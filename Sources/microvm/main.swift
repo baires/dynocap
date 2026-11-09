@@ -1,0 +1,118 @@
+import Foundation
+import MicroVMCore
+import MicroVMVZ
+
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
+
+@main
+struct Main {
+    static func main() {
+        do {
+            try run(CommandLine.arguments)
+        } catch {
+            let micro = error as? MicroVMError
+            let message = micro?.message ?? String(describing: error)
+            let code = micro?.exitCode ?? 1
+            fputs("microvm: \(message)\n", stderr)
+            exit(code)
+        }
+    }
+
+    static func run(_ args: [String]) throws {
+        let invocation = try parseCommand(args)
+        switch invocation.command {
+        case .help:
+            print(helpText)
+        case .version:
+            print(MicroVMInfo.describe(), terminator: "")
+        case .daemon:
+            if ProcessInfo.processInfo.environment["MICROVM_DETACH"] == "1" {
+                _ = setsid()
+            }
+            let paths = resolve(invocation)
+            let daemon = Daemon(home: paths.home, backend: makeBackend())
+            try daemon.start()
+            daemon.runForever()
+        case .ps:
+            let paths = try ready(invocation)
+            let records = try DaemonClient(socketPath: paths.socket.path).ps()
+            print(formatProcessTable(records, now: unixNow()), terminator: "")
+        case .run(let request):
+            let paths = try ready(invocation)
+            let status = try DaemonClient(socketPath: paths.socket.path).run(request)
+            print("\(status.name) \(status.phase)")
+        case .exec(let command):
+            let paths = try ready(invocation)
+            let outcome = try DaemonClient(socketPath: paths.socket.path).exec(
+                command,
+                onStdout: { try? FileHandle.standardOutput.write(contentsOf: $0) },
+                onStderr: { try? FileHandle.standardError.write(contentsOf: $0) }
+            )
+            let status: Int32 = outcome.signal > 0 ? 128 + outcome.signal : outcome.code
+            exit(status)
+        case .destroy(let name):
+            let paths = try ready(invocation)
+            try DaemonClient(socketPath: paths.socket.path).destroy(name)
+            print("destroyed \(name)")
+        }
+    }
+
+    static func resolve(_ invocation: CLIInvocation) -> MicroVMPaths {
+        if let home = invocation.home {
+            return MicroVMPaths(home: home)
+        }
+        return MicroVMPaths.resolve(override: nil)
+    }
+
+    static func ready(_ invocation: CLIInvocation) throws -> MicroVMPaths {
+        let paths = resolve(invocation)
+        try paths.ensure()
+        try ensureDaemon(paths: paths, home: invocation.home)
+        return paths
+    }
+
+    static func ensureDaemon(paths: MicroVMPaths, home: URL?) throws {
+        let client = DaemonClient(socketPath: paths.socket.path)
+        if (try? client.ping()) != nil { return }
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
+        if let home {
+            proc.arguments = ["--home", home.path, "daemon"]
+        } else if let envHome = ProcessInfo.processInfo.environment["MICROVM_HOME"], !envHome.isEmpty {
+            proc.arguments = ["--home", envHome, "daemon"]
+        } else {
+            proc.arguments = ["daemon"]
+        }
+        var env = ProcessInfo.processInfo.environment
+        env["MICROVM_DETACH"] = "1"
+        proc.environment = env
+        if !FileManager.default.fileExists(atPath: paths.log.path) {
+            _ = FileManager.default.createFile(atPath: paths.log.path, contents: nil)
+        }
+        if let log = FileHandle(forWritingAtPath: paths.log.path) {
+            _ = try? log.seekToEnd()
+            proc.standardOutput = log
+            proc.standardError = log
+        }
+        proc.standardInput = FileHandle(forReadingAtPath: "/dev/null")
+        try proc.run()
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline {
+            if (try? client.ping()) != nil { return }
+            usleep(50_000)
+        }
+        throw MicroVMError("daemon did not become ready; see \(paths.log.path)")
+    }
+
+    static func makeBackend() -> VMBackend {
+        #if os(macOS)
+        return VirtualizationBackend()
+        #else
+        return UnsupportedBackend()
+        #endif
+    }
+}

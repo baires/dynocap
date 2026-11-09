@@ -1,0 +1,32 @@
+included:
+  - Sources
+  - Tests
+
+excluded:
+  - .build
+  - .swiftpm
+  - sdk
+  - guest
+
+# Daemon and LinuxVM stay one type each. Short names (fd, vm, i) are normal
+# in the protocol and virtualization code.
+disabled_rules:
+  - file_length
+  - function_body_length
+  - type_body_length
+  - cyclomatic_complexity
+  - trailing_comma
+
+identifier_name:
+  min_length: 1
+  max_length: 50
+  excluded:
+    - DarwinClose
+
+line_length:
+  warning: 160
+  ignores_comments: true
+  ignores_urls: true
+
+opt_in_rules:
+  - empty_count

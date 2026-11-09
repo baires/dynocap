@@ -1,0 +1,18 @@
+{
+  "name": "microvm",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "lint": "swiftlint lint --quiet && ./scripts/gofmt-check.sh",
+    "typecheck": "npm run build --prefix sdk/typescript && npm run build --prefix sdk/mcp",
+    "test": "swift test && cd guest && go test ./... && cd .. && npm test --prefix sdk/typescript && npm test --prefix sdk/mcp",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "husky": "^9.1.7",
+    "lint-staged": "^17.6.0",
+    "prettier": "^3.9.10"
+  }
+}

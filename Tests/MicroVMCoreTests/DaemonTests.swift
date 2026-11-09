@@ -1,0 +1,129 @@
+import XCTest
+@testable import MicroVMCore
+
+final class DaemonTests: XCTestCase {
+    func testRunExecDestroy() throws {
+        let home = tempHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let backend = FakeBackend()
+        let daemon = Daemon(home: home, backend: backend)
+        try daemon.start()
+        defer { daemon.stop() }
+        let client = DaemonClient(socketPath: daemon.paths.socket.path)
+        try client.ping()
+        XCTAssertEqual(try client.ps().count, 0)
+
+        XCTAssertThrowsError(try client.run(RunRequest(name: "demo", cpus: 1, memoryMB: 256, ttlSeconds: nil, bootTimeoutSeconds: 5)))
+
+        try touchImages(daemon.paths)
+        let status = try client.run(RunRequest(name: "demo", cpus: 2, memoryMB: 1024, ttlSeconds: nil, bootTimeoutSeconds: 5))
+        XCTAssertEqual(status.phase, "running")
+        XCTAssertEqual(backend.booted["demo"]?.cpus, 2)
+        XCTAssertEqual(backend.booted["demo"]?.memoryMB, 1024)
+        XCTAssertEqual(try client.ps().map(\.name), ["demo"])
+
+        XCTAssertThrowsError(try client.run(RunRequest(name: "demo", cpus: 1, memoryMB: 256, ttlSeconds: nil, bootTimeoutSeconds: 5)))
+
+        let outcome = try client.exec(ExecCommand(name: "demo", argv: ["uname", "-a"], env: [], cwd: "", timeoutSeconds: 5))
+        XCTAssertEqual(outcome.code, 0)
+        XCTAssertEqual(String(data: outcome.stdout, encoding: .utf8), "uname -a\n")
+
+        try client.destroy("demo")
+        XCTAssertEqual(try client.ps().count, 0)
+        XCTAssertNil(backend.booted["demo"])
+    }
+
+    func testReapOnStartAndUnsupportedBoot() throws {
+        let home = tempHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let paths = MicroVMPaths(home: home)
+        try paths.ensure()
+        try StateStore(paths: paths).save(VMRecord(
+            name: "leaked", phase: .running, cpus: 1, memoryMB: 256,
+            daemonToken: "dead", createdAtUnix: 1, ttlSeconds: nil, message: nil
+        ))
+        let daemon = Daemon(home: home, backend: UnsupportedBackend())
+        try daemon.start()
+        defer { daemon.stop() }
+        let client = DaemonClient(socketPath: paths.socket.path)
+        let records = try client.ps()
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records[0].phase, .stopped)
+        XCTAssertTrue(records[0].message?.contains("reaped") == true)
+
+        try touchImages(paths)
+        XCTAssertThrowsError(try client.run(RunRequest(
+            name: "demo", cpus: 1, memoryMB: 256, ttlSeconds: nil, bootTimeoutSeconds: 5
+        ))) { error in
+            XCTAssertTrue(String(describing: error).contains("macOS"))
+        }
+        let failed = try client.ps().first { $0.name == "demo" }
+        XCTAssertEqual(failed?.phase, .failed)
+    }
+
+    func testExecTimeout() throws {
+        let home = tempHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let backend = FakeBackend()
+        backend.hangExec = true
+        let daemon = Daemon(home: home, backend: backend)
+        try daemon.start()
+        defer { daemon.stop() }
+        try touchImages(daemon.paths)
+        _ = try DaemonClient(socketPath: daemon.paths.socket.path).run(
+            RunRequest(name: "demo", cpus: 1, memoryMB: 256, ttlSeconds: nil, bootTimeoutSeconds: 5)
+        )
+        XCTAssertThrowsError(try DaemonClient(socketPath: daemon.paths.socket.path).exec(
+            ExecCommand(name: "demo", argv: ["sleep", "30"], env: [], cwd: "", timeoutSeconds: 1)
+        )) { error in
+            let micro = error as? MicroVMError
+            XCTAssertEqual(micro?.exitCode, 124)
+            XCTAssertTrue(micro?.message.contains("timed out") == true)
+        }
+    }
+
+    func testSecondDaemonRejected() throws {
+        let home = tempHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let first = Daemon(home: home, backend: FakeBackend())
+        try first.start()
+        defer { first.stop() }
+        let second = Daemon(home: home, backend: FakeBackend())
+        XCTAssertThrowsError(try second.start())
+    }
+}
+
+private final class FakeBackend: VMBackend {
+    var onGuestExit: ((String, String?) -> Void)?
+    var booted: [String: BootRequest] = [:]
+    var hangExec = false
+
+    func boot(_ request: BootRequest, completion: @escaping (Result<Void, Error>) -> Void) {
+        booted[request.name] = request
+        completion(.success(()))
+    }
+
+    func exec(_ request: ExecRequest, emit: @escaping (ExecEvent) -> Void) {
+        if hangExec { return }
+        emit(.stdout(Data((request.argv.joined(separator: " ") + "\n").utf8)))
+        emit(.finished(code: 0, signal: 0))
+    }
+
+    func cancelExec(name: String, id: UInt32) {}
+
+    func destroy(name: String, completion: @escaping (Result<Void, Error>) -> Void) {
+        booted.removeValue(forKey: name)
+        completion(.success(()))
+    }
+}
+
+private func tempHome() -> URL {
+    URL(fileURLWithPath: "/tmp/microvm-test-\(UUID().uuidString)")
+}
+
+private func touchImages(_ paths: MicroVMPaths) throws {
+    let dir = paths.imageDir(HostArch.guest)
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    _ = FileManager.default.createFile(atPath: paths.kernel(HostArch.guest).path, contents: Data("kernel".utf8))
+    _ = FileManager.default.createFile(atPath: paths.initrd(HostArch.guest).path, contents: Data("initrd".utf8))
+}

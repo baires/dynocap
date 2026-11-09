@@ -1,0 +1,23 @@
+.build/
+.swiftpm/
+.DS_Store
+*.partial
+*.xcuserstate
+xcuserdata/
+.idea/
+
+# Guest agent binary produced by the image build
+/guest/agent/microvm-agent
+
+# Node
+node_modules/
+sdk/typescript/dist/
+sdk/typescript/.tmp/
+sdk/mcp/dist/
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
