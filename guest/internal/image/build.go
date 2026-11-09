@@ -120,6 +120,9 @@ func Build(opts Options) (Manifest, error) {
 	}
 	initrdPath := filepath.Join(opts.OutDir, "initrd")
 	fmt.Fprintf(opts.Log, "packing initrd\n")
+	if err := pruneRoot(root); err != nil {
+		return Manifest{}, err
+	}
 	if err := writeInitrd(root, initrdPath); err != nil {
 		return Manifest{}, err
 	}
@@ -250,18 +253,28 @@ func installModules(dataTar []byte, release string, plan modulePlan, root string
 }
 
 func installGuest(root string, agent []byte, plan modulePlan, release string) error {
-	var lines []string
-	for _, rel := range plan.Paths {
-		lines = append(lines, path.Join("/lib/modules", release, rel))
-	}
-	body := strings.Join(lines, "\n")
-	if body != "" {
-		body += "\n"
+	writeList := func(name string, rels []string) error {
+		var lines []string
+		for _, rel := range rels {
+			lines = append(lines, path.Join("/lib/modules", release, rel))
+		}
+		body := strings.Join(lines, "\n")
+		if body != "" {
+			body += "\n"
+		}
+		return os.WriteFile(filepath.Join(root, "etc", name), []byte(body), 0o644)
 	}
 	if err := os.MkdirAll(filepath.Join(root, "etc"), 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(root, "etc", "microvm-modules"), []byte(body), 0o644); err != nil {
+	vsock, net := plan.Vsock, plan.Net
+	if vsock == nil && net == nil {
+		vsock = plan.Paths
+	}
+	if err := writeList("microvm-vsock-modules", vsock); err != nil {
+		return err
+	}
+	if err := writeList("microvm-net-modules", net); err != nil {
 		return err
 	}
 	if err := os.WriteFile(filepath.Join(root, "init"), initScript, 0o755); err != nil {

@@ -286,7 +286,7 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
                     return
                 }
                 if Date() < deadline {
-                    self.queue.asyncAfter(deadline: .now() + 0.2) {
+                    self.queue.asyncAfter(deadline: .now() + .milliseconds(10)) {
                         self.connectAgent(deadline: deadline)
                     }
                 } else {

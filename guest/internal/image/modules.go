@@ -5,10 +5,13 @@ import (
 	"strings"
 )
 
-// modulePlan is the insmod order for virtio-net (NAT) and virtio-vsock.
+// modulePlan is the insmod order for virtio-vsock and virtio-net (NAT).
+// Vsock is loaded before the agent listens. Net is loaded after.
 type modulePlan struct {
-	// Paths are relative to /lib/modules/<release>/ and end in .ko.
+	// Paths is Vsock then Net, relative to /lib/modules/<release>/, ending in .ko.
 	Paths []string
+	Vsock []string
+	Net   []string
 }
 
 // planModules reads modules.dep plus the kernel config and returns the
@@ -18,12 +21,13 @@ func planModules(depText, config string) (modulePlan, error) {
 	if err != nil {
 		return modulePlan{}, err
 	}
+	// vsock before virtio-net so PID 1 can start the agent before NAT comes up.
 	targets := []struct {
 		name   string
 		config string
 	}{
-		{"virtio_net", "CONFIG_VIRTIO_NET"},
 		{"vmw_vsock_virtio_transport", "CONFIG_VIRTIO_VSOCKETS"},
+		{"virtio_net", "CONFIG_VIRTIO_NET"},
 	}
 	seen := map[string]bool{}
 	var order []string
@@ -45,10 +49,18 @@ func planModules(depText, config string) (modulePlan, error) {
 		order = append(order, rel)
 		return nil
 	}
+	var vsock, net []string
 	for _, target := range targets {
+		before := len(order)
 		if _, ok := paths[target.name]; ok {
 			if err := walk(target.name); err != nil {
 				return modulePlan{}, err
+			}
+			added := append([]string(nil), order[before:]...)
+			if target.name == "vmw_vsock_virtio_transport" {
+				vsock = append(vsock, added...)
+			} else {
+				net = append(net, added...)
 			}
 			continue
 		}
@@ -61,7 +73,7 @@ func planModules(depText, config string) (modulePlan, error) {
 			return modulePlan{}, fmt.Errorf("kernel has no %s (%s)", target.name, target.config)
 		}
 	}
-	return modulePlan{Paths: order}, nil
+	return modulePlan{Paths: order, Vsock: vsock, Net: net}, nil
 }
 
 func configValue(config, key string) string {

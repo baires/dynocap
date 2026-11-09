@@ -162,19 +162,12 @@ unwrapping, module load order, CLI parsing, the VM phase machine, daemon
 the exec timeout. On Linux the virtualization backend is the explicit
 "requires macOS" error, and a test checks that path.
 
-## What a Mac still has to prove
+## Boot time
 
-This tree was written and unit-tested on Linux. Virtualization.framework is
-not in the Linux SDK, so none of the following was executed:
-
-- `VZVirtualMachine.start` of the produced kernel and initrd
-- the vsock connect/retry loop against a real guest
-- codesign with `com.apple.security.virtualization`
-- NAT DHCP inside the guest
-
-The Swift that calls those APIs is in `Sources/MicroVMVZ/LinuxVM.swift` and is
-compiled only on macOS. If `run` times out, read
-`~/.microvm/vms/<name>/console.log` and `~/.microvm/daemon.log`.
+A measured cold start on this Mac is in [docs/boot-time.md](docs/boot-time.md).
+`run` returns when the guest agent answers. The unit tests still do not boot
+a VM. If `run` times out, read `~/.microvm/vms/<name>/console.log` and
+`~/.microvm/daemon.log`.
 
 ## Layout
 

@@ -98,15 +98,29 @@ kernel/net/vmw_vsock/vmw_vsock_virtio_transport.ko.gz: kernel/net/vmw_vsock/vmw_
 	}
 	got := strings.Join(plan.Paths, ",")
 	want := strings.Join([]string{
-		"kernel/net/core/failover.ko",
-		"kernel/drivers/net/net_failover.ko",
-		"kernel/drivers/net/virtio_net.ko",
 		"kernel/net/vmw_vsock/vsock.ko",
 		"kernel/net/vmw_vsock/vmw_vsock_virtio_transport_common.ko",
 		"kernel/net/vmw_vsock/vmw_vsock_virtio_transport.ko",
+		"kernel/net/core/failover.ko",
+		"kernel/drivers/net/net_failover.ko",
+		"kernel/drivers/net/virtio_net.ko",
 	}, ",")
 	if got != want {
 		t.Fatalf("order\n got %s\nwant %s", got, want)
+	}
+	if strings.Join(plan.Vsock, ",") != strings.Join([]string{
+		"kernel/net/vmw_vsock/vsock.ko",
+		"kernel/net/vmw_vsock/vmw_vsock_virtio_transport_common.ko",
+		"kernel/net/vmw_vsock/vmw_vsock_virtio_transport.ko",
+	}, ",") {
+		t.Fatalf("vsock %v", plan.Vsock)
+	}
+	if strings.Join(plan.Net, ",") != strings.Join([]string{
+		"kernel/net/core/failover.ko",
+		"kernel/drivers/net/net_failover.ko",
+		"kernel/drivers/net/virtio_net.ko",
+	}, ",") {
+		t.Fatalf("net %v", plan.Net)
 	}
 
 	builtin := "CONFIG_VIRTIO_NET=y\nCONFIG_VIRTIO_VSOCKETS=y\n"
@@ -227,6 +241,41 @@ func gzipBytes(t *testing.T, payload []byte) []byte {
 		t.Fatal(err)
 	}
 	return buf.Bytes()
+}
+
+func TestPruneRootDropsUnusedLibraries(t *testing.T) {
+	root := t.TempDir()
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	must(os.MkdirAll(filepath.Join(root, "bin"), 0o755))
+	must(os.MkdirAll(filepath.Join(root, "usr/lib/ossl-modules"), 0o755))
+	must(os.MkdirAll(filepath.Join(root, "usr/local/bin"), 0o755))
+	must(os.MkdirAll(filepath.Join(root, "lib/modules/rel"), 0o755))
+	must(os.MkdirAll(filepath.Join(root, "etc"), 0o755))
+	must(os.WriteFile(filepath.Join(root, "bin/busybox"), []byte("bb"), 0o755))
+	must(os.Symlink("busybox", filepath.Join(root, "bin/sh")))
+	must(os.WriteFile(filepath.Join(root, "usr/lib/libcrypto.so.3"), []byte("crypto"), 0o644))
+	must(os.WriteFile(filepath.Join(root, "usr/lib/ossl-modules/legacy.so"), []byte("x"), 0o644))
+	must(os.WriteFile(filepath.Join(root, "usr/local/bin/microvm-agent"), []byte("agent"), 0o755))
+	must(os.WriteFile(filepath.Join(root, "lib/modules/rel/vsock.ko"), []byte("ko"), 0o644))
+	must(os.WriteFile(filepath.Join(root, "etc/microvm-vsock-modules"), []byte("vsock\n"), 0o644))
+	must(os.WriteFile(filepath.Join(root, "init"), []byte("#!/bin/sh\n"), 0o755))
+	must(pruneRoot(root))
+	if _, err := os.Stat(filepath.Join(root, "usr/lib/libcrypto.so.3")); !os.IsNotExist(err) {
+		t.Fatalf("libcrypto still present: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "usr/lib")); !os.IsNotExist(err) {
+		t.Fatalf("empty usr/lib still present: %v", err)
+	}
+	for _, rel := range []string{"bin/busybox", "bin/sh", "usr/local/bin/microvm-agent", "lib/modules/rel/vsock.ko", "init"} {
+		if _, err := os.Stat(filepath.Join(root, rel)); err != nil {
+			t.Fatalf("missing %s: %v", rel, err)
+		}
+	}
 }
 
 func TestTarExtractAndModules(t *testing.T) {
