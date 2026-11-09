@@ -45,6 +45,7 @@ test("create, exec, list, and destroy a sandbox", async () => {
         memoryMB: 512,
         createdAtUnix: 1_700_000_000,
         ttlSeconds: 600,
+        network: "none",
         message: null,
       },
     ]);
@@ -135,4 +136,76 @@ test("callers cannot import the client implementation", () => {
     }
   }
   assert.deepEqual(offenders, []);
+});
+
+test("default policy and explicit NAT propagate to the daemon", async () => {
+  const daemon = await fakeDaemon();
+  try {
+    await Sandbox.create({
+      name: "offline",
+      home: daemon.home,
+      ttlSeconds: null,
+    });
+    await Sandbox.create({
+      name: "online",
+      home: daemon.home,
+      network: "nat",
+      ttlSeconds: 86400,
+    });
+    assert.equal(daemon.runs[0]?.network, "none");
+    assert.equal(daemon.runs[0]?.ttlSeconds, 1800);
+    assert.equal(daemon.runs[1]?.network, "nat");
+    assert.equal(daemon.runs[1]?.ttlSeconds, 86400);
+    assert.deepEqual(
+      (await Sandbox.list({ home: daemon.home })).map((box) => box.network),
+      ["none", "nat"]
+    );
+  } finally {
+    await daemon.close();
+  }
+});
+
+test("invalid runtime inputs fail before any run request", async () => {
+  const daemon = await fakeDaemon();
+  try {
+    for (const ttlSeconds of [0, -1, 86401, 1.5, NaN, Infinity]) {
+      await assert.rejects(
+        Sandbox.create({ name: "bad", home: daemon.home, ttlSeconds }),
+        /between 1 and 86400/
+      );
+    }
+    const invalid = JSON.parse('{"network":"public"}');
+    await assert.rejects(
+      Sandbox.create({ name: "bad", home: daemon.home, ...invalid }),
+      /network must be/
+    );
+    assert.equal(daemon.runs.length, 0);
+  } finally {
+    await daemon.close();
+  }
+});
+
+test("old or incompatible daemons are rejected before creation", async () => {
+  for (const policyVersion of [null, 0, 2]) {
+    const daemon = await fakeDaemon({ policyVersion });
+    try {
+      await assert.rejects(
+        Sandbox.create({ name: "unsafe", home: daemon.home }),
+        /restart the daemon/
+      );
+      assert.equal(daemon.runs.length, 0);
+    } finally {
+      await daemon.close();
+    }
+  }
+});
+
+test("historical network metadata is unknown rather than offline", async () => {
+  const daemon = await fakeDaemon({ recordedNetwork: "unknown" });
+  try {
+    await Sandbox.create({ name: "old", home: daemon.home });
+    assert.equal((await Sandbox.list({ home: daemon.home }))[0]?.network, null);
+  } finally {
+    await daemon.close();
+  }
 });

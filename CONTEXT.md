@@ -59,7 +59,7 @@ One command running inside a sandbox, with its own arguments, working directory,
 _Avoid_: job, task, process
 
 **TTL**:
-The longest a sandbox may stay booting or running, counted from its creation. Absent means no limit.
+A sandbox’s finite lifetime, counted from creation and including boot. Activity does not renew it.
 _Avoid_: timeout, lease
 
 **Workspace**:
@@ -73,6 +73,9 @@ _Avoid_: snapshot, branch
 **Preview**:
 An address that reaches one port of a sandbox.
 _Avoid_: tunnel, ingress
+
+**Network mode**:
+Whether a sandbox is offline or has unrestricted outbound connectivity.
 
 **Egress**:
 Which outbound destinations a sandbox may open.

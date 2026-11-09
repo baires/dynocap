@@ -4,7 +4,7 @@ import { resolveHome } from "./lib/paths.ts";
 
 export { SandboxError } from "./lib/errors.ts";
 export type { SandboxErrorKind } from "./lib/errors.ts";
-export type { SandboxInfo } from "./lib/daemon.ts";
+export type { SandboxInfo, NetworkMode } from "./lib/daemon.ts";
 
 /** Phases the daemon records today. A newer daemon may report another phase string. */
 export const SANDBOX_PHASES = [
@@ -24,13 +24,16 @@ export type ClientOptions = {
 
 export type CreateOptions = ClientOptions & {
   name: string;
+  network?: "none" | "nat";
   cpus?: number;
   memoryMB?: number;
-  ttlSeconds?: number;
+  ttlSeconds?: number | null;
   bootTimeoutSeconds?: number;
 };
 
 export type ExecOptions = {
+  /** Require daemon-enforced offline networking, including for existing sandboxes. */
+  requireOffline?: boolean;
   cwd?: string;
   env?: Record<string, string>;
   timeoutSeconds?: number;
@@ -67,13 +70,23 @@ export class Sandbox {
   }
 
   static async create(options: CreateOptions): Promise<Sandbox> {
+    const ttlSeconds = options.ttlSeconds ?? 1800;
+    if (!Number.isInteger(ttlSeconds) || ttlSeconds < 1 || ttlSeconds > 86400)
+      throw new SandboxError(
+        "daemon",
+        "ttlSeconds must be an integer between 1 and 86400 (default 1800)"
+      );
+    const network = options.network ?? "none";
+    if (network !== "none" && network !== "nat")
+      throw new SandboxError("daemon", "network must be none or nat");
     const home = resolveHome(options.home);
     const status = await boot(home, {
       name: options.name,
       cpus: options.cpus ?? 1,
       memoryMB: options.memoryMB ?? 1024,
       bootTimeoutSeconds: options.bootTimeoutSeconds ?? 60,
-      ttlSeconds: options.ttlSeconds,
+      ttlSeconds,
+      network,
     });
     if (status.phase !== "running") {
       throw new SandboxError(
@@ -108,6 +121,7 @@ export class Sandbox {
       this.#home,
       {
         name: this.name,
+        requireOffline: options.requireOffline,
         argv: commandArgv(command),
         env: envEntries(options.env ?? {}),
         cwd: options.cwd ?? "",

@@ -59,6 +59,7 @@ public final class GuestLink {
         closed = true
         stateLock.unlock()
         if shouldClose {
+            _ = shutdown(fd, Int32(SHUT_RDWR))
             _ = DarwinClose(fd)
         }
     }

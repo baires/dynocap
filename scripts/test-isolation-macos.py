@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+"""Real-VM isolation smoke test. Uses an isolated home and an existing guest image."""
+import argparse
+import json
+import pathlib
+import platform
+import socket
+import struct
+import subprocess
+import tempfile
+import time
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    repo = pathlib.Path(__file__).resolve().parent.parent
+    parser.add_argument("--binary", type=pathlib.Path, default=repo / ".build/release/microvm")
+    parser.add_argument("--images", type=pathlib.Path, default=pathlib.Path.home() / ".microvm/images")
+    args = parser.parse_args()
+    if platform.system() != "Darwin":
+        parser.error("requires a virtualization-capable Mac and an entitled binary")
+    arch = "aarch64" if platform.machine() == "arm64" else "x86_64"
+    image = args.images.resolve() / arch
+    for name in ("kernel", "initrd"):
+        if not (image / name).is_file():
+            parser.error(f"missing {image / name}; build an image first")
+    binary = str(args.binary.resolve())
+    with tempfile.TemporaryDirectory(prefix="microvm-isolation-", dir="/tmp") as scratch:
+        home = pathlib.Path(scratch)
+        (home / "images").mkdir()
+        (home / "images" / arch).symlink_to(image, target_is_directory=True)
+        prefix = [binary, "--home", str(home)]
+
+        def cli(*arguments, check=True, timeout=25):
+            result = subprocess.run(prefix + list(arguments), capture_output=True, text=True, timeout=timeout)
+            if check and result.returncode:
+                raise AssertionError(f"{arguments}: {result.stderr}")
+            return result
+
+        with (home / "smoke-daemon.log").open("w+") as log:
+            daemon = subprocess.Popen(prefix + ["daemon"], stdout=log, stderr=log)
+            try:
+                deadline = time.monotonic() + 5
+                while not (home / "daemon.sock").exists():
+                    if daemon.poll() is not None or time.monotonic() >= deadline:
+                        raise AssertionError("daemon failed to start")
+                    time.sleep(0.02)
+
+                cli("run", "--name", "offline")
+                interfaces = cli("exec", "offline", "--", "ls", "/sys/class/net").stdout.split()
+                assert "lo" in interfaces, interfaces
+                # Kernels may also expose inert tunnel devices such as sit0; no NIC may exist.
+                cli("exec", "offline", "--", "sh", "-c",
+                    'for interface in /sys/class/net/*; do [ ! -e "$interface/device" ] || exit 1; done')
+                assert not cli("exec", "offline", "--", "ip", "route").stdout.strip()
+                record = json.loads((home / "vms/offline/state.json").read_text())
+                assert record["network"] == "none" and record["ttlSeconds"] == 1800, record
+                # A connection to a public IP must fail when no virtual NIC is attached.
+                blocked = cli("exec", "offline", "--", "sh", "-c",
+                              "printf 'GET / HTTP/1.0\r\n\r\n' | nc -w 2 1.1.1.1 80", check=False)
+                assert blocked.returncode != 0, blocked.stdout
+                print("PASS: default offline guest has no NIC or routes, vsock exec works, outbound TCP fails", flush=True)
+
+                cli("run", "--name", "online", "--network", "nat")
+                # Agent readiness does not imply DHCP readiness: wait independently for a route.
+                cli("exec", "online", "--timeout", "20", "--", "sh", "-c",
+                    "i=0; until ip route | grep -q '^default'; do "
+                    "i=$((i+1)); [ $i -lt 15 ] || exit 1; sleep 1; done")
+                cli("exec", "online", "--timeout", "15", "--", "sh", "-c",
+                    "printf 'GET / HTTP/1.0\r\nHost: 1.1.1.1\r\n\r\n' | "
+                    "nc -w 5 1.1.1.1 80 > /tmp/response; grep -q '^HTTP/' /tmp/response")
+                record = json.loads((home / "vms/online/state.json").read_text())
+                assert record["network"] == "nat", record
+                print("PASS: explicit NAT obtains DHCP and reaches public HTTP", flush=True)
+
+                sdk = (repo / "sdk/typescript/dist/index.js").as_uri()
+                mcp = (repo / "sdk/mcp/dist/tools.js").as_uri()
+                client_test = """
+                  import assert from 'node:assert/strict';
+                  const { Sandbox } = await import(process.argv[1]);
+                  const { microvmRun, microvmExec, microvmDestroy } = await import(process.argv[2]);
+                  const home = { home: process.argv[3] };
+                  const sdk = await Sandbox.create({ ...home, name: 'sdk' });
+                  assert.equal((await sdk.exec('echo sdk')).stdout.trim(), 'sdk');
+                  assert.equal((await Sandbox.list(home)).find(s => s.name === 'sdk').network, 'none');
+                  await sdk.destroy();
+                  assert.equal((await microvmRun({name: 'mcp'}, home)).isError, undefined);
+                  assert.equal((await microvmExec({name: 'mcp', command: 'true'}, home)).isError, undefined);
+                  assert.equal((await microvmRun({name: 'denied', network: 'nat'}, home)).isError, true);
+                  assert.equal((await microvmExec({name: 'online', command: 'true'}, home)).isError, true);
+                  assert.equal((await microvmExec({name: 'online', command: 'true'}, {...home, allowNat: true})).isError, undefined);
+                  await microvmDestroy('mcp', home);
+                """
+                subprocess.run(["node", "--input-type=module", "-e", client_test, sdk, mcp, str(home)], check=True, timeout=30)
+                print("PASS: real SDK/MCP offline exec and MCP NAT permission checks", flush=True)
+
+                cli("run", "--name", "short", "--ttl", "2")
+                started = time.monotonic()
+                expired = cli("exec", "short", "--timeout", "30", "--", "sleep", "30", check=False, timeout=15)
+                assert expired.returncode != 0 and "lifetime expired" in expired.stderr, expired
+                assert time.monotonic() - started < 10
+                deadline = time.monotonic() + 5
+                while (home / "vms/short").exists() and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                assert not (home / "vms/short").exists(), "expired sandbox record not removed"
+                print("PASS: short TTL terminates active exec and removes sandbox after teardown", flush=True)
+
+                # A client that stops reading a noisy command must not block host teardown.
+                cli("run", "--name", "noisy", "--ttl", "2")
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as unread:
+                    unread.connect(str(home / "daemon.sock"))
+                    payload = json.dumps({"name": "noisy", "argv": ["yes"], "env": [], "cwd": "", "timeoutSeconds": 30}).encode()
+                    unread.sendall(struct.pack(">IB", len(payload) + 1, 2) + payload)
+                    deadline = time.monotonic() + 8
+                    while (home / "vms/noisy").exists() and time.monotonic() < deadline:
+                        time.sleep(0.05)
+                    assert not (home / "vms/noisy").exists(), "unread output prevented TTL teardown: " + (home / "vms/noisy/state.json").read_text()
+                print("PASS: unread noisy output cannot prevent TTL teardown", flush=True)
+
+                cli("destroy", "offline")
+                cli("destroy", "online")
+            except BaseException:
+                log.flush()
+                print((home / "smoke-daemon.log").read_text())
+                raise
+            finally:
+                daemon.terminate()
+                try:
+                    daemon.wait(timeout=15)
+                except subprocess.TimeoutExpired:
+                    daemon.kill()
+                    daemon.wait()
+
+
+if __name__ == "__main__":
+    main()

@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+
+import { Sandbox } from "@microvm/sdk";
 
 import { createServer } from "../src/index.ts";
 import {
@@ -103,5 +107,140 @@ test("captured exec output is capped", async () => {
     assert.ok(Buffer.byteLength(exec.content[0].text) < 70_000);
   } finally {
     await daemon.close();
+  }
+});
+
+test("NAT creation requires an explicit MCP host policy", async () => {
+  const daemon = await fakeDaemon();
+  try {
+    const denied = await microvmRun(
+      { name: "denied", network: "nat" },
+      { home: daemon.home }
+    );
+    assert.equal(denied.isError, true);
+    assert.match(denied.content[0].text, /MICROVM_MCP_ALLOW_NAT=1/);
+    assert.equal(daemon.runs.length, 0);
+    const allowed = await microvmRun(
+      { name: "allowed", network: "nat" },
+      { home: daemon.home, allowNat: true }
+    );
+    assert.equal(allowed.isError, undefined);
+    assert.equal(daemon.runs[0]?.network, "nat");
+  } finally {
+    await daemon.close();
+  }
+});
+
+test("MCP cannot exec existing NAT or unknown sandboxes without host permission", async () => {
+  for (const recordedNetwork of ["nat", "unknown"] as const) {
+    const daemon = await fakeDaemon({ recordedNetwork });
+    const home = { home: daemon.home };
+    try {
+      await Sandbox.create({ ...home, name: "existing" });
+      const denied = await microvmExec(
+        { name: "existing", command: "true" },
+        home
+      );
+      assert.equal(denied.isError, true);
+      assert.match(denied.content[0].text, /offline sandbox/);
+      assert.equal(daemon.execs.length, 0);
+      const allowed = await microvmExec(
+        { name: "existing", command: "true" },
+        { ...home, allowNat: true }
+      );
+      assert.equal(allowed.isError, undefined);
+      assert.equal((await microvmPs(home)).isError, undefined);
+      assert.equal((await microvmDestroy("existing", home)).isError, undefined);
+    } finally {
+      await daemon.close();
+    }
+  }
+});
+
+test("daemon offline requirement protects MCP exec if networking changes after listing", async () => {
+  const daemon = await fakeDaemon({ execNetwork: "nat" });
+  const home = { home: daemon.home };
+  try {
+    await microvmRun({ name: "replaced" }, home);
+    const denied = await microvmExec(
+      { name: "replaced", command: "true" },
+      home
+    );
+    assert.equal(denied.isError, true);
+    assert.match(denied.content[0].text, /offline sandbox/);
+    assert.equal(daemon.execs.length, 0);
+  } finally {
+    await daemon.close();
+  }
+});
+
+test("MCP server snapshots host policy and validates TTL and networking schemas", async () => {
+  const daemon = await fakeDaemon();
+  const host = { home: daemon.home, allowNat: false };
+  const server = createServer(host);
+  host.allowNat = true;
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "test", version: "0.0.0" });
+  await Promise.all([
+    server.connect(serverTransport),
+    client.connect(clientTransport),
+  ]);
+  try {
+    const denied = await client.callTool({
+      name: "microvm_run",
+      arguments: { name: "denied", network: "nat" },
+    });
+    assert.equal(denied.isError, true);
+    for (const input of [
+      { ttlSeconds: 86401 },
+      { ttlSeconds: 0 },
+      { ttlSeconds: 1.5 },
+      { network: "public" },
+    ]) {
+      const result = await client.callTool({
+        name: "microvm_run",
+        arguments: { name: "bad", ...input },
+      });
+      assert.equal(result.isError, true);
+    }
+    assert.equal(daemon.runs.length, 0);
+    const offline = await client.callTool({
+      name: "microvm_run",
+      arguments: { name: "offline", ttlSeconds: null },
+    });
+    assert.equal(offline.isError, undefined);
+    assert.equal(daemon.runs[0]?.network, "none");
+    assert.equal(daemon.runs[0]?.ttlSeconds, 1800);
+  } finally {
+    await client.close();
+    await daemon.close();
+  }
+});
+
+test("stdio entrypoint only enables NAT for the literal host environment value 1", async () => {
+  for (const value of [undefined, "0", "true", "1"]) {
+    const daemon = await fakeDaemon();
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [fileURLToPath(new URL("../dist/bin.js", import.meta.url))],
+      env: {
+        MICROVM_HOME: daemon.home,
+        ...(value === undefined ? {} : { MICROVM_MCP_ALLOW_NAT: value }),
+      },
+    });
+    const client = new Client({ name: "test", version: "0.0.0" });
+    try {
+      await client.connect(transport);
+      const result = await client.callTool({
+        name: "microvm_run",
+        arguments: { name: "nat", network: "nat" },
+      });
+      assert.equal(result.isError === true, value !== "1");
+      assert.equal(daemon.runs.length, value === "1" ? 1 : 0);
+    } finally {
+      await client.close();
+      await daemon.close();
+    }
   }
 });

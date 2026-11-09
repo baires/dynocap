@@ -6,13 +6,15 @@ public struct RunRequest: Codable, Equatable {
     public var memoryMB: Int
     public var ttlSeconds: Int?
     public var bootTimeoutSeconds: Int
+    public var network: NetworkMode?
 
-    public init(name: String, cpus: Int, memoryMB: Int, ttlSeconds: Int?, bootTimeoutSeconds: Int) {
+    public init(name: String, cpus: Int, memoryMB: Int, ttlSeconds: Int?, bootTimeoutSeconds: Int, network: NetworkMode? = nil) {
         self.name = name
         self.cpus = cpus
         self.memoryMB = memoryMB
         self.ttlSeconds = ttlSeconds
         self.bootTimeoutSeconds = bootTimeoutSeconds
+        self.network = network
     }
 }
 
@@ -22,13 +24,15 @@ public struct ExecCommand: Codable, Equatable {
     public var env: [String]
     public var cwd: String
     public var timeoutSeconds: Int
+    public var requireOffline: Bool?
 
-    public init(name: String, argv: [String], env: [String], cwd: String, timeoutSeconds: Int) {
+    public init(name: String, argv: [String], env: [String], cwd: String, timeoutSeconds: Int, requireOffline: Bool? = nil) {
         self.name = name
         self.argv = argv
         self.env = env
         self.cwd = cwd
         self.timeoutSeconds = timeoutSeconds
+        self.requireOffline = requireOffline
     }
 }
 
@@ -56,7 +60,7 @@ public let helpText = """
 microvm \(MicroVMInfo.version) — local Linux microVMs on macOS
 
 USAGE
-  microvm run --name <name> [--cpus N] [--memory MB] [--ttl SEC] [--boot-timeout SEC]
+  microvm run --name <name> [--cpus N] [--memory MB] [--ttl SEC] [--network none|nat] [--boot-timeout SEC]
   microvm exec <name> [--timeout SEC] [--cwd DIR] [--env KEY=VAL] -- <command> [args...]
   microvm ps
   microvm destroy <name>
@@ -72,6 +76,8 @@ EXAMPLES
 
 Images are built with scripts/fetch-image.sh and stored under $MICROVM_HOME
 (default ~/.microvm). The CLI starts a per-user daemon if one is not running.
+Network defaults to none (no virtual NIC). nat explicitly enables unrestricted outbound access.
+TTL defaults to 1800 seconds, including boot; allowed range is 1–86400, with no unlimited mode.
 VMs do not outlive that daemon; the next command reaps leftover records.
 
 """
@@ -130,6 +136,7 @@ private func parseRun(_ args: [String]) throws -> RunRequest {
     var cpus = 1
     var memory = 1024
     var ttl: Int?
+    var network: NetworkMode?
     var bootTimeout = 60
     var i = 0
     while i < args.count {
@@ -143,6 +150,10 @@ private func parseRun(_ args: [String]) throws -> RunRequest {
             memory = try takeInt(args, &i, flag, min: 128)
         case "--ttl":
             ttl = try takeInt(args, &i, flag, min: 1)
+        case "--network":
+            let value = try takeValue(args, &i, flag)
+            guard let mode = NetworkMode(rawValue: value) else { throw MicroVMError("network must be none or nat") }
+            network = mode
         case "--boot-timeout":
             bootTimeout = try takeInt(args, &i, flag, min: 1)
         default:
@@ -151,7 +162,8 @@ private func parseRun(_ args: [String]) throws -> RunRequest {
     }
     guard let name else { throw MicroVMError("run requires --name") }
     try validateVMName(name)
-    return RunRequest(name: name, cpus: cpus, memoryMB: memory, ttlSeconds: ttl, bootTimeoutSeconds: bootTimeout)
+    _ = try IsolationPolicy.ttl(ttl)
+    return RunRequest(name: name, cpus: cpus, memoryMB: memory, ttlSeconds: ttl, bootTimeoutSeconds: bootTimeout, network: network)
 }
 
 private func parseExec(_ args: [String]) throws -> ExecCommand {

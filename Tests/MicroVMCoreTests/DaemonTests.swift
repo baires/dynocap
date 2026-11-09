@@ -94,7 +94,7 @@ final class DaemonTests: XCTestCase {
 }
 
 private final class FakeBackend: VMBackend {
-    var onGuestExit: ((String, String?) -> Void)?
+    var onGuestExit: ((String, UUID, String?) -> Void)?
     var booted: [String: BootRequest] = [:]
     var hangExec = false
 

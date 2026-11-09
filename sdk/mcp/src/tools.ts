@@ -10,11 +10,14 @@ export type ToolResult = {
   content: [{ type: "text"; text: string }];
 };
 
+export type ToolOptions = ClientOptions & { allowNat?: boolean };
+
 export type RunInput = {
+  network?: "none" | "nat";
   name: string;
   cpus?: number;
   memoryMB?: number;
-  ttlSeconds?: number;
+  ttlSeconds?: number | null;
   bootTimeoutSeconds?: number;
 };
 
@@ -27,7 +30,7 @@ export type ExecInput = {
 };
 
 export const toolDescriptions = {
-  microvm_run: `${local} Boot a sandbox and return when it is running.`,
+  microvm_run: `${local} Boot a sandbox and return when it is running. Default network none; nat is unrestricted outbound access and requires host permission. Default lifetime 1800 seconds, maximum 86400.`,
   microvm_exec: `${local} Run a shell command inside a running sandbox. The command is sh -c. Default deadline is 30 seconds. Output is capped.`,
   microvm_ps: `${local} List sandboxes and their phases.`,
   microvm_destroy: `${local} Destroy a sandbox and delete its record.`,
@@ -35,9 +38,13 @@ export const toolDescriptions = {
 
 export async function microvmRun(
   input: RunInput,
-  options?: ClientOptions
+  options?: ToolOptions
 ): Promise<ToolResult> {
   return guard(async () => {
+    if (input.network === "nat" && options?.allowNat !== true)
+      throw new Error(
+        "NAT is disabled by this MCP host; start the server with MICROVM_MCP_ALLOW_NAT=1 to permit it"
+      );
     const sandbox = await Sandbox.create({ ...input, home: options?.home });
     return ok(`running ${sandbox.name}`);
   });
@@ -45,16 +52,27 @@ export async function microvmRun(
 
 export async function microvmExec(
   input: ExecInput,
-  options?: ClientOptions
+  options?: ToolOptions
 ): Promise<ToolResult> {
   return guard(async () => {
+    const requireOffline = options?.allowNat !== true;
+    const recorded = (await Sandbox.list(options)).find(
+      (sandbox) => sandbox.name === input.name
+    );
+    if (recorded && requireOffline && recorded.network !== "none")
+      throw new Error(
+        "MCP exec requires an offline sandbox; networking is NAT or unknown"
+      );
     const sandbox = await Sandbox.connect(input.name, options);
-    const text = await presentExec(sandbox, input.command, input);
+    const text = await presentExec(sandbox, input.command, {
+      ...input,
+      requireOffline,
+    });
     return ok(text);
   });
 }
 
-export async function microvmPs(options?: ClientOptions): Promise<ToolResult> {
+export async function microvmPs(options?: ToolOptions): Promise<ToolResult> {
   return guard(async () => {
     const sandboxes = await Sandbox.list(options);
     return ok(JSON.stringify(sandboxes, null, 2));
@@ -63,7 +81,7 @@ export async function microvmPs(options?: ClientOptions): Promise<ToolResult> {
 
 export async function microvmDestroy(
   name: string,
-  options?: ClientOptions
+  options?: ToolOptions
 ): Promise<ToolResult> {
   return guard(async () => {
     const sandbox = await Sandbox.connect(name, options);

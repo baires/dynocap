@@ -8,7 +8,7 @@ import Virtualization
 /// over VZVirtioSocketDevice. Compiled only on macOS; this file is not
 /// type-checked on Linux.
 public final class VirtualizationBackend: VMBackend {
-    public var onGuestExit: ((String, String?) -> Void)?
+    public var onGuestExit: ((String, UUID, String?) -> Void)?
     private let lock = NSLock()
     private var machines: [String: LinuxVM] = [:]
 
@@ -19,12 +19,12 @@ public final class VirtualizationBackend: VMBackend {
         lock.lock()
         machines[request.name] = vm
         lock.unlock()
-        vm.onExit = { [weak self] message in
+        vm.onExit = { [weak self, weak vm] message in
             guard let self = self else { return }
             self.lock.lock()
-            self.machines[request.name] = nil
+            if self.machines[request.name] === vm { self.machines[request.name] = nil }
             self.lock.unlock()
-            self.onGuestExit?(request.name, message)
+            self.onGuestExit?(request.name, request.generation, message)
         }
         vm.boot(completion: completion)
     }
@@ -37,19 +37,20 @@ public final class VirtualizationBackend: VMBackend {
             emit(.failed("VM \(request.name) is not running"))
             return
         }
-        vm.exec(request, emit: emit)
+        // Guest I/O must not hold the daemon's lifecycle lock or the VM control queue.
+        DispatchQueue.global().async { vm.exec(request, emit: emit) }
     }
 
     public func cancelExec(name: String, id: UInt32) {
         lock.lock()
         let vm = machines[name]
         lock.unlock()
-        vm?.cancelExec(id)
+        DispatchQueue.global().async { vm?.cancelExec(id) }
     }
 
     public func destroy(name: String, completion: @escaping (Result<Void, Error>) -> Void) {
         lock.lock()
-        let vm = machines.removeValue(forKey: name)
+        let vm = machines[name]
         lock.unlock()
         guard let vm = vm else {
             completion(.success(()))
@@ -64,13 +65,21 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
     let queue: DispatchQueue
     var virtualMachine: VZVirtualMachine?
     var socketConnection: VZVirtioSocketConnection?
-    var link: GuestLink?
+    private var link: GuestLink?
+    private let linkLock = NSLock()
+
+    private var connectedLink: GuestLink? {
+        linkLock.lock()
+        defer { linkLock.unlock() }
+        return link
+    }
     var keptPipes: [Pipe] = []
     var consoleHandle: FileHandle?
     var onExit: ((String?) -> Void)?
     private var bootCompletion: ((Result<Void, Error>) -> Void)?
     private var bootFinished = false
     private var exited = false
+    private var stopping = false
     private let bootLock = NSLock()
     private let handlerLock = NSLock()
     private var handlers: [UInt32: (GuestMessage) -> Void] = [:]
@@ -94,7 +103,7 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
     }
 
     func exec(_ request: ExecRequest, emit: @escaping (ExecEvent) -> Void) {
-        guard let link = link else {
+        guard let link = connectedLink else {
             emit(.failed("guest agent is not connected"))
             return
         }
@@ -137,7 +146,7 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
     }
 
     func cancelExec(_ id: UInt32) {
-        try? link?.write(.kill(id: id))
+        try? connectedLink?.write(.kill(id: id))
     }
 
     func destroy(completion: @escaping (Result<Void, Error>) -> Void) {
@@ -146,31 +155,24 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
                 completion(.success(()))
                 return
             }
-            try? self.link?.write(.shutdown)
+            self.stopping = true
+            self.disconnectGuest()
             guard let vm = self.virtualMachine else {
                 self.teardown(message: nil)
                 completion(.success(()))
                 return
             }
-            if #available(macOS 14.0, *) {
+            if vm.state == .stopped {
+                self.teardown(message: nil)
+                completion(.success(()))
+            } else {
                 vm.stop { error in
-                    self.teardown(message: error?.localizedDescription)
-                    if let error {
+                    if let error, vm.state != .stopped {
                         completion(.failure(error))
                     } else {
-                        completion(.success(()))
-                    }
-                }
-            } else {
-                do {
-                    try vm.requestStop()
-                    self.queue.asyncAfter(deadline: .now() + 2) {
                         self.teardown(message: nil)
                         completion(.success(()))
                     }
-                } catch {
-                    self.teardown(message: error.localizedDescription)
-                    completion(.failure(error))
                 }
             }
         }
@@ -209,9 +211,7 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
         config.bootLoader = boot
         config.entropyDevices = [VZVirtioEntropyDeviceConfiguration()]
 
-        let network = VZVirtioNetworkDeviceConfiguration()
-        network.attachment = VZNATNetworkDeviceAttachment()
-        config.networkDevices = [network]
+        config.networkDevices = networkDevices(for: request.network)
 
         let guestToHost = Pipe()
         let hostToGuest = Pipe()
@@ -270,7 +270,7 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
     }
 
     private func connectAgent(deadline: Date) {
-        guard let vm = virtualMachine else {
+        guard !exited, !stopping, let vm = virtualMachine else {
             finishBoot(.failure(MicroVMError("virtual machine disappeared")))
             return
         }
@@ -281,6 +281,7 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
         device.connect(toPort: GuestProtocol.port) { [weak self] result in
             guard let self = self else { return }
             self.queue.async {
+                guard !self.exited, !self.stopping else { return }
                 if case .success(let connection) = result {
                     self.accept(connection)
                     return
@@ -302,6 +303,7 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
     }
 
     private func accept(_ connection: VZVirtioSocketConnection) {
+        guard !exited, !stopping else { connection.close(); return }
         let raw = connection.fileDescriptor
         guard raw >= 0 else {
             finishBoot(.failure(MicroVMError("vsock connection has no file descriptor")))
@@ -315,7 +317,9 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
         // Keep the Virtualization object alive; it owns the underlying socket.
         socketConnection = connection
         let link = GuestLink(fd: fd)
+        linkLock.lock()
         self.link = link
+        linkLock.unlock()
         link.readLoop { [weak self] result in
             guard let self = self else { return }
             switch result {
@@ -325,7 +329,9 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
                 let text = String(describing: error)
                 self.finishBoot(.failure(error))
                 self.failExecs(text)
-                self.teardown(message: text)
+                self.queue.async {
+                    if !self.stopping { self.destroy { _ in } }
+                }
             }
         }
     }
@@ -359,7 +365,7 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
         handlers.removeAll()
         handlerLock.unlock()
         for (_, handler) in pending {
-            handler(.error(id: 0, message: text))
+            DispatchQueue.global().async { handler(.error(id: 0, message: text)) }
         }
     }
 
@@ -374,19 +380,34 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
         completion?(result)
     }
 
+    private func disconnectGuest() {
+        linkLock.lock()
+        let connection = link
+        link = nil
+        linkLock.unlock()
+        connection?.close()
+        socketConnection?.close()
+        socketConnection = nil
+    }
+
     private func teardown(message: String?) {
         bootLock.lock()
         let already = exited
         exited = true
         bootLock.unlock()
         if already { return }
+        finishBoot(.failure(MicroVMError(message ?? "guest exited")))
+        disconnectGuest()
         failExecs(message ?? "guest exited")
-        link?.close()
-        link = nil
-        socketConnection?.close()
-        socketConnection = nil
         virtualMachine = nil
         onExit?(message)
     }
+}
+// Kept separate so the actual Virtualization configuration can be checked without booting a guest.
+func networkDevices(for mode: NetworkMode) -> [VZNetworkDeviceConfiguration] {
+    guard mode == .nat else { return [] }
+    let network = VZVirtioNetworkDeviceConfiguration()
+    network.attachment = VZNATNetworkDeviceAttachment()
+    return [network]
 }
 #endif

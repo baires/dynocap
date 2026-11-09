@@ -8,7 +8,10 @@ import {
   type ExecStream,
 } from "./session.ts";
 
+export type NetworkMode = "none" | "nat";
+
 export type SandboxInfo = {
+  network: NetworkMode | null;
   name: string;
   phase: string;
   cpus: number;
@@ -19,6 +22,7 @@ export type SandboxInfo = {
 };
 
 export type BootRequest = {
+  network: NetworkMode;
   name: string;
   cpus: number;
   memoryMB: number;
@@ -27,6 +31,7 @@ export type BootRequest = {
 };
 
 export type ExecBody = {
+  requireOffline?: boolean;
   name: string;
   argv: string[];
   env: string[];
@@ -38,7 +43,9 @@ export async function boot(
   home: string,
   request: BootRequest
 ): Promise<{ name: string; phase: string }> {
+  await requirePolicy(home);
   const body: Record<string, unknown> = {
+    network: request.network,
     name: request.name,
     cpus: request.cpus,
     memoryMB: request.memoryMB,
@@ -65,6 +72,7 @@ export async function exec(
   request: ExecBody,
   handlers: ExecHandlers
 ): Promise<ExecStream> {
+  if (request.requireOffline) await requirePolicy(home);
   return execStream(
     daemonSocket(home),
     encodeJSON(ControlType.exec, request),
@@ -116,6 +124,10 @@ function asInfo(value: unknown): SandboxInfo {
     throw new SandboxError("daemon", "daemon ps reply had a bad sandbox");
   }
   return {
+    network:
+      record.network === "none" || record.network === "nat"
+        ? record.network
+        : null,
     name: record.name,
     phase: record.phase,
     cpus: numberField(record.cpus, "cpus"),
@@ -134,4 +146,22 @@ function numberField(value: unknown, name: string): number {
     throw new SandboxError("daemon", `daemon ps reply had a bad ${name}`);
   }
   return value;
+}
+
+async function requirePolicy(home: string): Promise<void> {
+  const reply = await roundTrip(
+    daemonSocket(home),
+    encodeFrame(ControlType.ping, new Uint8Array())
+  );
+  if (
+    !reply ||
+    typeof reply !== "object" ||
+    (reply as Record<string, unknown>).ok !== true ||
+    (reply as Record<string, unknown>).isolationPolicyVersion !== 1
+  ) {
+    throw new SandboxError(
+      "daemon",
+      "daemon lacks isolation policy v1; rebuild microvm and manually restart the daemon before creating sandboxes"
+    );
+  }
 }

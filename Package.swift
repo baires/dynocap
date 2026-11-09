@@ -23,7 +23,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MicroVMCoreTests",
-            dependencies: ["MicroVMCore"],
+            dependencies: ["MicroVMCore", "MicroVMVZ"],
             path: "Tests/MicroVMCoreTests"
         ),
     ]

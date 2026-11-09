@@ -7,6 +7,8 @@ public struct BootRequest: Equatable {
     public var kernelURL: URL
     public var initrdURL: URL
     public var consoleLogURL: URL
+    public var generation: UUID
+    public var network: NetworkMode
     public var bootTimeoutSeconds: Int
 
     public init(
@@ -16,7 +18,9 @@ public struct BootRequest: Equatable {
         kernelURL: URL,
         initrdURL: URL,
         consoleLogURL: URL,
-        bootTimeoutSeconds: Int
+        bootTimeoutSeconds: Int,
+        network: NetworkMode = .none,
+        generation: UUID = UUID()
     ) {
         self.name = name
         self.cpus = cpus
@@ -24,6 +28,8 @@ public struct BootRequest: Equatable {
         self.kernelURL = kernelURL
         self.initrdURL = initrdURL
         self.consoleLogURL = consoleLogURL
+        self.generation = generation
+        self.network = network
         self.bootTimeoutSeconds = bootTimeoutSeconds
     }
 }
@@ -54,7 +60,7 @@ public enum ExecEvent: Equatable {
 }
 
 public protocol VMBackend: AnyObject {
-    var onGuestExit: ((String, String?) -> Void)? { get set }
+    var onGuestExit: ((String, UUID, String?) -> Void)? { get set }
     func boot(_ request: BootRequest, completion: @escaping (Result<Void, Error>) -> Void)
     func exec(_ request: ExecRequest, emit: @escaping (ExecEvent) -> Void)
     func cancelExec(name: String, id: UInt32)
@@ -63,7 +69,7 @@ public protocol VMBackend: AnyObject {
 
 /// Used on non-macOS builds and in tests that only exercise the control plane.
 public final class UnsupportedBackend: VMBackend {
-    public var onGuestExit: ((String, String?) -> Void)?
+    public var onGuestExit: ((String, UUID, String?) -> Void)?
 
     public init() {}
 

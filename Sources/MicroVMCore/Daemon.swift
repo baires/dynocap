@@ -17,6 +17,7 @@ public final class Daemon {
     private var token = ""
     private var stopped = false
     private var nextExecID: UInt32 = 0
+    private var lifecycles: [String: SandboxLifecycle] = [:]
     private var ttlTimer: DispatchSourceTimer?
 
     public init(home: URL, backend: VMBackend, guestArch: String = HostArch.guest) {
@@ -37,8 +38,8 @@ public final class Daemon {
         }
         listenFD = try POSIX.listenUnix(paths.socket.path)
         signal(SIGPIPE, SIG_IGN)
-        backend.onGuestExit = { [weak self] name, message in
-            self?.noteGuestExit(name, message: message)
+        backend.onGuestExit = { [weak self] name, generation, message in
+            DispatchQueue.global().async { self?.noteGuestExit(name, generation: generation, message: message) }
         }
         stopped = false
         let thread = Thread { [weak self] in
@@ -114,13 +115,15 @@ public final class Daemon {
             let message = try ControlCodec.read(fd)
             switch message {
             case .ping:
-                try ControlCodec.write(fd, .result(try JSONEncoder().encode(OKResult(ok: true))))
+                try ControlCodec.write(fd, .result(try JSONEncoder().encode(PolicyCapabilities())))
             case .ps:
                 let records = try store.list()
                 try ControlCodec.write(fd, .result(try JSONEncoder().encode(PSResult(vms: records))))
             case .run(let request):
                 let record = try boot(request)
-                try ControlCodec.write(fd, .result(try JSONEncoder().encode(StatusResult(name: record.name, phase: record.phase.rawValue))))
+                let status = StatusResult(name: record.name, phase: record.phase.rawValue,
+                                          network: record.network, ttlSeconds: record.ttlSeconds)
+                try ControlCodec.write(fd, .result(try JSONEncoder().encode(status)))
             case .exec(let command):
                 try performExec(fd, command)
             case .destroy(let name):
@@ -137,7 +140,25 @@ public final class Daemon {
         }
     }
 
+    private func lifecycle(_ name: String) -> SandboxLifecycle {
+        lock.lock()
+        defer { lock.unlock() }
+        if let existing = lifecycles[name] { return existing }
+        let lifecycle = SandboxLifecycle()
+        lifecycles[name] = lifecycle
+        return lifecycle
+    }
+
     private func boot(_ request: RunRequest) throws -> VMRecord {
+        let ttl = try IsolationPolicy.ttl(request.ttlSeconds)
+        guard (1...86400).contains(request.bootTimeoutSeconds) else {
+            throw MicroVMError("bootTimeoutSeconds must be between 1 and 86400")
+        }
+        let lifecycle = lifecycle(request.name)
+        lifecycle.lock.lock()
+        // Release while waiting for the guest, allowing expiry and explicit destroy during boot.
+        var locked = true
+        defer { if locked { lifecycle.lock.unlock() } }
         try validateVMName(request.name)
         guard request.cpus >= 1 else { throw MicroVMError("cpus must be >= 1") }
         guard request.memoryMB >= 128 else { throw MicroVMError("memory must be >= 128 MB") }
@@ -170,10 +191,13 @@ public final class Daemon {
             memoryMB: request.memoryMB,
             daemonToken: token,
             createdAtUnix: unixNow(),
-            ttlSeconds: request.ttlSeconds,
-            message: nil
+            ttlSeconds: ttl,
+            message: nil,
+            network: request.network ?? NetworkMode.none
         )
         try store.save(record)
+        let live = LiveSandbox()
+        lifecycle.live = live
         let boot = BootRequest(
             name: request.name,
             cpus: request.cpus,
@@ -181,49 +205,56 @@ public final class Daemon {
             kernelURL: kernel,
             initrdURL: initrd,
             consoleLogURL: paths.consoleLog(request.name),
-            bootTimeoutSeconds: request.bootTimeoutSeconds
+            bootTimeoutSeconds: request.bootTimeoutSeconds,
+            network: request.network ?? NetworkMode.none,
+            generation: live.generation
         )
-        let sem = DispatchSemaphore(value: 0)
-        var result: Result<Void, Error>?
-        backend.boot(boot) { value in
-            result = value
-            sem.signal()
+        backend.boot(boot) { live.boot.complete($0) }
+        lifecycle.lock.unlock()
+        locked = false
+        let result = live.boot.wait(seconds: request.bootTimeoutSeconds + 5)
+        lifecycle.lock.lock()
+        locked = true
+        guard lifecycle.live === live, let current = try store.load(request.name), current.phase == .booting else {
+            throw MicroVMError("sandbox \(request.name) stopped or expired during boot")
         }
-        let wait = sem.wait(timeout: .now() + .seconds(request.bootTimeoutSeconds + 5))
-        if wait == .timedOut {
-            backend.destroy(name: request.name) { _ in }
-            record.phase = .failed
-            record.message = "boot timed out"
-            try store.save(record)
-            throw MicroVMError("boot timed out waiting for \(request.name)")
+        if vmIsExpired(current, now: unixNow()) {
+            try destroyLocked(request.name, lifecycle: lifecycle, reason: "sandbox lifetime expired")
+            throw MicroVMError("sandbox lifetime expired during boot")
         }
         switch result {
         case .success:
-            guard let next = transition(record.phase, .agentReady) else {
-                throw MicroVMError("internal phase error")
-            }
-            record.phase = next
+            record.phase = .running
             record.message = nil
             try store.save(record)
             log("\(request.name) running")
             return record
         case .failure(let error):
-            record.phase = .failed
-            record.message = String(describing: error)
-            try store.save(record)
-            throw MicroVMError(String(describing: error))
-        case .none:
-            throw MicroVMError("boot returned no result")
+            try destroyLocked(request.name, lifecycle: lifecycle, reason: String(describing: error), keepFailure: true)
+            throw error
         }
     }
 
     private func performExec(_ fd: Int32, _ command: ExecCommand) throws {
+        try POSIX.setWriteTimeout(fd, seconds: 5)
+        let lifecycle = lifecycle(command.name)
+        lifecycle.lock.lock()
+        var locked = true
+        defer { if locked { lifecycle.lock.unlock() } }
         guard let record = try store.load(command.name) else {
             throw MicroVMError("no VM named \(command.name)")
         }
         guard record.phase == .running else {
             throw MicroVMError("VM \(command.name) is \(record.phase.rawValue)")
         }
+        if vmIsExpired(record, now: unixNow()) {
+            try destroyLocked(command.name, lifecycle: lifecycle, reason: "sandbox lifetime expired")
+            throw MicroVMError("sandbox lifetime expired")
+        }
+        if command.requireOffline == true && record.network != NetworkMode.none {
+            throw MicroVMError("exec requires an offline sandbox; networking is NAT or unknown")
+        }
+        guard let live = lifecycle.live else { throw MicroVMError("sandbox is not owned by this daemon") }
         lock.lock()
         nextExecID &+= 1
         if nextExecID == 0 { nextExecID = 1 }
@@ -240,10 +271,36 @@ public final class Daemon {
         let writeLock = NSLock()
         let state = ExecWait()
         let sem = DispatchSemaphore(value: 0)
-        func send(_ message: ControlMessage) {
+        var transportFailed = false // Protected by writeLock, including terminal writes.
+        func send(_ message: ControlMessage, terminal: Bool = false) {
             writeLock.lock()
             defer { writeLock.unlock() }
-            try? ControlCodec.write(fd, message)
+            guard !transportFailed, terminal || !state.isFinished else { return }
+            do {
+                try ControlCodec.write(fd, message)
+            } catch {
+                // A partial frame cannot be followed by another frame. Disconnect and
+                // release guest I/O so an unread client cannot obstruct VM shutdown.
+                transportFailed = true
+                _ = shutdown(fd, Int32(SHUT_RDWR))
+                if state.markFinished() {
+                    DispatchQueue.global().async {
+                        lifecycle.lock.lock()
+                        if lifecycle.live === live { self.backend.cancelExec(name: command.name, id: id) }
+                        lifecycle.lock.unlock()
+                    }
+                    sem.signal()
+                }
+            }
+        }
+        live.execs[id] = { reason in
+            if state.markFinished() {
+                // A caller that stops reading output must not prevent host teardown.
+                DispatchQueue.global().async {
+                    send(.error(reason), terminal: true)
+                    sem.signal()
+                }
+            }
         }
         backend.exec(request) { event in
             switch event {
@@ -253,73 +310,112 @@ public final class Daemon {
                 if !state.isFinished { send(.stderr(data)) }
             case .finished(let code, let signal):
                 if state.markFinished() {
-                    send(.exit(code: code, signal: signal))
+                    send(.exit(code: code, signal: signal), terminal: true)
                     sem.signal()
                 }
             case .failed(let message):
                 if state.markFinished() {
-                    send(.error(message))
+                    send(.error(message), terminal: true)
                     sem.signal()
                 }
             }
         }
+        lifecycle.lock.unlock()
+        locked = false
         let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global())
         timer.schedule(deadline: .now() + .seconds(command.timeoutSeconds))
         timer.setEventHandler { [weak self] in
             guard let self = self else { return }
             if state.markFinished() {
-                self.backend.cancelExec(name: command.name, id: id)
-                send(.error("timed out after \(command.timeoutSeconds)s"))
+                lifecycle.lock.lock()
+                if lifecycle.live === live { self.backend.cancelExec(name: command.name, id: id) }
+                lifecycle.lock.unlock()
+                send(.error("timed out after \(command.timeoutSeconds)s"), terminal: true)
                 sem.signal()
             }
         }
         timer.resume()
         sem.wait()
         timer.cancel()
+        lifecycle.lock.lock()
+        live.execs[id] = nil
+        lifecycle.lock.unlock()
     }
 
     private func destroyVM(_ name: String) throws {
         try validateVMName(name)
-        guard let record = try store.load(name) else {
-            throw MicroVMError("no VM named \(name)")
-        }
-        if record.phase == .running || record.phase == .booting || record.phase == .stopping {
-            if let next = transition(record.phase, .stopRequested) {
-                var stopping = record
-                stopping.phase = next
-                try store.save(stopping)
-            }
-            let sem = DispatchSemaphore(value: 0)
-            var failure: Error?
-            backend.destroy(name: name) { result in
-                if case .failure(let error) = result { failure = error }
-                sem.signal()
-            }
-            _ = sem.wait(timeout: .now() + 8)
-            if let failure {
-                throw MicroVMError("destroy \(name): \(failure)")
-            }
-        }
-        try store.remove(name)
-        log("destroyed \(name)")
+        let lifecycle = lifecycle(name)
+        lifecycle.lock.lock()
+        defer { lifecycle.lock.unlock() }
+        try destroyLocked(name, lifecycle: lifecycle, reason: "sandbox destroyed")
     }
 
-    private func noteGuestExit(_ name: String, message: String?) {
-        guard var record = try? store.load(name) else { return }
-        guard let next = transition(record.phase, message == nil ? .guestExited : .fault) else { return }
-        if next == record.phase { return }
-        record.phase = next
-        record.message = message ?? record.message
+    // Caller owns the per-name lock. Backend callbacks must not synchronously acquire it.
+    private func destroyLocked(
+        _ name: String, lifecycle: SandboxLifecycle, reason: String, keepFailure: Bool = false
+    ) throws {
+        guard var record = try store.load(name) else { return }
+        if let live = lifecycle.live {
+            let reason = live.stopReason ?? reason
+            live.stopReason = reason
+            record.phase = .stopping
+            record.message = reason
+            try store.save(record)
+            live.boot.complete(.failure(MicroVMError(reason)))
+            for cancel in live.execs.values { cancel(reason) }
+            live.execs.removeAll()
+            let completion = CompletionWait()
+            backend.destroy(name: name) { completion.complete($0) }
+            do {
+                try completion.wait(seconds: 8).get()
+            } catch {
+                record.message = "\(reason); teardown failed: \(error)"
+                try store.save(record)
+                log("\(name) \(record.message ?? reason)")
+                throw MicroVMError(record.message ?? reason)
+            }
+            lifecycle.live = nil
+        }
+        if keepFailure {
+            record.phase = .failed
+            record.message = reason
+            try store.save(record)
+        } else {
+            try store.remove(name)
+        }
+        log("destroyed \(name): \(reason)")
+    }
+
+    func noteGuestExit(_ name: String, generation: UUID, message: String?) {
+        let lifecycle = lifecycle(name)
+        lifecycle.lock.lock()
+        defer { lifecycle.lock.unlock() }
+        guard let live = lifecycle.live, live.generation == generation,
+              var record = try? store.load(name) else { return }
+        // Explicit teardown owns this transition and retries until confirmed.
+        guard record.phase != .stopping else { return }
+        live.boot.complete(.failure(MicroVMError(message ?? "guest exited")))
+        for cancel in live.execs.values { cancel(message ?? "guest exited") }
+        lifecycle.live = nil
+        record.phase = message == nil ? .stopped : .failed
+        record.message = message
         try? store.save(record)
-        log("\(name) \(next.rawValue)")
+        log("\(name) \(record.phase.rawValue)")
     }
 
     private func reapExpired() {
         guard let records = try? store.list() else { return }
-        let now = unixNow()
-        for record in records where vmIsExpired(record, now: now) {
-            log("ttl expired for \(record.name)")
-            try? destroyVM(record.name)
+        for record in records {
+            let lifecycle = lifecycle(record.name)
+            lifecycle.lock.lock()
+            defer { lifecycle.lock.unlock() }
+            guard let current = try? store.load(record.name),
+                  current.phase == .stopping || vmIsExpired(current, now: unixNow()) else { continue }
+            do {
+                try destroyLocked(record.name, lifecycle: lifecycle, reason: current.message ?? "sandbox lifetime expired")
+            } catch {
+                log("teardown will retry for \(record.name): \(error)")
+            }
         }
     }
 
@@ -381,6 +477,15 @@ public struct DaemonClient {
         guard case .result = reply else { throw messageError(reply) }
     }
 
+    public func requirePolicy() throws {
+        let reply = try roundTrip(.ping)
+        guard case .result(let data) = reply,
+              let capability = try? JSONDecoder().decode(PolicyCapabilities.self, from: data),
+              capability.ok, capability.isolationPolicyVersion == IsolationPolicy.version else {
+            throw MicroVMError("daemon lacks isolation policy v1; rebuild microvm and manually restart the daemon before creating sandboxes")
+        }
+    }
+
     public func ps() throws -> [VMRecord] {
         let reply = try roundTrip(.ps)
         guard case .result(let data) = reply else { throw messageError(reply) }
@@ -388,6 +493,8 @@ public struct DaemonClient {
     }
 
     public func run(_ request: RunRequest) throws -> StatusResult {
+        _ = try IsolationPolicy.ttl(request.ttlSeconds)
+        try requirePolicy()
         let reply = try roundTrip(.run(request))
         guard case .result(let data) = reply else { throw messageError(reply) }
         return try JSONDecoder().decode(StatusResult.self, from: data)
@@ -403,6 +510,7 @@ public struct DaemonClient {
         onStdout: (Data) -> Void = { _ in },
         onStderr: (Data) -> Void = { _ in }
     ) throws -> ExecOutcome {
+        if command.requireOffline == true { try requirePolicy() }
         let fd = try POSIX.connectUnix(socketPath)
         defer { _ = closeFD(fd) }
         try ControlCodec.write(fd, .exec(command))
@@ -449,4 +557,39 @@ func closeFD(_ fd: Int32) -> Int32 {
     #else
     return Glibc.close(fd)
     #endif
+}
+
+private final class SandboxLifecycle {
+    let lock = NSRecursiveLock()
+    var live: LiveSandbox?
+}
+
+private final class LiveSandbox {
+    let generation = UUID()
+    let boot = CompletionWait()
+    var stopReason: String?
+    var execs: [UInt32: (String) -> Void] = [:]
+}
+
+private final class CompletionWait {
+    private let lock = NSLock()
+    private let semaphore = DispatchSemaphore(value: 0)
+    private var result: Result<Void, Error>?
+
+    func complete(_ result: Result<Void, Error>) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard self.result == nil else { return }
+        self.result = result
+        semaphore.signal()
+    }
+
+    func wait(seconds: Int) -> Result<Void, Error> {
+        if semaphore.wait(timeout: .now() + .seconds(seconds)) == .timedOut {
+            return .failure(MicroVMError("timed out waiting for backend operation"))
+        }
+        lock.lock()
+        defer { lock.unlock() }
+        return result ?? .failure(MicroVMError("backend returned no result"))
+    }
 }

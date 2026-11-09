@@ -148,7 +148,12 @@ public struct StatusResult: Codable, Equatable {
     public var name: String
     public var phase: String
 
-    public init(name: String, phase: String) {
+    public var network: NetworkMode?
+    public var ttlSeconds: Int?
+
+    public init(name: String, phase: String, network: NetworkMode? = nil, ttlSeconds: Int? = nil) {
+        self.network = network
+        self.ttlSeconds = ttlSeconds
         self.name = name
         self.phase = phase
     }
@@ -182,4 +187,9 @@ public struct ExecOutcome: Equatable {
         self.stdout = stdout
         self.stderr = stderr
     }
+}
+
+public struct PolicyCapabilities: Codable {
+    public var ok: Bool = true
+    public var isolationPolicyVersion: Int = IsolationPolicy.version
 }

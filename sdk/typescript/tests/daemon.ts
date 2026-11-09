@@ -13,6 +13,7 @@ export type FakeExec = {
 };
 
 type Recorded = {
+  network?: string;
   name: string;
   phase: string;
   cpus: number;
@@ -26,6 +27,7 @@ type Recorded = {
 export type FakeDaemon = {
   home: string;
   execs: FakeExec[];
+  runs: Record<string, unknown>[];
   close: () => Promise<void>;
 };
 
@@ -43,6 +45,7 @@ export async function fakeDaemon(
   const socketPath = path.join(home, "daemon.sock");
   const sandboxes = new Map<string, Recorded>();
   const execs: FakeExec[] = [];
+  const runs: Record<string, unknown>[] = [];
   const server = net.createServer((socket) => {
     const reader = new FrameReader();
     socket.on("data", (chunk: Buffer) => {
@@ -58,7 +61,7 @@ export async function fakeDaemon(
         return;
       }
       for (const body of bodies)
-        handle(socket, body, sandboxes, execs, behavior);
+        handle(socket, body, sandboxes, execs, runs, behavior);
     });
   });
   await new Promise<void>((resolve, reject) => {
@@ -68,6 +71,7 @@ export async function fakeDaemon(
   return {
     home,
     execs,
+    runs,
     close: () =>
       new Promise((resolve) => {
         server.close(() => {
@@ -79,6 +83,9 @@ export async function fakeDaemon(
 }
 
 type FakeBehavior = {
+  policyVersion: number | null;
+  execNetwork: "none" | "nat";
+  recordedNetwork: "none" | "nat" | "unknown";
   onRun: (name: string) => "running" | "error";
 };
 
@@ -87,6 +94,7 @@ function handle(
   body: Buffer,
   sandboxes: Map<string, Recorded>,
   execs: FakeExec[],
+  runs: Record<string, unknown>[],
   behavior: Partial<FakeBehavior>
 ) {
   if (body.length === 0) return;
@@ -96,8 +104,23 @@ function handle(
     JSON.parse(payload.toString("utf8")) as Record<string, unknown>;
   try {
     switch (type) {
+      case 6:
+        writeFrame(
+          socket,
+          16,
+          Buffer.from(
+            JSON.stringify({
+              ok: true,
+              ...(behavior.policyVersion === null
+                ? {}
+                : { isolationPolicyVersion: behavior.policyVersion ?? 1 }),
+            })
+          )
+        );
+        return;
       case 1: {
         const request = json();
+        runs.push(request);
         const name = String(request.name);
         if (behavior.onRun?.(name) === "error") {
           writeFrame(
@@ -108,6 +131,10 @@ function handle(
           return;
         }
         sandboxes.set(name, {
+          network:
+            behavior.recordedNetwork === "unknown"
+              ? undefined
+              : (behavior.recordedNetwork ?? String(request.network ?? "none")),
           name,
           phase: "running",
           cpus: Number(request.cpus),
@@ -115,7 +142,7 @@ function handle(
           daemonToken: "secret-token",
           createdAtUnix: 1_700_000_000,
           ttlSeconds:
-            request.ttlSeconds == null ? null : Number(request.ttlSeconds),
+            request.ttlSeconds == null ? 1800 : Number(request.ttlSeconds),
           message: null,
         });
         writeFrame(
@@ -131,6 +158,17 @@ function handle(
         const recorded = sandboxes.get(name);
         if (!recorded) {
           writeFrame(socket, 20, Buffer.from(`no VM named ${name}`));
+          return;
+        }
+        if (
+          request.requireOffline &&
+          (behavior.execNetwork ?? recorded.network) !== "none"
+        ) {
+          writeFrame(
+            socket,
+            20,
+            Buffer.from("exec requires an offline sandbox")
+          );
           return;
         }
         const argv = request.argv as string[];

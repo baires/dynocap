@@ -181,6 +181,13 @@ enum POSIX {
         return data
     }
 
+    static func setWriteTimeout(_ fd: Int32, seconds: Int) throws {
+        var timeout = timeval(tv_sec: seconds, tv_usec: 0)
+        guard setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size)) == 0 else {
+            throw MicroVMError("setsockopt SO_SNDTIMEO: \(errnoString())")
+        }
+    }
+
     static func writeAll(_ fd: Int32, _ data: Data) throws {
         if data.isEmpty { return }
         try data.withUnsafeBytes { raw in

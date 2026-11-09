@@ -14,7 +14,7 @@ microvm CLI  --unix socket-->  microvm daemon (same binary)
                                     |
                                     |  VZLinuxBootLoader
                                     |  virtio-console  -> ~/.microvm/vms/<name>/console.log
-                                    |  virtio-net NAT  -> outbound DHCP only
+                                    |  virtio-net      -> absent by default; NAT opt-in
                                     |  virtio-vsock    -> guest port 5252
                                     v
                                Linux guest (Alpine minirootfs initramfs)
@@ -100,8 +100,52 @@ Virtualization.framework needs an uncompressed ARM64 `Image`. Alpine ships an
 EFI zboot wrapper, and the image builder extracts the gzip payload and checks
 the `ARM\x64` magic. Intel Macs boot the bzImage as published.
 
-The guest gets outbound NAT. Nothing is published inbound, and the host home
-directory is not mounted. DHCP comes from `VZNATNetworkDeviceAttachment`.
+The default guest has **no virtual network device**. Exec still works over
+vsock. `--network nat` explicitly attaches `VZNATNetworkDeviceAttachment` for
+unrestricted outbound access with DHCP. No host filesystem is mounted.
+
+## Isolation promise
+
+Each sandbox runs a separate Linux kernel with its configured CPU and memory.
+By default it has no virtual NIC, no host filesystem mount, and a 30-minute
+lifetime counted from creation, including boot. Loopback inside the guest
+still works; vsock is the daemon-to-agent control channel.
+
+`--network nat` is an explicit relaxation: the guest can reach destinations
+allowed by the host network, potentially including host services, private
+networks, link-local services, and cloud metadata endpoints. NAT does **not**
+filter destinations or prevent data exfiltration. The runtime does not publish
+inbound ports. Filtered internet access is future work.
+
+The host daemon and applications running as your user are trusted. The Unix
+socket is the local control boundary, not a boundary between applications
+running as the same user. Guest code may be privileged inside its own Linux
+kernel; networking policy is enforced by host device configuration, not guest
+firewall rules. This is not a claim that hypervisor vulnerabilities cannot exist.
+
+TTL is host-clock-based lifecycle cleanup, not a precise real-time execution
+deadline. A one-second sweep starts teardown at expiry; host sleep, clock
+changes, scheduling, and teardown latency affect timing. Expired sandboxes
+reject new execs and active commands receive an error. Failed teardown remains
+visible as `stopping`, is logged, and is retried. Teardown uses the host
+force-stop API on all supported macOS versions; it does not depend on the
+guest accepting a shutdown request. Guest I/O is disconnected before force-stop
+so unread output cannot obstruct shutdown. A socket write stalled for five
+seconds disconnects the exec stream and cancels its command.
+
+### Upgrading from unrestricted defaults
+
+This release changes omitted networking to `none` and omitted/null TTL to
+1800 seconds; explicit TTL must be an integer from 1 through 86400. There is
+no unlimited lifetime or automatic renewal. Restart the daemon after upgrading:
+stop its foreground process with Ctrl-C, or send SIGTERM to its PID from
+`$MICROVM_HOME/daemon.json` (default `~/.microvm/daemon.json`), then let the next
+CLI command start the rebuilt binary. Stopping the daemon stops its sandboxes.
+There is no live migration or automatic restart of an existing daemon.
+
+Updated CLI/SDK clients require isolation policy v1 before creating sandboxes
+and reject older daemons with upgrade instructions. Missing networking in
+historical records is reported as `unknown`, never as offline.
 
 Cache and state:
 
@@ -121,11 +165,15 @@ Override the root with `--home` or `MICROVM_HOME`.
 ## Flags
 
 ```
-microvm run --name demo --cpus 2 --memory 1024 --ttl 3600 --boot-timeout 60
+microvm run --name demo --cpus 2 --memory 1024 --ttl 3600 --network none --boot-timeout 60
+# Opt in to unrestricted outbound networking:
+microvm run --name online --network nat
 microvm exec demo --timeout 30 --cwd /tmp --env FOO=bar -- uname -a
 ```
 
-`--memory` is megabytes. `--ttl` destroys the VM after that many seconds.
+`--memory` is megabytes. `--ttl` defaults to 1800 seconds and accepts 1–86400.
+The limit includes boot time and exec never renews it. `ps` shows the effective
+`NETWORK` and `TTL_SEC`; `unknown` identifies absent historical metadata.
 `--timeout` kills the guest process group and the command exits 124. With an
 empty `--env` list the agent still sets `PATH`, `HOME`, `TERM`, and `LANG`.
 
@@ -133,9 +181,9 @@ If boot fails, the error includes the tail of `console.log`.
 
 ## Cleanup
 
-`microvm destroy demo` tells the agent to power the guest off
-(`reboot(LINUX_REBOOT_CMD_POWER_OFF)`), then calls `VZVirtualMachine.stop` on
-macOS 14+ (`requestStop` on macOS 13) and deletes the VM directory.
+`microvm destroy demo` terminates active execs and calls
+`VZVirtualMachine.stop` on the host. It deletes the sandbox directory only
+after confirmed teardown. Failures remain visible as `stopping` and are retried.
 
 A killed daemon takes its VMs with it. The next command starts a daemon with
 a new token and rewrites stale `running` records to `stopped` with the message
@@ -161,6 +209,23 @@ unwrapping, module load order, CLI parsing, the VM phase machine, daemon
 `run` / `exec` / `ps` / `destroy` over a unix socket, leftover-VM reaping, and
 the exec timeout. On Linux the virtualization backend is the explicit
 "requires macOS" error, and a test checks that path.
+
+To exercise real guests on a virtualization-capable Mac with an existing image:
+
+```sh
+./scripts/build-macos.sh
+npm run typecheck
+python3 scripts/test-isolation-macos.py
+```
+
+The smoke test uses a temporary home and its own daemon. It checks no NIC/routes
+by default, outbound TCP denial, NAT DHCP and public HTTP reachability, real SDK
+and MCP policy behavior, and TTL termination of active commands, including a
+noisy command whose client stops reading output. It needs
+internet for the explicit NAT test. Override the image directory with
+`--images /path/to/images`; it never rewrites the source image or touches your
+existing daemon. Unit tests also cover malformed policy requests, legacy daemon
+rejection, expiry during boot/exec, late callbacks, and teardown failure/retry.
 
 ## Boot time
 

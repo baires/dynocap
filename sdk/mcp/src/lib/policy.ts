@@ -9,12 +9,14 @@ export async function presentExec(
   sandbox: Sandbox,
   command: string,
   options: {
+    requireOffline?: boolean;
     cwd?: string;
     env?: Record<string, string>;
     timeoutSeconds?: number;
   }
 ): Promise<string> {
   const result = await sandbox.exec(command, {
+    requireOffline: options.requireOffline,
     cwd: options.cwd,
     env: options.env,
     timeoutSeconds: options.timeoutSeconds ?? EXEC_TIMEOUT_SECONDS,

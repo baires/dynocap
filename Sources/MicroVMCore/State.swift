@@ -43,6 +43,7 @@ public struct VMRecord: Codable, Equatable {
     public var memoryMB: Int
     public var daemonToken: String
     public var createdAtUnix: Int64
+    public var network: NetworkMode?
     public var ttlSeconds: Int?
     public var message: String?
 
@@ -54,8 +55,10 @@ public struct VMRecord: Codable, Equatable {
         daemonToken: String,
         createdAtUnix: Int64,
         ttlSeconds: Int?,
-        message: String?
+        message: String?,
+        network: NetworkMode? = nil
     ) {
+        self.network = network
         self.name = name
         self.phase = phase
         self.cpus = cpus
@@ -82,26 +85,28 @@ public struct DaemonIdentity: Codable, Equatable {
 public func vmIsExpired(_ record: VMRecord, now: Int64) -> Bool {
     guard let ttl = record.ttlSeconds, ttl > 0 else { return false }
     switch record.phase {
-    case .booting, .running:
+    case .booting, .running, .stopping:
         return now >= record.createdAtUnix + Int64(ttl)
-    case .stopping, .stopped, .failed:
+    case .stopped, .failed:
         return false
     }
 }
 
 public func formatProcessTable(_ records: [VMRecord], now: Int64) -> String {
-    let rows: [[String]] = [["NAME", "PHASE", "CPUS", "MEMORY_MB", "AGE", "MESSAGE"]] +
+    let rows: [[String]] = [["NAME", "PHASE", "CPUS", "MEMORY_MB", "NETWORK", "TTL_SEC", "AGE", "MESSAGE"]] +
         records.sorted { $0.name < $1.name }.map { record in
             [
                 record.name,
                 record.phase.rawValue,
                 String(record.cpus),
                 String(record.memoryMB),
+                record.network?.rawValue ?? "unknown",
+                record.ttlSeconds.map(String.init) ?? "unknown",
                 formatAge(max(0, now - record.createdAtUnix)),
                 record.message ?? "",
             ]
         }
-    let widths = (0..<6).map { col in
+    let widths = (0..<8).map { col in
         rows.map { $0[col].count }.max() ?? 0
     }
     return rows.map { row in
