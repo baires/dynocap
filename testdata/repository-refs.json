@@ -1,0 +1,110 @@
+[
+  {
+    "ref": "main",
+    "valid": true,
+    "normalized": "main",
+    "commit": false
+  },
+  {
+    "ref": "feature/café",
+    "valid": true,
+    "normalized": "feature/café",
+    "commit": false
+  },
+  {
+    "ref": "feature/café",
+    "valid": true,
+    "normalized": "feature/café",
+    "commit": false
+  },
+  {
+    "ref": "版本/٢",
+    "valid": true,
+    "normalized": "版本/٢",
+    "commit": false
+  },
+  {
+    "ref": "release.V1",
+    "valid": true,
+    "normalized": "release.V1",
+    "commit": false
+  },
+  {
+    "ref": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "valid": true,
+    "normalized": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "commit": true
+  },
+  {
+    "ref": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "valid": true,
+    "normalized": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "commit": true
+  },
+  {
+    "ref": "ＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦ",
+    "valid": true,
+    "normalized": "ＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦＦ",
+    "commit": false
+  },
+  {
+    "ref": "",
+    "valid": false,
+    "normalized": "",
+    "commit": false
+  },
+  {
+    "ref": "-main",
+    "valid": false,
+    "normalized": "-main",
+    "commit": false
+  },
+  {
+    "ref": "/main",
+    "valid": false,
+    "normalized": "/main",
+    "commit": false
+  },
+  {
+    "ref": "main/",
+    "valid": false,
+    "normalized": "main/",
+    "commit": false
+  },
+  {
+    "ref": "a..b",
+    "valid": false,
+    "normalized": "a..b",
+    "commit": false
+  },
+  {
+    "ref": "a b",
+    "valid": false,
+    "normalized": "a b",
+    "commit": false
+  },
+  {
+    "ref": "a\\b",
+    "valid": false,
+    "normalized": "a\\b",
+    "commit": false
+  },
+  {
+    "ref": "a\"b",
+    "valid": false,
+    "normalized": "a\"b",
+    "commit": false
+  },
+  {
+    "ref": "a\nb",
+    "valid": false,
+    "normalized": "a\nb",
+    "commit": false
+  },
+  {
+    "ref": "refs/main@{1}",
+    "valid": false,
+    "normalized": "refs/main@{1}",
+    "commit": false
+  }
+]

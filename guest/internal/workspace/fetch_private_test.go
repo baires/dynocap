@@ -244,3 +244,35 @@ func leadingInt(text string) (int, bool) {
 	}
 	return n, i > 0
 }
+
+func TestPublicAndCredentialedFetchShareRefSemantics(t *testing.T) {
+	repo := bareRepo(t)
+	gitCmd(t, repo, "branch", "feature/café", "main")
+	gitCmd(t, repo, "tag", "release", "main")
+	revision := gitOutputIn(t, repo, "rev-parse", "main")
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		serveGitBackend(w, r, filepath.Dir(repo))
+	}))
+	defer srv.Close()
+	ca := writeCertPEM(t, srv.Certificate())
+	for _, ref := range []string{"", "main", "feature/café", "release", strings.ToUpper(revision)} {
+		for _, token := range []string{"", "fixture-token"} {
+			dest := filepath.Join(t.TempDir(), "checkout")
+			got, console, err := fetchObserved(dest, srv.URL+"/repo.git", ref, token, "", fetchOptions{caFile: ca})
+			if err != nil {
+				t.Fatalf("ref %q authenticated=%v: %v %s", ref, token != "", err, console)
+			}
+			if got != revision {
+				t.Fatalf("revision %s != %s", got, revision)
+			}
+			head, err := os.ReadFile(filepath.Join(dest, ".git", "HEAD"))
+			if err != nil || strings.TrimSpace(string(head)) != revision {
+				t.Fatalf("not detached: %s %v", head, err)
+			}
+			if _, err := os.Stat(filepath.Join(dest, ".git", "hooks")); !os.IsNotExist(err) {
+				t.Fatal("hooks remain")
+			}
+			assertTokenAbsent(t, dest, console, "fixture-token")
+		}
+	}
+}

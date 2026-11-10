@@ -260,30 +260,12 @@ final class TaskManager {
             }
         case .guestClone(let repo):
             let pinned = repo.ref.flatMap { CommitID.isValid($0) ? $0 : nil }
-            let privateFetch = !credentialEnv.isEmpty
-            let data: Data
-            if privateFetch {
-                data = try execute(id, GuestGit.privateFetch(url: repo.url, ref: repo.ref), credentialEnv, nil, nil, 4 << 20)
-                credentialEnv = []
-            } else {
-                _ = try execute(id, GuestGit.clone(url: repo.url, ref: repo.ref), [], nil, nil, 4 << 20)
-                if let pinned {
-                    _ = try execute(id, GuestGit.fetchCommit(pinned), [], nil, nil, 4 << 20)
-                    _ = try execute(id, GuestGit.detach(pinned), [], nil, nil, 1 << 20)
-                }
-                data = try execute(id, GuestGit.revision(), [], nil, nil, 1 << 20)
-            }
+            let data = try execute(id, GuestGit.fetch(url: repo.url, ref: repo.ref), credentialEnv, nil, nil, 4 << 20)
+            credentialEnv = []
             let revision = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             guard CommitID.isValid(revision) else { throw MicroVMError("git did not return a commit") }
             if let pinned {
                 guard revision == pinned else { throw MicroVMError("git did not return a commit") }
-            } else if !privateFetch {
-                _ = try execute(id, GuestGit.detach(revision), [], nil, nil, 1 << 20)
-            }
-            if !privateFetch {
-                for argv in GuestGit.configure(url: repo.url) {
-                    _ = try execute(id, argv, [], nil, nil, 1 << 20)
-                }
             }
             sourceRevision = revision
             _ = try execute(id, ["/usr/local/bin/microvm-agent", "pack", "/workspace"], [], nil, input, 256 << 20)

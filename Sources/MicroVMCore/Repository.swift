@@ -1,4 +1,5 @@
 import Foundation
+
 #if canImport(Darwin)
 import Darwin
 #elseif canImport(Glibc)
@@ -20,7 +21,10 @@ struct RepositorySource: Equatable {
 
 enum CommitID {
     static func isValid(_ value: String) -> Bool {
-        (value.count == 40 || value.count == 64) && value.allSatisfy(\.isHexDigit)
+        (value.utf8.count == 40 || value.utf8.count == 64)
+            && value.utf8.allSatisfy {
+                (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0)
+            }
     }
 }
 
@@ -109,7 +113,7 @@ private func parseRef(_ ref: String) throws -> String {
     if ref.isEmpty || ref.hasPrefix("-") || ref.hasPrefix("/") || ref.hasSuffix("/") || ref.contains("..") || !ok {
         throw MicroVMError("ref must be a branch or tag name")
     }
-    return ref
+    return CommitID.isValid(ref) ? ref.lowercased() : ref
 }
 
 func redactSecrets(_ message: String, secrets: [String]) -> String {
@@ -121,48 +125,8 @@ func redactSecrets(_ message: String, secrets: [String]) -> String {
 }
 
 enum GuestGit {
-    private static let lock = ["GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_TERMINAL_PROMPT=0"]
-    private static let config = [
-        "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=", "-c", "credential.helper=",
-        "-c", "protocol.file.allow=never", "-c", "protocol.ext.allow=never", "-c", "init.templateDir=",
-    ]
-
-    static func clone(url: String, ref: String?) -> [String] {
-        var args = ["env"] + lock + ["git"] + config + ["clone", "--no-recurse-submodules"]
-        if let ref {
-            if CommitID.isValid(ref) {
-                args += ["--no-checkout"]
-            } else {
-                args += ["--branch", ref]
-            }
-        }
-        args += ["--", url, "/workspace"]
-        return args
-    }
-
-    static func fetchCommit(_ revision: String) -> [String] {
-        ["env"] + lock + ["git", "-C", "/workspace"] + config + [
-            "fetch", "--no-recurse-submodules", "origin", revision,
-        ]
-    }
-
-    static func revision() -> [String] {
-        ["env"] + lock + ["git", "-C", "/workspace", "-c", "core.hooksPath=/dev/null", "rev-parse", "HEAD"]
-    }
-
-    static func detach(_ revision: String) -> [String] {
-        ["env"] + lock + ["git", "-C", "/workspace", "-c", "core.hooksPath=/dev/null", "checkout", "--detach", revision]
-    }
-
-    static func configure(url: String) -> [[String]] {
-        [
-            ["env"] + lock + ["git", "-C", "/workspace", "-c", "core.hooksPath=/dev/null", "config", "--local", "core.hooksPath", "/dev/null"],
-            ["env"] + lock + ["git", "-C", "/workspace", "-c", "core.hooksPath=/dev/null", "remote", "set-url", "origin", url],
-        ]
-    }
-
     /// One guest exec. The URL and ref are arguments. The credential is not.
-    static func privateFetch(url: String, ref: String?) -> [String] {
+    static func fetch(url: String, ref: String?) -> [String] {
         ["/usr/local/bin/microvm-agent", "fetch", "/workspace", url, ref ?? ""]
     }
 

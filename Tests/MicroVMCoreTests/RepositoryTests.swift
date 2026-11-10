@@ -17,30 +17,39 @@ final class RepositoryTests: XCTestCase {
         XCTAssertEqual(repo.url, "https://github.com/org/repo.git")
         XCTAssertEqual(repo.ref, "main")
         XCTAssertNil(repo.token)
-        let argv = GuestGit.clone(url: repo.url, ref: repo.ref)
-        XCTAssertTrue(argv.contains("--branch"))
-        XCTAssertTrue(argv.contains("main"))
-        XCTAssertFalse(argv.contains("--no-checkout"))
-        XCTAssertTrue(argv.contains("core.hooksPath=/dev/null"))
-        XCTAssertTrue(argv.contains("credential.helper="))
-        XCTAssertTrue(argv.contains("protocol.file.allow=never"))
-        XCTAssertEqual(argv.suffix(3), ["--", repo.url, "/workspace"])
+        XCTAssertEqual(
+            GuestGit.fetch(url: repo.url, ref: repo.ref),
+            ["/usr/local/bin/microvm-agent", "fetch", "/workspace", repo.url, "main"])
         command.network = .filtered
         guard case .guestClone = try TaskSourceResolver.resolve(command) else {
             return XCTFail("filtered public clone")
         }
-        let sha = "d6de9f4b36f175b11586f89339689c1fe3c88805"
-        let commit = GuestGit.clone(url: repo.url, ref: sha)
-        XCTAssertFalse(commit.contains("--branch"))
-        XCTAssertTrue(commit.contains("--no-checkout"))
-        XCTAssertTrue(commit.contains("--no-recurse-submodules"))
-        XCTAssertEqual(commit.suffix(3), ["--", repo.url, "/workspace"])
-        let fetch = GuestGit.fetchCommit(sha)
-        XCTAssertTrue(fetch.contains("fetch"))
-        XCTAssertTrue(fetch.contains(sha))
-        XCTAssertTrue(fetch.contains("core.hooksPath=/dev/null"))
-        XCTAssertTrue(fetch.contains("--no-recurse-submodules"))
-        XCTAssertTrue(fetch.contains("credential.helper="))
+
+    }
+
+    func testSharedRefVectors() throws {
+        struct Vector: Decodable {
+            let ref: String
+            let valid: Bool
+            let normalized: String
+            let commit: Bool
+        }
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("testdata/repository-refs.json")
+        let vectors = try JSONDecoder().decode([Vector].self, from: Data(contentsOf: url))
+        for vector in vectors {
+            var command = TaskCommand(op: "start")
+            command.repositoryUrl = "https://github.com/org/repo.git"
+            command.network = .filtered
+            command.ref = vector.ref
+            XCTAssertEqual(CommitID.isValid(vector.ref), vector.commit, vector.ref)
+            if vector.valid {
+                guard case .guestClone(let repo) = try TaskSourceResolver.resolve(command) else { return XCTFail(vector.ref) }
+                XCTAssertEqual(repo.ref, vector.normalized, vector.ref)
+            } else {
+                XCTAssertThrowsError(try TaskSourceResolver.resolve(command), vector.ref)
+            }
+        }
     }
 
     func testCredentialSelectsGuestFetchAndRecordOmitsIt() throws {
@@ -55,7 +64,7 @@ final class RepositoryTests: XCTestCase {
             return XCTFail("expected guest fetch")
         }
         XCTAssertEqual(repo.token, "secret-token")
-        let argv = GuestGit.privateFetch(url: repo.url, ref: repo.ref)
+        let argv = GuestGit.fetch(url: repo.url, ref: repo.ref)
         XCTAssertEqual(argv, ["/usr/local/bin/microvm-agent", "fetch", "/workspace", repo.url, ""])
         XCTAssertFalse(argv.joined(separator: "\n").contains("secret-token"))
         XCTAssertEqual(try GuestGit.secretEnv(repo), ["MICROVM_GIT_TOKEN=secret-token"])
@@ -111,7 +120,7 @@ final class RepositoryTests: XCTestCase {
         }
         XCTAssertEqual(repo.kind, "ssh")
         XCTAssertNil(repo.token)
-        let argv = GuestGit.privateFetch(url: repo.url, ref: nil)
+        let argv = GuestGit.fetch(url: repo.url, ref: nil)
         XCTAssertFalse(argv.joined(separator: "\n").contains("id_ed25519"))
         XCTAssertEqual(argv.last, "")
     }
@@ -129,7 +138,7 @@ final class RepositoryTests: XCTestCase {
         guard case .guestClone(let repo) = try TaskSourceResolver.resolve(command) else {
             return XCTFail("expected guest fetch")
         }
-        let argv = GuestGit.privateFetch(url: repo.url, ref: nil).joined(separator: "\n")
+        let argv = GuestGit.fetch(url: repo.url, ref: nil).joined(separator: "\n")
         let env = try GuestGit.secretEnv(repo)
         XCTAssertFalse(argv.contains("secret-key-material"))
         XCTAssertEqual(env, ["MICROVM_SSH_KEY=\(material)"])

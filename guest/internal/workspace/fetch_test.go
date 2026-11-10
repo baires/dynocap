@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -243,4 +244,31 @@ func gitCmd(t *testing.T, dir string, args ...string) {
 
 func shellQuote(path string) string {
 	return "'" + strings.ReplaceAll(path, "'", "'\\''") + "'"
+}
+
+func TestSharedRefVectors(t *testing.T) {
+	raw, err := os.ReadFile("../../../testdata/repository-refs.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var vectors []struct {
+		Ref        string
+		Valid      bool
+		Normalized string
+		Commit     bool
+	}
+	if err := json.Unmarshal(raw, &vectors); err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range vectors {
+		if (ValidateRef(v.Ref) == nil) != v.Valid {
+			t.Errorf("validation %q", v.Ref)
+		}
+		if normalizeRef(v.Ref) != v.Normalized {
+			t.Errorf("normalization %q", v.Ref)
+		}
+		if commitPattern.MatchString(normalizeRef(v.Ref)) != v.Commit {
+			t.Errorf("commit %q", v.Ref)
+		}
+	}
 }

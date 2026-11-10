@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // Fetch clones a repository in the calling process. A token or SSH key stays
@@ -34,6 +35,7 @@ type fetchOptions struct {
 }
 
 func fetchObserved(dest, rawURL, ref, token, sshKey string, opts fetchOptions) (string, string, error) {
+	ref = normalizeRef(ref)
 	parsed, err := ParseRepositoryURL(rawURL)
 	if err != nil {
 		return "", "", err
@@ -308,12 +310,21 @@ func sshUserinfo(raw string) bool {
 	return user != "git"
 }
 
-var refPattern = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 var commitPattern = regexp.MustCompile(`^[0-9a-f]{40}$|^[0-9a-f]{64}$`)
 var userinfoPattern = regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.-]*://[^/\s@]+@`)
 
+func normalizeRef(ref string) string {
+	lower := strings.ToLower(ref)
+	if commitPattern.MatchString(lower) {
+		return lower
+	}
+	return ref
+}
+
 func ValidateRef(ref string) error {
-	if ref == "" || strings.HasPrefix(ref, "-") || strings.HasPrefix(ref, "/") || strings.HasSuffix(ref, "/") || strings.Contains(ref, "..") || !refPattern.MatchString(ref) {
+	if ref == "" || strings.HasPrefix(ref, "-") || strings.HasPrefix(ref, "/") || strings.HasSuffix(ref, "/") || strings.Contains(ref, "..") || strings.ContainsFunc(ref, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r) && !unicode.IsMark(r) && !strings.ContainsRune("._/-", r)
+	}) {
 		return fmt.Errorf("ref must be a branch or tag name")
 	}
 	return nil
