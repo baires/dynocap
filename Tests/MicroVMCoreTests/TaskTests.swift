@@ -13,7 +13,7 @@ final class TaskTests: XCTestCase {
     private func manager(_ home: URL) -> TaskManager {
         TaskManager(
             paths: MicroVMPaths(home: home), arch: "aarch64", boot: { _ in throw MicroVMError("unexpected boot") },
-            execute: { _, _, _, _, _ in throw MicroVMError("unexpected execution") }, destroy: { _ in })
+            execute: { _, _, _, _, _, _ in throw MicroVMError("unexpected execution") }, destroy: { _ in })
     }
     func testUnsupportedSelectionDoesNotAllocate() throws {
         let root = try home()

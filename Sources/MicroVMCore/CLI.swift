@@ -93,8 +93,9 @@ public let helpText = """
     (default ~/.microvm). The CLI starts a per-user daemon if one is not running.
     Network defaults to none (no virtual NIC). nat explicitly enables unrestricted outbound access.
     filtered allows HTTPS only to registry.npmjs.org and, for a repository URL, that URL's host.
-    A repository URL without a credential is cloned inside the guest and requires nat or filtered.
-    --git-token-env or --ssh-key fetches on the host. The credential is not imported.
+    A repository URL is cloned inside the guest and requires nat or filtered.
+    --git-token-env or --ssh-key is held for that guest fetch and is not imported.
+    An ssh URL requires nat.
     TTL defaults to 1800 seconds, including boot; allowed range is 1–86400, with no unlimited mode.
     VMs do not outlive that daemon; the next command reaps leftover records.
 

@@ -96,7 +96,7 @@ export function createServer(options: ToolOptions = {}): McpServer {
     "microvm_task_start",
     {
       description:
-        "Start a Node task from a local directory or a repository URL. A URL without gitToken or sshKeyPath is cloned in the guest and requires nat or filtered. A token or SSH key fetches on the host and is not imported. Results require finish before TTL.",
+        "Start a Node task from a local directory or a repository URL. A URL is cloned in the guest and requires nat or filtered. A token or SSH key is held for that guest fetch and is not imported. An ssh URL requires nat. Results require finish before TTL.",
       inputSchema: {
         projectPath: z.string().optional(),
         repositoryUrl: z.string().optional(),
@@ -105,7 +105,7 @@ export function createServer(options: ToolOptions = {}): McpServer {
           .string()
           .optional()
           .describe(
-            "HTTPS token. Used only for the host fetch and not returned or imported."
+            "HTTPS token. Held in daemon memory for the guest fetch and not returned or imported."
           ),
         sshKeyPath: z.string().optional(),
         runtimes: z

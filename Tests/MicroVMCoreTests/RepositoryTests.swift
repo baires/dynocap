@@ -43,14 +43,26 @@ final class RepositoryTests: XCTestCase {
         XCTAssertTrue(fetch.contains("credential.helper="))
     }
 
-    func testCredentialSelectsHostFetchAndRecordOmitsIt() throws {
+    func testCredentialSelectsGuestFetchAndRecordOmitsIt() throws {
         var command = TaskCommand(op: "start")
         command.repositoryUrl = "https://github.com/org/private.git"
         command.gitToken = "secret-token"
-        guard case .hostFetch(let repo) = try TaskSourceResolver.resolve(command) else {
-            return XCTFail("expected host fetch")
+        XCTAssertThrowsError(try TaskSourceResolver.resolve(command)) { error in
+            XCTAssertEqual(String(describing: error), "repository fetch requires --network nat")
+        }
+        command.network = .filtered
+        guard case .guestClone(let repo) = try TaskSourceResolver.resolve(command) else {
+            return XCTFail("expected guest fetch")
         }
         XCTAssertEqual(repo.token, "secret-token")
+        let argv = GuestGit.privateFetch(url: repo.url, ref: repo.ref)
+        XCTAssertEqual(argv, ["/usr/local/bin/microvm-agent", "fetch", "/workspace", repo.url, ""])
+        XCTAssertFalse(argv.joined(separator: "\n").contains("secret-token"))
+        XCTAssertEqual(try GuestGit.secretEnv(repo), ["MICROVM_GIT_TOKEN=secret-token"])
+        let console = "Authorization: Bearer secret-token\nfatal: authentication failed"
+        XCTAssertEqual(
+            redactSecrets(console, secrets: ["secret-token"]),
+            "Authorization: Bearer <redacted>\nfatal: authentication failed")
         var record = TaskRecord(
             id: "task-test", phase: "running", runtimeDigest: "digest", createdAtUnix: 1, expiresAtUnix: 2,
             sourceUrl: repo.url, network: .none)
@@ -86,11 +98,47 @@ final class RepositoryTests: XCTestCase {
             XCTAssertEqual(String(describing: error), "ssh repository requires --ssh-key")
         }
         ssh.sshKeyPath = "/tmp/id_ed25519"
-        guard case .hostFetch(let repo) = try? TaskSourceResolver.resolve(ssh) else {
-            return XCTFail("expected ssh host fetch")
+        XCTAssertThrowsError(try TaskSourceResolver.resolve(ssh)) { error in
+            XCTAssertEqual(String(describing: error), "repository fetch requires --network nat")
+        }
+        ssh.network = .filtered
+        XCTAssertThrowsError(try TaskSourceResolver.resolve(ssh)) { error in
+            XCTAssertEqual(String(describing: error), "an ssh repository requires --network nat")
+        }
+        ssh.network = .nat
+        guard case .guestClone(let repo) = try? TaskSourceResolver.resolve(ssh) else {
+            return XCTFail("expected ssh guest fetch")
         }
         XCTAssertEqual(repo.kind, "ssh")
         XCTAssertNil(repo.token)
+        let argv = GuestGit.privateFetch(url: repo.url, ref: nil)
+        XCTAssertFalse(argv.joined(separator: "\n").contains("id_ed25519"))
+        XCTAssertEqual(argv.last, "")
+    }
+
+    func testSSHKeyBytesStayInTheFetchEnvironment() throws {
+        let key = FileManager.default.temporaryDirectory.appendingPathComponent("microvm-key-" + UUID().uuidString)
+        let material = "-----BEGIN OPENSSH PRIVATE KEY-----\nsecret-key-material\n-----END OPENSSH PRIVATE KEY-----\n"
+        try Data(material.utf8).write(to: key)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: key.path)
+        defer { try? FileManager.default.removeItem(at: key) }
+        var command = TaskCommand(op: "start")
+        command.repositoryUrl = "git@github.com:org/private.git"
+        command.sshKeyPath = key.path
+        command.network = .nat
+        guard case .guestClone(let repo) = try TaskSourceResolver.resolve(command) else {
+            return XCTFail("expected guest fetch")
+        }
+        let argv = GuestGit.privateFetch(url: repo.url, ref: nil).joined(separator: "\n")
+        let env = try GuestGit.secretEnv(repo)
+        XCTAssertFalse(argv.contains("secret-key-material"))
+        XCTAssertEqual(env, ["MICROVM_SSH_KEY=\(material)"])
+        let record = TaskRecord(
+            id: "task-test", phase: "starting", runtimeDigest: "digest", createdAtUnix: 1, expiresAtUnix: 2,
+            sourceUrl: repo.url, network: .nat)
+        let encoded = String(data: try JSONEncoder().encode(record), encoding: .utf8) ?? ""
+        XCTAssertFalse(encoded.contains("secret-key-material"))
+        XCTAssertFalse(encoded.contains(key.path))
     }
 
     func testCLIReadsTokenFromTheNamedVariable() throws {

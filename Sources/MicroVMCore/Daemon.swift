@@ -21,7 +21,7 @@ public final class Daemon {
     private var ttlTimer: DispatchSourceTimer?
     private lazy var tasks = TaskManager(
         paths: paths, arch: guestArch, boot: { try self.boot($0) },
-        execute: { try self.executeInternal($0, $1, input: $2, output: $3, limit: $4) }, destroy: { try self.destroyVM($0) })
+        execute: { try self.executeInternal($0, $1, env: $2, input: $3, output: $4, limit: $5) }, destroy: { try self.destroyVM($0) })
 
     public init(home: URL, backend: VMBackend, guestArch: String = HostArch.guest) {
         self.paths = MicroVMPaths(home: home)
@@ -517,7 +517,8 @@ public final class Daemon {
     }
 
     private func executeInternal(
-        _ name: String, _ argv: [String], input: URL?, output: URL?, limit: Int64, requireOffline: Bool = false
+        _ name: String, _ argv: [String], env: [String] = [], input: URL? = nil, output: URL? = nil, limit: Int64,
+        requireOffline: Bool = false
     ) throws -> Data {
         let lifecycle = lifecycle(name)
         lifecycle.lock.lock()
@@ -533,7 +534,7 @@ public final class Daemon {
         let id = nextExecID
         lock.unlock()
         let timeout = Int(min(300, max(1, (record.createdAtUnix + Int64(record.ttlSeconds ?? 1800)) - unixNow())))
-        var request = ExecRequest(name: name, id: id, argv: argv, env: [], cwd: "/", timeoutSeconds: timeout)
+        var request = ExecRequest(name: name, id: id, argv: argv, env: env, cwd: "/", timeoutSeconds: timeout)
         request.stdinFile = input
         let state = NSLock()
         let sem = DispatchSemaphore(value: 0)
@@ -603,8 +604,15 @@ public final class Daemon {
         lifecycle.lock.unlock()
         state.lock()
         defer { state.unlock() }
-        if let problem { throw MicroVMError(problem) }
-        return data
+        let secrets = env.compactMap { entry -> String? in
+            guard let eq = entry.firstIndex(of: "="), eq != entry.startIndex else { return nil }
+            let value = String(entry[entry.index(after: eq)...])
+            return value.count >= 4 ? value : nil
+        }
+        if let problem { throw MicroVMError(redactSecrets(problem, secrets: secrets)) }
+        guard !secrets.isEmpty, var text = String(data: data, encoding: .utf8) else { return data }
+        text = redactSecrets(text, secrets: secrets)
+        return Data(text.utf8)
     }
 
     private func transfer(_ command: TransferCommand) throws {

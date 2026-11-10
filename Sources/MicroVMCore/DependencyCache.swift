@@ -19,12 +19,12 @@ enum DependencyCache {
         let archive = home.appendingPathComponent("npm-cache/\(key).tar")
         guard FileManager.default.fileExists(atPath: archive.path) else { return }
         do {
-            _ = try execute(id, ["/usr/local/bin/microvm-agent", "cache-unpack", "/work/npm-cache/_cacache"], archive, nil, 2 << 30)
-            _ = try execute(id, ["npm", "cache", "verify", "--cache", "/work/npm-cache"], nil, nil, 1 << 20)
+            _ = try execute(id, ["/usr/local/bin/microvm-agent", "cache-unpack", "/work/npm-cache/_cacache"], [], archive, nil, 2 << 30)
+            _ = try execute(id, ["npm", "cache", "verify", "--cache", "/work/npm-cache"], [], nil, nil, 1 << 20)
             try FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: archive.path)
         } catch {
             try? FileManager.default.removeItem(at: archive)
-            _ = try execute(id, ["sh", "-c", "rm -rf /work/npm-cache/_cacache"], nil, nil, 1 << 20)
+            _ = try execute(id, ["sh", "-c", "rm -rf /work/npm-cache/_cacache"], [], nil, nil, 1 << 20)
         }
     }
     static func compatibleCommand(argv: [String], env: [String]) -> Bool {
@@ -39,10 +39,10 @@ enum DependencyCache {
         let fm = FileManager.default
         let directory = home.appendingPathComponent("npm-cache")
         try fm.createDirectory(at: directory, withIntermediateDirectories: true)
-        _ = try execute(id, ["npm", "cache", "verify", "--cache", "/work/npm-cache"], nil, nil, 1 << 20)
+        _ = try execute(id, ["npm", "cache", "verify", "--cache", "/work/npm-cache"], [], nil, nil, 1 << 20)
         let stage = directory.appendingPathComponent("\(key).partial")
         defer { try? fm.removeItem(at: stage) }
-        _ = try execute(id, ["/usr/local/bin/microvm-agent", "cache-pack", "/work/npm-cache/_cacache"], nil, stage, 2 << 30)
+        _ = try execute(id, ["/usr/local/bin/microvm-agent", "cache-pack", "/work/npm-cache/_cacache"], [], nil, stage, 2 << 30)
         let files = try fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.contentModificationDateKey]).filter {
             $0.pathExtension == "tar"
         }.sorted {

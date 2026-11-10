@@ -1,9 +1,13 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 enum TaskSource: Equatable {
     case directory(String)
     case guestClone(RepositorySource)
-    case hostFetch(RepositorySource)
 }
 
 struct RepositorySource: Equatable {
@@ -43,12 +47,15 @@ enum TaskSourceResolver {
         let repo = RepositorySource(url: parsed.url, ref: ref, token: token, sshKeyPath: key, kind: parsed.kind)
         if token == nil && key == nil {
             guard parsed.kind == "https" else { throw MicroVMError("ssh repository requires --ssh-key") }
-            guard command.network == .nat || command.network == .filtered else {
-                throw MicroVMError("repository fetch requires --network nat")
-            }
-            return .guestClone(repo)
         }
-        return .hostFetch(repo)
+        guard command.network == .nat || command.network == .filtered else {
+            throw MicroVMError("repository fetch requires --network nat")
+        }
+        // Filtered egress is TCP 443 only, so an SSH fetch cannot leave the guest on that mode.
+        if key != nil && command.network != .nat {
+            throw MicroVMError("an ssh repository requires --network nat")
+        }
+        return .guestClone(repo)
     }
 }
 
@@ -113,25 +120,6 @@ func redactSecrets(_ message: String, secrets: [String]) -> String {
     return result
 }
 
-enum RepositoryFetch {
-    static func checkout(_ repo: RepositorySource, dest: URL) throws -> String {
-        var env = ProcessInfo.processInfo.environment
-        env["MICROVM_GIT_TOKEN"] = repo.token ?? ""
-        env["MICROVM_SSH_KEY"] = repo.sshKeyPath ?? ""
-        let data: Data
-        do {
-            data = try HostTree.run("microvm-workspace", ["fetch", dest.path, repo.url, repo.ref ?? ""], environment: env)
-        } catch let error as MicroVMError {
-            throw MicroVMError(redactSecrets(error.message, secrets: [repo.token ?? "", repo.sshKeyPath ?? ""]))
-        } catch {
-            throw MicroVMError(redactSecrets(String(describing: error), secrets: [repo.token ?? "", repo.sshKeyPath ?? ""]))
-        }
-        let revision = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard CommitID.isValid(revision) else { throw MicroVMError("git did not return a commit") }
-        return revision
-    }
-}
-
 enum GuestGit {
     private static let lock = ["GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_TERMINAL_PROMPT=0"]
     private static let config = [
@@ -171,5 +159,40 @@ enum GuestGit {
             ["env"] + lock + ["git", "-C", "/workspace", "-c", "core.hooksPath=/dev/null", "config", "--local", "core.hooksPath", "/dev/null"],
             ["env"] + lock + ["git", "-C", "/workspace", "-c", "core.hooksPath=/dev/null", "remote", "set-url", "origin", url],
         ]
+    }
+
+    /// One guest exec. The URL and ref are arguments. The credential is not.
+    static func privateFetch(url: String, ref: String?) -> [String] {
+        ["/usr/local/bin/microvm-agent", "fetch", "/workspace", url, ref ?? ""]
+    }
+
+    /// Token or key bytes for the one fetch exec. Callers do not store the result.
+    static func secretEnv(_ repo: RepositorySource) throws -> [String] {
+        if let token = repo.token, !token.isEmpty {
+            let entry = "MICROVM_GIT_TOKEN=\(token)"
+            guard entry.utf8.count <= 32 << 10 else { throw MicroVMError("git token is too large") }
+            return [entry]
+        }
+        if let path = repo.sshKeyPath, !path.isEmpty {
+            try validateSSHKey(path)
+            let data = try Data(contentsOf: URL(fileURLWithPath: path))
+            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else {
+                throw MicroVMError("ssh key is not a file")
+            }
+            let entry = "MICROVM_SSH_KEY=\(text)"
+            guard entry.utf8.count <= 32 << 10 else { throw MicroVMError("ssh key is too large") }
+            return [entry]
+        }
+        return []
+    }
+}
+
+private func validateSSHKey(_ path: String) throws {
+    var info = stat()
+    guard lstat(path, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else {
+        throw MicroVMError("ssh key is not a file")
+    }
+    if info.st_mode & 0o077 != 0 {
+        throw MicroVMError("ssh key must be readable only by its owner")
     }
 }

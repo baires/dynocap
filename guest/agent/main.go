@@ -13,6 +13,15 @@ import (
 )
 
 func main() {
+	if len(os.Args) == 5 && os.Args[1] == "fetch" {
+		revision, err := workspace.Fetch(os.Args[2], os.Args[3], os.Args[4], os.Getenv("MICROVM_GIT_TOKEN"), os.Getenv("MICROVM_SSH_KEY"))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Fprint(os.Stdout, revision)
+		return
+	}
 	if len(os.Args) == 3 && (os.Args[1] == "pack" || os.Args[1] == "unpack" || os.Args[1] == "cache-pack" || os.Args[1] == "cache-unpack" || os.Args[1] == "freeze" || os.Args[1] == "task-pack") {
 		var err error
 		switch os.Args[1] {

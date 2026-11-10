@@ -13,109 +13,236 @@ import (
 	"strings"
 )
 
-// Fetch clones a repository on the host. The token and SSH key stay in this
-// process. The returned checkout has had credential material removed.
+// Fetch clones a repository in the calling process. A token or SSH key stays
+// in memory for that clone. Git receives the clean URL only. The returned
+// checkout has had credential material removed.
 func Fetch(dest, rawURL, ref, token, sshKey string) (string, error) {
-	return fetch(dest, rawURL, ref, token, sshKey, false)
+	revision, _, err := fetchObserved(dest, rawURL, ref, token, sshKey, fetchOptions{})
+	return revision, err
 }
 
 func fetch(dest, rawURL, ref, token, sshKey string, allowFile bool) (string, error) {
+	revision, _, err := fetchObserved(dest, rawURL, ref, token, sshKey, fetchOptions{allowFile: allowFile})
+	return revision, err
+}
+
+// fetchOptions.caFile trusts one local HTTPS fixture. Production fetches leave it empty.
+type fetchOptions struct {
+	allowFile bool
+	caFile    string
+}
+
+func fetchObserved(dest, rawURL, ref, token, sshKey string, opts fetchOptions) (string, string, error) {
 	parsed, err := ParseRepositoryURL(rawURL)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	if parsed.Kind == "file" && !allowFile {
-		return "", fmt.Errorf("repository URL must be https or ssh")
+	if parsed.Kind == "file" && !opts.allowFile {
+		return "", "", fmt.Errorf("repository URL must be https or ssh")
 	}
 	if ref != "" {
 		if err := ValidateRef(ref); err != nil {
-			return "", err
+			return "", "", err
 		}
 	}
 	if token != "" && sshKey != "" {
-		return "", fmt.Errorf("pass a token or an ssh key, not both")
+		return "", "", fmt.Errorf("pass a token or an ssh key, not both")
 	}
 	if token != "" && parsed.Kind != "https" {
-		return "", fmt.Errorf("an https token cannot fetch an ssh repository")
+		return "", "", fmt.Errorf("an https token cannot fetch an ssh repository")
 	}
-	if sshKey != "" && parsed.Kind != "ssh" {
-		return "", fmt.Errorf("an ssh key cannot fetch an https repository")
+	if sshKey != "" && parsed.Kind != "ssh" && parsed.Kind != "file" {
+		return "", "", fmt.Errorf("an ssh key cannot fetch an https repository")
 	}
-	if sshKey != "" {
+	identity := sshKey
+	var closeIdentity func()
+	if sshKey != "" && sshKeyIsMaterial(sshKey) {
+		path, cleanup, err := exposeSSHKey(sshKey)
+		if err != nil {
+			return "", "", err
+		}
+		identity = path
+		closeIdentity = cleanup
+	} else if sshKey != "" {
 		info, err := os.Lstat(sshKey)
 		if err != nil || !info.Mode().IsRegular() {
-			return "", fmt.Errorf("ssh key is not a file")
+			return "", "", fmt.Errorf("ssh key is not a file")
 		}
 		if info.Mode().Perm()&0077 != 0 {
-			return "", fmt.Errorf("ssh key must be readable only by its owner")
+			return "", "", fmt.Errorf("ssh key must be readable only by its owner")
 		}
+	}
+	if closeIdentity != nil {
+		defer closeIdentity()
 	}
 	scripts, err := os.MkdirTemp("", "microvm-fetch-")
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	defer os.RemoveAll(scripts)
 	extra := map[string]string{}
+	var configKeys, configValues []string
 	if token != "" {
-		askpass := filepath.Join(scripts, "askpass")
-		if err := writeAskPass(askpass); err != nil {
-			return "", err
+		// The header is process configuration. It is not an argument and not a file.
+		configKeys = append(configKeys, "http.extraHeader")
+		configValues = append(configValues, "Authorization: Bearer "+token)
+	}
+	if opts.caFile != "" {
+		configKeys = append(configKeys, "http.sslCAInfo")
+		configValues = append(configValues, opts.caFile)
+	}
+	if len(configKeys) > 0 {
+		extra["GIT_CONFIG_COUNT"] = fmt.Sprintf("%d", len(configKeys))
+		for i := range configKeys {
+			extra[fmt.Sprintf("GIT_CONFIG_KEY_%d", i)] = configKeys[i]
+			extra[fmt.Sprintf("GIT_CONFIG_VALUE_%d", i)] = configValues[i]
 		}
-		extra["GIT_ASKPASS"] = askpass
-		extra["SSH_ASKPASS"] = askpass
-		extra["MICROVM_GIT_TOKEN"] = token
 	}
 	if sshKey != "" {
 		wrapper := filepath.Join(scripts, "ssh")
 		if err := writeSSHWrapper(wrapper); err != nil {
-			return "", err
+			return "", "", err
 		}
 		known := filepath.Join(scripts, "known_hosts")
 		if err := os.WriteFile(known, nil, 0600); err != nil {
-			return "", err
+			return "", "", err
 		}
+		// identity is a path or a memfd. The key bytes are not in this environment.
 		extra["GIT_SSH_COMMAND"] = wrapper
-		extra["MICROVM_SSH_KEY"] = sshKey
+		extra["MICROVM_SSH_KEY"] = identity
 		extra["MICROVM_KNOWN_HOSTS"] = known
 	}
 	env := cleanEnv(scripts, extra)
 	if err := os.MkdirAll(filepath.Dir(dest), 0700); err != nil {
-		return "", err
+		return "", "", err
 	}
 	bin, err := hostGit()
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	clone := exec.Command(bin, cloneArgs(parsed.URL, dest, ref, allowFile)...)
-	clone.Env = env
-	if out, err := clone.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("git clone failed: %s", redact(string(out), token, sshKey))
+	var console bytes.Buffer
+	run := func(args ...string) error {
+		cmd := exec.Command(bin, args...)
+		cmd.Env = env
+		cmd.Stdout = &console
+		cmd.Stderr = &console
+		return cmd.Run()
 	}
-	revision, err := gitOutput(dest, env, "rev-parse", "HEAD")
-	if err != nil {
-		return "", err
+	failed := true
+	defer func() {
+		if failed {
+			_ = os.RemoveAll(dest)
+		}
+	}()
+	if err := run(cloneArgs(parsed.URL, dest, ref, opts.allowFile)...); err != nil {
+		return "", console.String(), fmt.Errorf("git clone failed: %s", redact(console.String(), token, sshKey))
 	}
-	revision = strings.TrimSpace(revision)
-	if !commitPattern.MatchString(revision) {
-		return "", fmt.Errorf("git did not return a commit")
-	}
-	branch := ""
-	if out, err := gitOutput(dest, env, "symbolic-ref", "--quiet", "HEAD"); err == nil {
-		name := strings.TrimPrefix(strings.TrimSpace(out), "refs/heads/")
-		if ValidateRef(name) == nil {
-			branch = name
+	pinned := commitPattern.MatchString(ref)
+	if pinned {
+		args := append([]string{"-C", dest}, lockedConfig()...)
+		args = append(args, "fetch", "--no-recurse-submodules", "origin", ref)
+		if err := run(args...); err != nil {
+			return "", console.String(), fmt.Errorf("git fetch failed: %s", redact(console.String(), token, sshKey))
 		}
 	}
-	detach := exec.Command(bin, append([]string{"-C", dest}, lockedConfig()...)...)
-	detach.Args = append(detach.Args, "checkout", "--detach", revision)
-	detach.Env = env
-	if out, err := detach.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("git checkout failed: %s", redact(string(out), token, sshKey))
+	branch := ""
+	if !pinned {
+		symArgs := append([]string{"-C", dest}, lockedConfig()...)
+		symArgs = append(symArgs, "symbolic-ref", "--quiet", "HEAD")
+		sym := exec.Command(bin, symArgs...)
+		sym.Env = env
+		if out, err := sym.Output(); err == nil {
+			name := strings.TrimPrefix(strings.TrimSpace(string(out)), "refs/heads/")
+			if ValidateRef(name) == nil {
+				branch = name
+			}
+		}
+	}
+	revision := ref
+	if !pinned {
+		revArgs := append([]string{"-C", dest}, lockedConfig()...)
+		revArgs = append(revArgs, "rev-parse", "HEAD")
+		rev := exec.Command(bin, revArgs...)
+		rev.Env = env
+		out, err := rev.Output()
+		console.Write(out)
+		if err != nil {
+			return "", console.String(), fmt.Errorf("git rev-parse failed")
+		}
+		revision = strings.TrimSpace(string(out))
+		if !commitPattern.MatchString(revision) {
+			return "", console.String(), fmt.Errorf("git did not return a commit")
+		}
+	}
+	detachArgs := append([]string{"-C", dest}, lockedConfig()...)
+	detachArgs = append(detachArgs, "checkout", "--detach", revision)
+	if err := run(detachArgs...); err != nil {
+		return "", console.String(), fmt.Errorf("git checkout failed: %s", redact(console.String(), token, sshKey))
+	}
+	revArgs := append([]string{"-C", dest}, lockedConfig()...)
+	revArgs = append(revArgs, "rev-parse", "HEAD")
+	rev := exec.Command(bin, revArgs...)
+	rev.Env = env
+	out, err := rev.Output()
+	console.Write(out)
+	if err != nil {
+		return "", console.String(), fmt.Errorf("git rev-parse failed")
+	}
+	revision = strings.TrimSpace(string(out))
+	if !commitPattern.MatchString(revision) || (pinned && revision != ref) {
+		return "", console.String(), fmt.Errorf("git did not return a commit")
 	}
 	if err := Sanitize(dest, parsed.URL, branch, token); err != nil {
-		return "", err
+		return "", console.String(), fmt.Errorf("%s", redact(err.Error(), token, sshKey))
 	}
-	return revision, nil
+	if escapedSecret(scripts, dest, token, sshKey) {
+		return "", console.String(), fmt.Errorf("credential material escaped the fetch process")
+	}
+	failed = false
+	return revision, console.String(), nil
+}
+
+func sshKeyIsMaterial(key string) bool {
+	return strings.Contains(key, "PRIVATE KEY") || strings.HasPrefix(key, "-----BEGIN")
+}
+
+func escapedSecret(home, dest, token, key string) bool {
+	secrets := []string{}
+	if len(token) >= 4 {
+		secrets = append(secrets, token)
+	}
+	if sshKeyIsMaterial(key) && len(key) >= 4 {
+		secrets = append(secrets, key)
+	}
+	if len(secrets) == 0 {
+		return false
+	}
+	for _, root := range []string{home, dest} {
+		found := false
+		_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() || found {
+				return nil
+			}
+			if !d.Type().IsRegular() {
+				return nil
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return nil
+			}
+			for _, secret := range secrets {
+				if bytes.Contains(data, []byte(secret)) {
+					found = true
+					return fmt.Errorf("stop")
+				}
+			}
+			return nil
+		})
+		if found {
+			return true
+		}
+	}
+	return false
 }
 
 type ParsedRepository struct {
@@ -206,7 +333,11 @@ func cloneArgs(url, dest, ref string, allowFile bool) []string {
 		"clone", "--no-recurse-submodules",
 	}
 	if ref != "" {
-		args = append(args, "--branch", ref)
+		if commitPattern.MatchString(ref) {
+			args = append(args, "--no-checkout")
+		} else {
+			args = append(args, "--branch", ref)
+		}
 	}
 	args = append(args, "--", url, dest)
 	return args
