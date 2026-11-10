@@ -637,7 +637,8 @@ func TestNestedGitMetadataIsStripped(t *testing.T) {
 	must(t, os.MkdirAll(filepath.Join(module, "hooks"), 0755))
 	must(t, os.MkdirAll(filepath.Join(module, "objects", "info"), 0755))
 	must(t, os.WriteFile(filepath.Join(module, "hooks", "post-checkout"), []byte("#!/bin/sh\necho nested-hook\n"), 0755))
-	must(t, os.WriteFile(filepath.Join(module, "config"), []byte("[core]\n\trepositoryformatversion = 0\n[credential]\n\thelper = store\n[credential \"https://example.invalid\"]\n\thelper = osxkeychain\n"), 0644))
+	must(t, os.WriteFile(filepath.Join(module, "config"), []byte("[core]\n\trepositoryformatversion = 0\n[remote \"origin\"]\n\turl = https://example.invalid/repo.git\n[branch \"main\"]\n\tremote = origin\n\tmerge = refs/heads/main\n[credential]\n\thelper = store\n[credential \"https://example\"]\n\thelper = osxkeychain\n[credential] # keep\n\thelper = commented-helper\n[credential] ; keep\n\thelper = semicolon-helper\n"), 0644))
+	must(t, os.WriteFile(filepath.Join(gitDir, "config.worktree"), []byte("[credential] # keep\n\thelper = worktree-helper\n"), 0644))
 	must(t, os.MkdirAll(filepath.Join(gitDir, "objects", "info"), 0755))
 	must(t, os.WriteFile(filepath.Join(gitDir, "objects", "info", "http-alternates"), []byte("https://example.invalid/objects\n"), 0644))
 	must(t, os.WriteFile(filepath.Join(module, "objects", "info", "alternates"), []byte("/host/objects\n"), 0644))
@@ -668,14 +669,21 @@ func TestNestedGitMetadataIsStripped(t *testing.T) {
 	if bytes.Contains(bytes.ToLower(nested), []byte("helper")) {
 		t.Fatalf("nested config:\n%s", nested)
 	}
-	if !bytes.Contains(nested, []byte("repositoryformatversion = 0")) {
+	if !bytes.Contains(nested, []byte("repositoryformatversion = 0")) || !bytes.Contains(nested, []byte("[credential] # keep")) || !bytes.Contains(nested, []byte("[remote \"origin\"]")) || !bytes.Contains(nested, []byte("[branch \"main\"]")) || !bytes.Contains(nested, []byte("[credential \"https://example\"]")) {
 		t.Fatalf("nested config:\n%s", nested)
+	}
+	worktree, err := os.ReadFile(filepath.Join(destGit, "config.worktree"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(bytes.ToLower(worktree), []byte("helper")) || !bytes.Contains(worktree, []byte("[credential] # keep")) {
+		t.Fatalf("config.worktree:\n%s", worktree)
 	}
 	var packed bytes.Buffer
 	if err := PackGit(dest, &packed, Limit); err != nil {
 		t.Fatal(err)
 	}
-	if bytes.Contains(packed.Bytes(), []byte("nested-hook")) || bytes.Contains(packed.Bytes(), []byte("osxkeychain")) || bytes.Contains(packed.Bytes(), []byte("http-alternates")) || bytes.Contains(packed.Bytes(), []byte("/host/objects")) {
+	if bytes.Contains(packed.Bytes(), []byte("nested-hook")) || bytes.Contains(packed.Bytes(), []byte("osxkeychain")) || bytes.Contains(packed.Bytes(), []byte("commented-helper")) || bytes.Contains(packed.Bytes(), []byte("semicolon-helper")) || bytes.Contains(packed.Bytes(), []byte("worktree-helper")) || bytes.Contains(packed.Bytes(), []byte("http-alternates")) || bytes.Contains(packed.Bytes(), []byte("/host/objects")) {
 		t.Fatal("unsafe metadata packed")
 	}
 }
@@ -713,6 +721,91 @@ func TestPackGitRejectsRemainingNestedMetadata(t *testing.T) {
 				must(t, os.WriteFile(filepath.Join(gitDir, "modules", "vendor", "config"), []byte("[credential]\n\thelper = store\n"), 0644))
 			},
 		},
+		{
+			name: "commented-credential-header",
+			plant: func(gitDir string) {
+				must(t, os.WriteFile(filepath.Join(gitDir, "config"), []byte("[credential] # keep\n\thelper = osxkeychain\n[credential] ; keep\n\thelper = store\n"), 0644))
+			},
+		},
+		{
+			name: "config.worktree",
+			plant: func(gitDir string) {
+				must(t, os.WriteFile(filepath.Join(gitDir, "config.worktree"), []byte("[credential] # keep\n\thelper = osxkeychain\n"), 0644))
+			},
+		},
+		{
+			name: "include",
+			plant: func(gitDir string) {
+				must(t, os.WriteFile(filepath.Join(gitDir, "config"), []byte("[include] # keep\n\tpath = ../secret-config\n"), 0644))
+			},
+		},
+		{
+			name: "includeIf",
+			plant: func(gitDir string) {
+				must(t, os.WriteFile(filepath.Join(gitDir, "config"), []byte("[includeIf \"gitdir:~/work\"] ; keep\n\tpath = ../secret-config\n"), 0644))
+			},
+		},
+		{
+			name: "include.path",
+			plant: func(gitDir string) {
+				must(t, os.WriteFile(filepath.Join(gitDir, "config"), []byte("include.path = ../secret-config\n"), 0644))
+			},
+		},
+		{
+			name: "extensions.worktreeConfig",
+			plant: func(gitDir string) {
+				must(t, os.WriteFile(filepath.Join(gitDir, "config"), []byte("[extensions] # keep\n\tworktreeConfig = true\n"), 0644))
+				must(t, os.WriteFile(filepath.Join(gitDir, "config.worktree"), []byte("[credential]\n\thelper = osxkeychain\n"), 0644))
+			},
+		},
+		{
+			name: "credential-header-extra",
+			plant: func(gitDir string) {
+				must(t, os.WriteFile(filepath.Join(gitDir, "config"), []byte("[credential] extra\n[credential]\textra\n"), 0644))
+			},
+		},
+		{
+			name: "same-line-helper",
+			plant: func(gitDir string) {
+				must(t, os.WriteFile(filepath.Join(gitDir, "config"), []byte("[credential] helper = store\n"), 0644))
+			},
+		},
+		{
+			name: "same-line-helper-tight",
+			plant: func(gitDir string) {
+				must(t, os.WriteFile(filepath.Join(gitDir, "config"), []byte("[credential]helper=store\n"), 0644))
+			},
+		},
+		{
+			name: "same-line-helper-tab",
+			plant: func(gitDir string) {
+				must(t, os.WriteFile(filepath.Join(gitDir, "config"), []byte("[credential]\thelper = store\n"), 0644))
+			},
+		},
+		{
+			name: "same-line-helper-quoted",
+			plant: func(gitDir string) {
+				must(t, os.WriteFile(filepath.Join(gitDir, "config"), []byte("[credential] helper = \"store\"\n"), 0644))
+			},
+		},
+		{
+			name: "same-line-worktreeConfig",
+			plant: func(gitDir string) {
+				must(t, os.WriteFile(filepath.Join(gitDir, "config"), []byte("[extensions] worktreeConfig\n"), 0644))
+			},
+		},
+		{
+			name: "bare-worktreeConfig",
+			plant: func(gitDir string) {
+				must(t, os.WriteFile(filepath.Join(gitDir, "config"), []byte("[extensions]\n\tworktreeConfig\n"), 0644))
+			},
+		},
+		{
+			name: "unrecognized",
+			plant: func(gitDir string) {
+				must(t, os.WriteFile(filepath.Join(gitDir, "config"), []byte("[core]\n\tthis is not a key\n"), 0644))
+			},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -724,6 +817,52 @@ func TestPackGitRejectsRemainingNestedMetadata(t *testing.T) {
 			var packed bytes.Buffer
 			if err := PackGit(root, &packed, Limit); err == nil {
 				t.Fatal("packed unsafe history")
+			}
+		})
+	}
+}
+
+func TestImportRejectsIncludeAndWorktreeConfig(t *testing.T) {
+	cases := []struct {
+		name string
+		want string
+		add  string
+	}{
+		{name: "include", want: "include", add: "[include] # keep\n\tpath = ../secret-config\n"},
+		{name: "includeIf", want: "include", add: "[includeIf \"gitdir:~/work\"] ; keep\n\tpath = ../secret-config\n"},
+		{name: "include.path", want: "include", add: "include.path = ../secret-config\n"},
+		{name: "extensions.worktreeConfig", want: "extensions.worktreeConfig", add: "[extensions] # keep\n\tworktreeConfig = true\n"},
+		{name: "bare-worktreeConfig", want: "extensions.worktreeConfig", add: "[extensions]\n\tworktreeConfig\n"},
+		{name: "unrecognized", want: "unrecognized", add: "this is not a key\n"},
+		{name: "same-line-helper", want: "unrecognized", add: "[credential] helper = store\n"},
+		{name: "same-line-helper-tight", want: "unrecognized", add: "[credential]helper=store\n"},
+		{name: "same-line-helper-tab", want: "unrecognized", add: "[credential]\thelper = store\n"},
+		{name: "same-line-helper-quoted", want: "unrecognized", add: "[credential] helper = \"store\"\n"},
+		{name: "same-line-worktreeConfig", want: "unrecognized", add: "[extensions] worktreeConfig\n"},
+		{name: "credential-header-extra", want: "unrecognized", add: "[credential] extra\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			source := t.TempDir()
+			gitCmd(t, source, "init", "-b", "main")
+			must(t, os.WriteFile(filepath.Join(source, "README"), []byte("hello\n"), 0644))
+			gitCmd(t, source, "add", "README")
+			gitCmd(t, source, "commit", "-m", "initial")
+			gitDir := filepath.Join(source, ".git")
+			cfg, err := os.ReadFile(filepath.Join(gitDir, "config"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			must(t, os.WriteFile(filepath.Join(gitDir, "config"), append(cfg, []byte(tc.add)...), 0644))
+			must(t, os.WriteFile(filepath.Join(gitDir, "config.worktree"), []byte("[credential] # keep\n\thelper = osxkeychain\n"), 0644))
+			must(t, os.WriteFile(filepath.Join(gitDir, "secret-config"), []byte("[credential]\n\thelper = osxkeychain\n"), 0644))
+			before := treeDigest(t, source)
+			err = ImportGit(source, filepath.Join(t.TempDir(), "history"))
+			if err == nil || errors.Is(err, ErrNoGit) || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("got %v", err)
+			}
+			if treeDigest(t, source) != before {
+				t.Fatal("source checkout changed")
 			}
 		})
 	}

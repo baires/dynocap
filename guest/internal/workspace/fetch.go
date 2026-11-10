@@ -278,6 +278,9 @@ func Sanitize(root, cleanURL, branch, token string) error {
 	if branch != "" {
 		fmt.Fprintf(&config, "[branch \"%s\"]\n\tremote = origin\n\tmerge = refs/heads/%s\n", branch, branch)
 	}
+	if err := scrubCopiedGit(gitDir); err != nil {
+		return err
+	}
 	if err := os.WriteFile(filepath.Join(gitDir, "config"), []byte(config.String()), 0644); err != nil {
 		return err
 	}
@@ -285,14 +288,12 @@ func Sanitize(root, cleanURL, branch, token string) error {
 		return err
 	}
 	_ = os.Remove(filepath.Join(gitDir, "objects", "info", "alternates"))
-	if err := scrubCopiedGit(gitDir); err != nil {
-		return err
-	}
 	return scrubMetadata(gitDir, token)
 }
 
 // scrubCopiedGit removes hooks, alternates, and credential helpers anywhere
 // under the copied git directory, including a deinitialized modules tree.
+// Includes and extensions.worktreeConfig are rejected instead of followed.
 func scrubCopiedGit(gitDir string) error {
 	return filepath.WalkDir(gitDir, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -308,27 +309,56 @@ func scrubCopiedGit(gitDir string) error {
 			}
 			return filepath.SkipDir
 		}
+		rel, err := filepath.Rel(gitDir, p)
+		if err != nil {
+			return err
+		}
+		if isObjectPayload(rel) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		if d.IsDir() {
+			return nil
+		}
+		if !d.Type().IsRegular() {
 			return nil
 		}
 		if name == "alternates" || name == "http-alternates" {
 			return os.Remove(p)
 		}
-		if name == "config" {
-			return stripCredentialHelperFile(p)
-		}
-		return nil
+		return scrubGitConfigFile(p, isGitConfigFile(name))
 	})
 }
 
-func stripCredentialHelperFile(path string) error {
+func isGitConfigFile(name string) bool {
+	return name == "config" || name == "config.worktree"
+}
+
+func isObjectPayload(rel string) bool {
+	rel = filepath.ToSlash(rel)
+	if rel == "objects" || rel == "objects/info" || strings.HasPrefix(rel, "objects/info/") {
+		return false
+	}
+	return strings.HasPrefix(rel, "objects/")
+}
+
+func scrubGitConfigFile(path string, stripHelper bool) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
+	problem := gitConfigProblem(data, stripHelper)
+	if problem != "" && (problem != "credential.helper" || !stripHelper) {
+		return gitConfigError(problem)
+	}
+	if !stripHelper {
+		return nil
+	}
 	stripped := stripCredentialHelpers(data)
-	if configHasCredentialHelper(stripped) {
-		return fmt.Errorf("repository history contains credentials")
+	if problem = gitConfigProblem(stripped, true); problem != "" {
+		return gitConfigError(problem)
 	}
 	if bytes.Equal(data, stripped) {
 		return nil
@@ -340,16 +370,29 @@ func stripCredentialHelperFile(path string) error {
 	return os.WriteFile(path, stripped, info.Mode().Perm())
 }
 
+func gitConfigError(problem string) error {
+	switch problem {
+	case "include":
+		return fmt.Errorf("repository history contains an include")
+	case "worktreeConfig":
+		return fmt.Errorf("repository history contains extensions.worktreeConfig")
+	case "unrecognized":
+		return fmt.Errorf("repository history contains unrecognized config syntax")
+	default:
+		return fmt.Errorf("repository history contains credentials")
+	}
+}
+
 func stripCredentialHelpers(data []byte) []byte {
 	lines := strings.Split(string(data), "\n")
 	out := make([]string, 0, len(lines))
 	inCredential := false
 	for _, line := range lines {
-		trim := strings.TrimSpace(line)
-		if strings.HasPrefix(trim, "[") {
-			inCredential = credentialSection(trim)
+		kind, key := classifyConfigLine(configLine(line))
+		if kind == "section" {
+			inCredential = strings.EqualFold(key, "credential")
 		}
-		if dropCredentialHelperLine(trim, inCredential) {
+		if kind == "key" && isCredentialHelperKey(key, inCredential) {
 			continue
 		}
 		out = append(out, line)
@@ -357,47 +400,165 @@ func stripCredentialHelpers(data []byte) []byte {
 	return []byte(strings.Join(out, "\n"))
 }
 
-func dropCredentialHelperLine(trim string, inCredential bool) bool {
-	if trim == "" || strings.HasPrefix(trim, "#") || strings.HasPrefix(trim, ";") {
-		return false
+func isCredentialHelperKey(key string, inCredential bool) bool {
+	if inCredential && strings.EqualFold(key, "helper") {
+		return true
 	}
-	if inCredential {
-		key, _, ok := strings.Cut(trim, "=")
-		if ok && strings.EqualFold(strings.TrimSpace(key), "helper") {
-			return true
-		}
-	}
-	lower := strings.ToLower(trim)
-	return strings.Contains(lower, "credential.helper") && strings.Contains(trim, "=")
+	return strings.Contains(strings.ToLower(key), "credential.helper")
 }
 
-func credentialSection(header string) bool {
+// gitConfigProblem reports include, worktreeConfig, credential.helper, or
+// unrecognized. strict is for files Git reads as config: a line that is not a
+// blank, a comment, a section header, or a key is rejected. Other files are
+// scanned only for the dangerous keys.
+func gitConfigProblem(data []byte, strict bool) string {
+	inCredential := false
+	inExtensions := false
+	for _, line := range strings.Split(string(data), "\n") {
+		kind, key := classifyConfigLine(configLine(line))
+		switch kind {
+		case "blank":
+			continue
+		case "unrecognized":
+			if strict {
+				return "unrecognized"
+			}
+		case "section":
+			inCredential = strings.EqualFold(key, "credential")
+			inExtensions = strings.EqualFold(key, "extensions")
+			if isIncludeSection(key) {
+				return "include"
+			}
+		case "key":
+			lower := strings.ToLower(key)
+			if lower == "include.path" || strings.HasPrefix(lower, "includeif") {
+				return "include"
+			}
+			if strings.EqualFold(key, "extensions.worktreeConfig") || (inExtensions && strings.EqualFold(key, "worktreeConfig")) {
+				return "worktreeConfig"
+			}
+			if isCredentialHelperKey(key, inCredential) {
+				return "credential.helper"
+			}
+		}
+	}
+	return ""
+}
+
+// configLine drops a trailing # or ; comment. Characters inside quotes stay.
+func configLine(line string) string {
+	inQuote := false
+	escape := false
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		if inQuote && c == '\\' && !escape {
+			escape = true
+			continue
+		}
+		if escape {
+			escape = false
+			continue
+		}
+		if c == '"' {
+			inQuote = !inQuote
+			continue
+		}
+		if !inQuote && (c == '#' || c == ';') {
+			return strings.TrimSpace(line[:i])
+		}
+	}
+	return strings.TrimSpace(line)
+}
+
+// classifyConfigLine accepts a blank, a section header, or a key.
+// A header is [name] or [name "subsection"], then only a comment.
+// Anything else after ] is unrecognized. A key with no '=' is boolean true.
+func classifyConfigLine(logical string) (string, string) {
+	if logical == "" {
+		return "blank", ""
+	}
+	if strings.HasSuffix(logical, `\`) {
+		return "unrecognized", ""
+	}
+	if strings.HasPrefix(logical, "[") {
+		name, ok := sectionName(logical)
+		if !ok {
+			return "unrecognized", ""
+		}
+		return "section", name
+	}
+	if strings.Contains(logical, `"`) {
+		return "unrecognized", ""
+	}
+	key := logical
+	if cut, _, ok := strings.Cut(logical, "="); ok {
+		key = strings.TrimSpace(cut)
+	} else if strings.ContainsAny(logical, " \t") {
+		return "unrecognized", ""
+	}
+	if !validConfigKey(key) {
+		return "unrecognized", ""
+	}
+	return "key", key
+}
+
+func sectionName(header string) (string, bool) {
+	header = configLine(header)
 	if !strings.HasPrefix(header, "[") || !strings.HasSuffix(header, "]") {
-		return false
+		return "", false
 	}
 	body := strings.TrimSpace(header[1 : len(header)-1])
-	name, _, _ := strings.Cut(body, " ")
-	name, _, _ = strings.Cut(name, "\t")
-	name = strings.Trim(name, `"`)
-	return strings.EqualFold(name, "credential")
+	if body == "" {
+		return "", false
+	}
+	name := body
+	rest := ""
+	if i := strings.IndexAny(body, " \t"); i >= 0 {
+		name = body[:i]
+		rest = strings.TrimSpace(body[i+1:])
+	}
+	if strings.Contains(name, ".") || !validConfigKey(name) {
+		return "", false
+	}
+	if rest == "" {
+		return name, true
+	}
+	if len(rest) < 2 || rest[0] != '"' || rest[len(rest)-1] != '"' {
+		return "", false
+	}
+	inner := rest[1 : len(rest)-1]
+	if strings.ContainsAny(inner, "\"\\") {
+		return "", false
+	}
+	return name, true
 }
 
-func configHasCredentialHelper(data []byte) bool {
-	inCredential := false
-	for _, line := range strings.Split(string(data), "\n") {
-		trim := strings.TrimSpace(line)
-		if trim == "" || strings.HasPrefix(trim, "#") || strings.HasPrefix(trim, ";") {
-			continue
+func validConfigKey(key string) bool {
+	if key == "" {
+		return false
+	}
+	for _, part := range strings.Split(key, ".") {
+		if part == "" {
+			return false
 		}
-		if strings.HasPrefix(trim, "[") {
-			inCredential = credentialSection(trim)
-			continue
-		}
-		if dropCredentialHelperLine(trim, inCredential) {
-			return true
+		for i := 0; i < len(part); i++ {
+			c := part[i]
+			letter := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+			digit := c >= '0' && c <= '9'
+			if i == 0 && !letter {
+				return false
+			}
+			if !letter && !digit && c != '-' {
+				return false
+			}
 		}
 	}
-	return false
+	return true
+}
+
+func isIncludeSection(name string) bool {
+	lower := strings.ToLower(name)
+	return lower == "include" || strings.HasPrefix(lower, "includeif")
 }
 
 func scrubMetadata(gitDir, token string) error {
@@ -518,8 +679,10 @@ func PackGit(root string, w io.Writer, limit int64) error {
 		if !strings.Contains(name, "/objects/") && containsCredential(data, "") {
 			return fmt.Errorf("repository history contains credentials")
 		}
-		if filepath.Base(name) == "config" && configHasCredentialHelper(data) {
-			return fmt.Errorf("repository history contains credentials")
+		if !strings.Contains(name, "/objects/") {
+			if problem := gitConfigProblem(data, isGitConfigFile(filepath.Base(name))); problem != "" {
+				return gitConfigError(problem)
+			}
 		}
 		total += int64(len(data))
 		if total > limit {
