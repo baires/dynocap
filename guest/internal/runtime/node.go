@@ -28,12 +28,13 @@ func resolveNode(requests []Request, arch string) (Recipe, error) {
 	// Newest linux-arm64-musl build that satisfies lint-staged's >=22.22.1 engine range. One pin, no fallback.
 	const nodeVersion = "v22.23.4"
 	const npmVersion = "10.9.9"
+	const sshVersion = "OpenSSH_10.3p1"
 	inputs = append(inputs, Input{
 		URL:    "https://unofficial-builds.nodejs.org/download/release/" + nodeVersion + "/node-" + nodeVersion + "-linux-arm64-musl.tar.xz",
 		SHA256: "ed505d3b41e7674fd20b864c544b6bcd177fd88cb00124a23d5ecd4874041b3a",
 	})
-	verify := fmt.Sprintf("test \"$(node --version)\" = %s && test \"$(npm --version)\" = %s && git --version && test -s /etc/ssl/cert.pem", nodeVersion, npmVersion)
-	return Recipe{InstallArchive: installNodeArchive, VerificationCommand: []string{"sh", "-c", verify}, Requests: requests, Inputs: inputs, Environment: map[string]string{"PATH": "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin", "HOME": "/work/home", "npm_config_cache": "/work/npm-cache"}, Tools: map[string]string{"node": nodeVersion, "npm": npmVersion}}, nil
+	verify := fmt.Sprintf("test \"$(node --version)\" = %s && test \"$(npm --version)\" = %s && git --version && test \"$(ssh -V 2>&1 | cut -d, -f1)\" = %s && test -s /etc/ssl/cert.pem", nodeVersion, npmVersion, sshVersion)
+	return Recipe{InstallArchive: installNodeArchive, VerificationCommand: []string{"sh", "-c", verify}, Requests: requests, Inputs: inputs, Environment: map[string]string{"PATH": "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin", "HOME": "/work/home", "npm_config_cache": "/work/npm-cache"}, Tools: map[string]string{"node": nodeVersion, "npm": npmVersion, "ssh": sshVersion}}, nil
 }
 func installNodeArchive(archive, root string) error {
 	dest := filepath.Join(root, "usr/local")

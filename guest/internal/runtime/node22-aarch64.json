@@ -70,5 +70,29 @@
   {
     "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/zstd-libs-1.5.7-r2.apk",
     "sha256": "2bb5136c89f5b0bbe1554c8915a3b520d5aa63ae2a51d4d821eb81698db5a818"
+  },
+  {
+    "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libedit-20260508.3.1-r1.apk",
+    "sha256": "3055936ce398b3657fe6b0c7c6ce95618bfb2b21364d7aea823a192bb8237ac3"
+  },
+  {
+    "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libncursesw-6.6_p20260516-r0.apk",
+    "sha256": "51a7aa4b3ec40b144d0801c0544e0a9f62e2a41d04b6067bb5e95786040741c6"
+  },
+  {
+    "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/ncurses-terminfo-base-6.6_p20260516-r0.apk",
+    "sha256": "e0c546b9461bdce206a90bc720cb69aa4628b5a5b8d908c3e5084e00f28f6a9d"
+  },
+  {
+    "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/openssh-client-common-10.3_p1-r2.apk",
+    "sha256": "dbecbe100cf0a648c5b3119d6c68805c383e7f2e213c54e212b4547d3fa41c11"
+  },
+  {
+    "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/openssh-client-default-10.3_p1-r2.apk",
+    "sha256": "b902d754fbbe09509a961756ca1ef7e18caa9a1dbabc3399e85faaade1e73f20"
+  },
+  {
+    "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/openssh-keygen-10.3_p1-r2.apk",
+    "sha256": "c7ba694e102891f34cc53f143356ec28f961d5e98ac58e6333bec352bffed452"
   }
 ]

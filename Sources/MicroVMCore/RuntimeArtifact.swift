@@ -20,6 +20,7 @@ public struct RuntimeSelection: Codable, Equatable {
 
 /// Resolves supported selections; task execution treats the result as an opaque disk artifact.
 public struct RuntimeArtifact: Codable {
+    public static let currentFormatVersion = 2
     public var runtimes: [RuntimeSelection]
     public var arch: String
     public var baseImageDigest: String
@@ -48,7 +49,10 @@ public struct RuntimeArtifact: Codable {
     public static func resolve(_ requested: [RuntimeSelection]?, directory: URL, arch: String) throws -> RuntimeArtifact {
         let artifact = try JSONDecoder().decode(
             RuntimeArtifact.self, from: Data(contentsOf: directory.appendingPathComponent("runtime.json")))
-        guard artifact.formatVersion == 1, artifact.arch == arch,
+        guard artifact.formatVersion == currentFormatVersion else {
+            throw MicroVMError("runtime artifact is outdated; run microvm runtime prepare before creating tasks")
+        }
+        guard artifact.arch == arch,
             artifact.runtimes == (requested ?? defaultRuntimes)
         else {
             throw MicroVMError("unsupported runtimes or architecture; prepare a matching artifact; no version substitution is performed")

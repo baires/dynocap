@@ -19,6 +19,8 @@ import (
 	"time"
 )
 
+const ArtifactFormatVersion = 2
+
 type Request struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
@@ -202,11 +204,13 @@ func reusablePublished(home, selection, key string, tools map[string]string) (Ma
 		return Manifest{}, false
 	}
 	var cached Manifest
-	if json.Unmarshal(raw, &cached) != nil || cached.BuildKey != key {
+	if json.Unmarshal(raw, &cached) != nil || cached.BuildKey != key || cached.FormatVersion != ArtifactFormatVersion {
 		return Manifest{}, false
 	}
-	if cached.Tools["node"] != tools["node"] || cached.Tools["npm"] != tools["npm"] {
-		return Manifest{}, false
+	for tool, version := range tools {
+		if cached.Tools[tool] != version {
+			return Manifest{}, false
+		}
 	}
 	sum, e := hashFile(filepath.Join(dir, "runtime.ext4"))
 	if e != nil || sum != cached.ArtifactDigest {
@@ -292,7 +296,7 @@ func Build(repo, home, arch string, requests []Request) (Manifest, error) {
 	if e != nil {
 		return Manifest{}, e
 	}
-	m := Manifest{BuildKey: key, Recipe: recipe, Arch: arch, BaseImageDigest: base.InitrdSHA256, ArtifactDigest: digest, PreparedAt: time.Now().Unix(), FormatVersion: 1}
+	m := Manifest{BuildKey: key, Recipe: recipe, Arch: arch, BaseImageDigest: base.InitrdSHA256, ArtifactDigest: digest, PreparedAt: time.Now().Unix(), FormatVersion: ArtifactFormatVersion}
 	raw, _ := json.MarshalIndent(m, "", "  ")
 	if e = os.WriteFile(filepath.Join(boot, "runtime.json"), raw, 0600); e != nil {
 		return Manifest{}, e

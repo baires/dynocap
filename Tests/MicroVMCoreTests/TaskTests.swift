@@ -21,7 +21,8 @@ final class TaskTests: XCTestCase {
         try FileManager.default.createDirectory(at: runtime, withIntermediateDirectories: true)
         let manifest = RuntimeArtifact(
             runtimes: RuntimeArtifact.defaultRuntimes, arch: "aarch64", baseImageDigest: "base", artifactDigest: "artifact",
-            tools: ["node": "22.23.4"], environment: [:], formatVersion: 1, verificationCommand: ["true"])
+            tools: ["node": "22.23.4"], environment: [:], formatVersion: RuntimeArtifact.currentFormatVersion, verificationCommand: ["true"]
+        )
         try JSONEncoder().encode(manifest).write(to: runtime.appendingPathComponent("runtime.json"))
         try JSONEncoder().encode(["aarch64/node@22": String(repeating: "a", count: 64)]).write(
             to: root.appendingPathComponent("runtime-catalog.json"))
@@ -69,7 +70,7 @@ final class TaskTests: XCTestCase {
         try Data("lock one".utf8).write(to: root.appendingPathComponent("package-lock.json"))
         var runtime = RuntimeArtifact(
             runtimes: RuntimeArtifact.defaultRuntimes, arch: "aarch64", baseImageDigest: "base", artifactDigest: "first", tools: [:],
-            environment: [:], formatVersion: 1, verificationCommand: [])
+            environment: [:], formatVersion: RuntimeArtifact.currentFormatVersion, verificationCommand: [])
         let first = try DependencyCache.key(baseline: root, runtime: runtime)
         runtime.artifactDigest = "second"
         XCTAssertNotEqual(first, try DependencyCache.key(baseline: root, runtime: runtime))
@@ -153,6 +154,17 @@ final class TaskTests: XCTestCase {
         try Data("abc".utf8).write(to: file)
         XCTAssertEqual(try fileDigest(file), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
         XCTAssertEqual(try dataDigest(Data()), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+    }
+
+    func testLegacyRuntimeRequiresPreparation() throws {
+        let root = try home()
+        let legacy = RuntimeArtifact(
+            runtimes: RuntimeArtifact.defaultRuntimes, arch: "aarch64", baseImageDigest: "base", artifactDigest: "disk", tools: [:],
+            environment: [:], formatVersion: 1, verificationCommand: [])
+        try JSONEncoder().encode(legacy).write(to: root.appendingPathComponent("runtime.json"))
+        XCTAssertThrowsError(try RuntimeArtifact.resolve(nil, directory: root, arch: "aarch64")) { error in
+            XCTAssertTrue(String(describing: error).contains("runtime prepare"))
+        }
     }
 
 }

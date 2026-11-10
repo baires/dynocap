@@ -85,9 +85,35 @@ func TestOldNodeArtifactIsNotReused(t *testing.T) {
 	if _, ok := reusablePublished(home, selection, staleKey, recipe.Tools); ok {
 		t.Fatal("accepted stale node tools under their own build key")
 	}
-	write(Manifest{BuildKey: "current-key", ArtifactDigest: digest, Recipe: Recipe{Tools: recipe.Tools}})
+	write(Manifest{FormatVersion: 1, BuildKey: "current-key", ArtifactDigest: digest, Recipe: Recipe{Tools: recipe.Tools}})
+	if _, ok := reusablePublished(home, selection, "current-key", recipe.Tools); ok {
+		t.Fatal("reused format 1 artifact with no SSH contract")
+	}
+	write(Manifest{FormatVersion: ArtifactFormatVersion, BuildKey: "current-key", ArtifactDigest: digest, Recipe: Recipe{Tools: recipe.Tools}})
 	got, ok := reusablePublished(home, selection, "current-key", recipe.Tools)
 	if !ok || got.Tools["node"] != "v22.23.4" || got.Tools["npm"] != "10.9.9" {
 		t.Fatalf("current artifact refused: %+v ok=%v", got.Tools, ok)
+	}
+}
+
+func TestRuntimeIncludesVerifiedSSHClient(t *testing.T) {
+	recipe, err := Resolve([]Request{{"node", "22"}}, "aarch64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recipe.Tools["ssh"] != "OpenSSH_10.3p1" || !strings.Contains(strings.Join(recipe.VerificationCommand, " "), "ssh -V") {
+		t.Fatal("SSH client not verified")
+	}
+	found := false
+	for _, in := range recipe.Inputs {
+		if strings.Contains(in.URL, "/openssh-client-default-") {
+			found = true
+			if len(in.SHA256) != 64 {
+				t.Fatal("unverified SSH input")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("SSH client is not pinned")
 	}
 }
