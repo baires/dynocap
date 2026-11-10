@@ -62,7 +62,7 @@ func Result(before, after, out string) error {
 	if e != nil {
 		return e
 	}
-	patch, renamedTo, e := reviewPatch(before, after)
+	patch, renamedTo, e := reviewPatch(before, after, ignored)
 	if e != nil {
 		return e
 	}
@@ -491,7 +491,7 @@ func gitArgs(repo string, args ...string) []string {
 
 // reviewPatch diffs the saved baseline and the exported tree with host Git.
 // Rename detection uses the exported paths. The writable workspace is not on PATH.
-func reviewPatch(before, after string) ([]byte, map[string]string, error) {
+func reviewPatch(before, after string, ignored map[string]bool) ([]byte, map[string]string, error) {
 	bin, err := hostGit()
 	if err != nil {
 		return nil, nil, err
@@ -513,7 +513,7 @@ func reviewPatch(before, after string) ([]byte, map[string]string, error) {
 	if err := copyWorktree(before, repo); err != nil {
 		return nil, nil, err
 	}
-	if _, err := runGit(bin, repo, env, gitArgs(repo, "add", "-A")); err != nil {
+	if _, err := runGit(bin, repo, env, gitArgs(repo, "add", "-A", "--force")); err != nil {
 		return nil, nil, err
 	}
 	if _, err := runGit(bin, repo, env, gitArgs(repo, "commit", "--quiet", "--allow-empty", "-m", "baseline")); err != nil {
@@ -522,10 +522,10 @@ func reviewPatch(before, after string) ([]byte, map[string]string, error) {
 	if err := clearWorktree(repo); err != nil {
 		return nil, nil, err
 	}
-	if err := copyWorktree(after, repo); err != nil {
+	if err := copyWorktreeExcept(after, repo, ignored); err != nil {
 		return nil, nil, err
 	}
-	if _, err := runGit(bin, repo, env, gitArgs(repo, "add", "--all")); err != nil {
+	if _, err := runGit(bin, repo, env, gitArgs(repo, "add", "--all", "--force")); err != nil {
 		return nil, nil, err
 	}
 	patch, err := runGit(bin, repo, env, gitArgs(repo, "diff", "--cached", "--binary", "--find-renames", "--no-color", "HEAD"))
@@ -573,7 +573,9 @@ func parseRenames(status []byte) map[string]string {
 	return renames
 }
 
-func copyWorktree(src, dst string) error {
+func copyWorktree(src, dst string) error { return copyWorktreeExcept(src, dst, nil) }
+
+func copyWorktreeExcept(src, dst string, ignored map[string]bool) error {
 	return filepath.WalkDir(src, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -584,6 +586,12 @@ func copyWorktree(src, dst string) error {
 		rel, err := filepath.Rel(src, p)
 		if err != nil {
 			return err
+		}
+		if ignored[filepath.ToSlash(rel)] {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
 		}
 		if rel == ".git" || strings.HasPrefix(rel, ".git"+string(os.PathSeparator)) {
 			if d.IsDir() {

@@ -999,3 +999,42 @@ func normalizePatch(patch []byte) string {
 	}
 	return b.String()
 }
+
+func TestPatchPreservesImportedIgnoredFilesAndFrozenNewFilePolicy(t *testing.T) {
+	before, after, out := t.TempDir(), t.TempDir(), t.TempDir()
+	must(t, os.WriteFile(filepath.Join(before, ".gitignore"), []byte("tracked.txt\nignored-new.txt\n"), 0644))
+	must(t, os.WriteFile(filepath.Join(before, "tracked.txt"), []byte("before\n"), 0644))
+	must(t, os.WriteFile(filepath.Join(after, ".gitignore"), []byte("*\n"), 0644))
+	must(t, os.WriteFile(filepath.Join(after, "tracked.txt"), []byte("after\n"), 0644))
+	must(t, os.WriteFile(filepath.Join(after, "allowed-new.txt"), []byte("included\n"), 0644))
+	must(t, os.WriteFile(filepath.Join(after, "ignored-new.txt"), []byte("excluded\n"), 0644))
+	must(t, Result(before, after, out))
+	patch, err := os.ReadFile(filepath.Join(out, "changes.patch"))
+	must(t, err)
+	for _, name := range []string{"a/tracked.txt", "b/allowed-new.txt", "a/.gitignore"} {
+		if !bytes.Contains(patch, []byte(name)) {
+			t.Fatalf("patch omitted %s:\n%s", name, patch)
+		}
+	}
+	if bytes.Contains(patch, []byte("diff --git a/ignored-new.txt")) {
+		t.Fatal("patch included an ignored new file")
+	}
+	applied := t.TempDir()
+	must(t, copyWorktree(before, applied))
+	bin, err := hostGit()
+	must(t, err)
+	_, err = runGit(bin, applied, gitEnv(t.TempDir()), []string{"apply", "--binary", filepath.Join(out, "changes.patch")})
+	must(t, err)
+	for _, name := range []string{"tracked.txt", "allowed-new.txt", ".gitignore"} {
+		want, err := os.ReadFile(filepath.Join(after, name))
+		must(t, err)
+		got, err := os.ReadFile(filepath.Join(applied, name))
+		must(t, err)
+		if !bytes.Equal(got, want) {
+			t.Fatalf("applied %s differs", name)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(out, "files/ignored-new.txt")); !os.IsNotExist(err) {
+		t.Fatal("result included ignored new file")
+	}
+}
