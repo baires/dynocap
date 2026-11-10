@@ -119,14 +119,26 @@ public final class Daemon {
             let message = try ControlCodec.read(fd)
             switch message {
             case .task(let command):
+                if command.op != "start", let requested = command.network, let id = command.id,
+                   let recorded = tasks.recordedNetwork(id) {
+                    try NetworkModeLock.rejectChange(from: recorded, to: requested)
+                }
                 let data: Data
                 switch command.op {
                 case "start":
-                    if command.requireOffline == true && command.network == .nat { throw MicroVMError("task requires offline networking") }
+                    if let message = NetworkAdmission.rejection(
+                        network: command.network ?? NetworkMode.none, requireOffline: command.requireOffline == true,
+                        permitFiltered: command.permitFiltered, offlineMessage: "task requires offline networking"
+                    ) { throw MicroVMError(message) }
                     data = try JSONEncoder().encode(TaskDescriptor(tasks.start(command)))
                 case "finish":
                     guard let id = command.id else { throw MicroVMError("task id required") }
-                    data = try JSONEncoder().encode(TaskDescriptor(tasks.finish(id, requireOffline: command.requireOffline == true)))
+                    if let requested = command.network, let recorded = tasks.recordedNetwork(id) {
+                        try NetworkModeLock.rejectChange(from: recorded, to: requested)
+                    }
+                    data = try JSONEncoder().encode(TaskDescriptor(tasks.finish(
+                        id, requireOffline: command.requireOffline == true, permitFiltered: command.permitFiltered
+                    )))
                 case "runtimeVerify": data = try JSONEncoder().encode(tasks.verifyRuntime(command.runtimes))
                 default: throw MicroVMError("unknown task operation")
                 }
@@ -184,6 +196,11 @@ public final class Daemon {
         guard request.cpus >= 1 else { throw MicroVMError("cpus must be >= 1") }
         guard request.memoryMB >= 128 else { throw MicroVMError("memory must be >= 128 MB") }
         if let existing = try store.load(request.name) {
+            let requested = request.network ?? NetworkMode.none
+            if let recorded = existing.network, recorded != requested,
+               existing.phase == .booting || existing.phase == .running || existing.phase == .stopping {
+                throw MicroVMError("network mode is fixed at start")
+            }
             switch existing.phase {
             case .stopped, .failed:
                 try store.remove(request.name)
@@ -232,7 +249,8 @@ public final class Daemon {
             network: request.network ?? NetworkMode.none,
             generation: live.generation,
             runtimeDirectory: request.runtimeDirectory.map { URL(fileURLWithPath: $0) },
-            workspaceDisk: request.workspaceDisk.map { URL(fileURLWithPath: $0) }
+            workspaceDisk: request.workspaceDisk.map { URL(fileURLWithPath: $0) },
+            filteredRepositoryHost: request.filteredRepositoryHost
         )
         backend.boot(boot) { live.boot.complete($0) }
         lifecycle.lock.unlock()
@@ -284,8 +302,12 @@ public final class Daemon {
             try destroyLocked(command.name, lifecycle: lifecycle, reason: "sandbox lifetime expired")
             throw MicroVMError("sandbox lifetime expired")
         }
-        if command.requireOffline == true && record.network != NetworkMode.none {
-            throw MicroVMError("exec requires an offline sandbox; networking is NAT or unknown")
+        if let message = NetworkAdmission.rejection(
+            network: record.network, requireOffline: command.requireOffline == true,
+            permitFiltered: command.permitFiltered,
+            offlineMessage: "exec requires an offline sandbox; networking is NAT or unknown"
+        ) {
+            throw MicroVMError(message)
         }
         guard let live = lifecycle.live else { throw MicroVMError("sandbox is not owned by this daemon") }
         lock.lock()

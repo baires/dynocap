@@ -27,7 +27,7 @@ export type ClientOptions = {
 
 export type CreateOptions = ClientOptions & {
   name: string;
-  network?: "none" | "nat";
+  network?: "none" | "nat" | "filtered";
   cpus?: number;
   memoryMB?: number;
   ttlSeconds?: number | null;
@@ -39,6 +39,8 @@ export type ExecOptions = {
   maxOutputBytes?: number;
   /** Require daemon-enforced offline networking, including for existing sandboxes. */
   requireOffline?: boolean;
+  /** Permit an existing filtered sandbox. Omitted by direct SDK callers. */
+  permitFiltered?: boolean;
   cwd?: string;
   env?: Record<string, string>;
   timeoutSeconds?: number;
@@ -83,8 +85,11 @@ export class Sandbox {
         "ttlSeconds must be an integer between 1 and 86400 (default 1800)"
       );
     const network = options.network ?? "none";
-    if (network !== "none" && network !== "nat")
-      throw new SandboxError("daemon", "network must be none or nat");
+    if (network !== "none" && network !== "nat" && network !== "filtered")
+      throw new SandboxError(
+        "daemon",
+        "network must be none, nat, or filtered"
+      );
     const home = resolveHome(options.home);
     const status = await boot(home, {
       name: options.name,
@@ -128,6 +133,9 @@ export class Sandbox {
       {
         name: this.name,
         requireOffline: options.requireOffline,
+        ...(options.permitFiltered === undefined
+          ? {}
+          : { permitFiltered: options.permitFiltered }),
         argv: commandArgv(command),
         env: envEntries(options.env ?? {}),
         cwd: options.cwd ?? "",

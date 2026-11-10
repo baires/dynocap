@@ -156,9 +156,15 @@ test("default policy and explicit NAT propagate to the daemon", async () => {
     assert.equal(daemon.runs[0]?.ttlSeconds, 1800);
     assert.equal(daemon.runs[1]?.network, "nat");
     assert.equal(daemon.runs[1]?.ttlSeconds, 86400);
+    await Sandbox.create({
+      name: "filtered",
+      home: daemon.home,
+      network: "filtered",
+    });
+    assert.equal(daemon.runs[2]?.network, "filtered");
     assert.deepEqual(
       (await Sandbox.list({ home: daemon.home })).map((box) => box.network),
-      ["none", "nat"]
+      ["none", "nat", "filtered"]
     );
   } finally {
     await daemon.close();

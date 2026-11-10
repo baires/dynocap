@@ -76,6 +76,7 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
     var keptPipes: [Pipe] = []
     var consoleHandle: FileHandle?
     var onExit: ((String?) -> Void)?
+    private var forwarder: FilteredForwarder?
     private var bootCompletion: ((Result<Void, Error>) -> Void)?
     private var bootFinished = false
     private var exited = false
@@ -97,6 +98,8 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
             do {
                 try self.makeAndStart()
             } catch {
+                self.forwarder?.stop()
+                self.forwarder = nil
                 self.finishBoot(.failure(error))
             }
         }
@@ -230,7 +233,16 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
         config.bootLoader = boot
         config.entropyDevices = [VZVirtioEntropyDeviceConfiguration()]
 
-        config.networkDevices = networkDevices(for: request.network)
+        switch request.network {
+        case .nat:
+            config.networkDevices = networkDevices(for: .nat)
+        case .filtered:
+            let forwarder = try FilteredForwarder.start(repositoryHost: request.filteredRepositoryHost)
+            self.forwarder = forwarder
+            config.networkDevices = [forwarder.device]
+        case .none:
+            config.networkDevices = []
+        }
 
         let guestToHost = Pipe()
         let hostToGuest = Pipe()
@@ -418,6 +430,8 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
         exited = true
         bootLock.unlock()
         if already { return }
+        forwarder?.stop()
+        forwarder = nil
         finishBoot(.failure(MicroVMError(message ?? "guest exited")))
         disconnectGuest()
         failExecs(message ?? "guest exited")

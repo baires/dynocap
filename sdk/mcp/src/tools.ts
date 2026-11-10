@@ -16,10 +16,13 @@ export type ToolResult = {
   content: [{ type: "text"; text: string }];
 };
 
-export type ToolOptions = ClientOptions & { allowNat?: boolean };
+export type ToolOptions = ClientOptions & {
+  allowNat?: boolean;
+  allowFiltered?: boolean;
+};
 
 export type RunInput = {
-  network?: "none" | "nat";
+  network?: "none" | "nat" | "filtered";
   name: string;
   cpus?: number;
   memoryMB?: number;
@@ -36,7 +39,7 @@ export type ExecInput = {
 };
 
 export const toolDescriptions = {
-  microvm_run: `${local} Boot a sandbox and return when it is running. Default network none; nat is unrestricted outbound access and requires host permission. Default lifetime 1800 seconds, maximum 86400.`,
+  microvm_run: `${local} Boot a sandbox and return when it is running. Default network none. nat is unrestricted outbound access and requires MICROVM_MCP_ALLOW_NAT=1. filtered allows HTTPS only to registry.npmjs.org and the task Git host and requires MICROVM_MCP_ALLOW_FILTERED=1. Default lifetime 1800 seconds, maximum 86400.`,
   microvm_exec: `${local} Run a shell command inside a running sandbox. The command is sh -c. Default deadline is 30 seconds. Output is capped.`,
   microvm_ps: `${local} List sandboxes and their phases.`,
   microvm_destroy: `${local} Destroy a sandbox and delete its record.`,
@@ -51,6 +54,10 @@ export async function microvmRun(
       throw new Error(
         "NAT is disabled by this MCP host; start the server with MICROVM_MCP_ALLOW_NAT=1 to permit it"
       );
+    if (input.network === "filtered" && options?.allowFiltered !== true)
+      throw new Error(
+        "filtered networking is disabled by this MCP host; start the server with MICROVM_MCP_ALLOW_FILTERED=1 to permit it"
+      );
     const sandbox = await Sandbox.create({ ...input, home: options?.home });
     return ok(`running ${sandbox.name}`);
   });
@@ -61,18 +68,14 @@ export async function microvmExec(
   options?: ToolOptions
 ): Promise<ToolResult> {
   return guard(async () => {
-    const requireOffline = options?.allowNat !== true;
     const recorded = (await Sandbox.list(options)).find(
       (sandbox) => sandbox.name === input.name
     );
-    if (recorded && requireOffline && recorded.network !== "none")
-      throw new Error(
-        "MCP exec requires an offline sandbox; networking is NAT or unknown"
-      );
+    assertExecutable(recorded?.network, options);
     const sandbox = await Sandbox.connect(input.name, options);
     const text = await presentExec(sandbox, input.command, {
       ...input,
-      requireOffline,
+      ...permits(options),
     });
     return ok(text);
   });
@@ -94,6 +97,35 @@ export async function microvmDestroy(
     await sandbox.destroy();
     return ok(`destroyed ${name}`);
   });
+}
+
+function permits(options?: ToolOptions): {
+  requireOffline: boolean;
+  permitFiltered: boolean;
+} {
+  return {
+    requireOffline: options?.allowNat !== true,
+    permitFiltered: options?.allowFiltered === true,
+  };
+}
+
+function assertExecutable(
+  network: "none" | "nat" | "filtered" | null | undefined,
+  options?: ToolOptions
+) {
+  if (network === undefined) return;
+  if (network === "filtered" && options?.allowFiltered !== true)
+    throw new Error(
+      "filtered networking is disabled by this MCP host; start the server with MICROVM_MCP_ALLOW_FILTERED=1 to permit it"
+    );
+  if (
+    network !== "filtered" &&
+    options?.allowNat !== true &&
+    network !== "none"
+  )
+    throw new Error(
+      "MCP exec requires an offline sandbox; networking is NAT or unknown"
+    );
 }
 
 function ok(text: string): ToolResult {
@@ -125,10 +157,12 @@ export async function microvmTaskStart(
   return guard(async () => {
     if (input.network === "nat" && options?.allowNat !== true)
       throw new Error("NAT is disabled by this MCP host");
+    if (input.network === "filtered" && options?.allowFiltered !== true)
+      throw new Error("filtered networking is disabled by this MCP host");
     const task = await Task.start({
       ...input,
       home: options?.home,
-      requireOffline: options?.allowNat !== true,
+      ...permits(options),
     });
     return ok(
       JSON.stringify({
@@ -144,9 +178,13 @@ export async function microvmTaskExec(
   options?: ToolOptions
 ): Promise<ToolResult> {
   return guard(async () => {
+    const recorded = (await Sandbox.list(options)).find(
+      (sandbox) => sandbox.name === input.name
+    );
+    assertExecutable(recorded?.network, options);
     const task = Task.connect(input.name, {
       home: options?.home,
-      requireOffline: options?.allowNat !== true,
+      ...permits(options),
     });
     const result = await task.exec(input.command, input);
     return ok(
@@ -165,7 +203,7 @@ export async function microvmTaskFinish(
       JSON.stringify(
         await Task.connect(id, {
           home: options?.home,
-          requireOffline: options?.allowNat !== true,
+          ...permits(options),
         }).finish()
       )
     )

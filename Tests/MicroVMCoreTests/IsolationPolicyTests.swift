@@ -191,6 +191,35 @@ final class IsolationPolicyTests: XCTestCase {
         XCTAssertEqual(fixture.backend.destroyCount, 1)
     }
 
+    func testFilteredNetworkCannotBeReplacedWithNAT() throws {
+        let fixture = try PolicyFixture()
+        defer { fixture.close() }
+        var filtered = fixture.request("box")
+        filtered.network = .filtered
+        _ = try fixture.client.run(filtered)
+        XCTAssertEqual(try fixture.client.ps().first?.network, .filtered)
+        XCTAssertEqual(fixture.backend.request("box")?.network, .filtered)
+        var nat = fixture.request("box")
+        nat.network = .nat
+        XCTAssertThrowsError(try fixture.client.run(nat)) { error in
+            XCTAssertEqual(String(describing: error), "network mode is fixed at start")
+        }
+        XCTAssertEqual(try fixture.client.ps().first?.network, .filtered)
+        XCTAssertThrowsError(try fixture.client.exec(ExecCommand(
+            name: "box", argv: ["true"], env: [], cwd: "", timeoutSeconds: 5, requireOffline: false, permitFiltered: false
+        ))) { error in
+            XCTAssertEqual(String(describing: error), "filtered networking is disabled")
+        }
+        var online = fixture.request("online")
+        online.network = .nat
+        _ = try fixture.client.run(online)
+        XCTAssertThrowsError(try fixture.client.exec(ExecCommand(
+            name: "online", argv: ["true"], env: [], cwd: "", timeoutSeconds: 5, requireOffline: true, permitFiltered: true
+        ))) { error in
+            XCTAssertTrue(String(describing: error).contains("offline sandbox"))
+        }
+    }
+
     func testDaemonEnforcesOfflineExecRequirement() throws {
         let fixture = try PolicyFixture()
         defer { fixture.close() }

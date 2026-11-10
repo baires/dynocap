@@ -9,6 +9,7 @@ public struct RunRequest: Codable, Equatable {
     public var ttlSeconds: Int?
     public var bootTimeoutSeconds: Int
     public var network: NetworkMode?
+    public var filteredRepositoryHost: String?
 
     public init(name: String, cpus: Int, memoryMB: Int, ttlSeconds: Int?, bootTimeoutSeconds: Int, network: NetworkMode? = nil) {
         self.name = name
@@ -27,14 +28,19 @@ public struct ExecCommand: Codable, Equatable {
     public var cwd: String
     public var timeoutSeconds: Int
     public var requireOffline: Bool?
+    public var permitFiltered: Bool?
 
-    public init(name: String, argv: [String], env: [String], cwd: String, timeoutSeconds: Int, requireOffline: Bool? = nil) {
+    public init(
+        name: String, argv: [String], env: [String], cwd: String, timeoutSeconds: Int,
+        requireOffline: Bool? = nil, permitFiltered: Bool? = nil
+    ) {
         self.name = name
         self.argv = argv
         self.env = env
         self.cwd = cwd
         self.timeoutSeconds = timeoutSeconds
         self.requireOffline = requireOffline
+        self.permitFiltered = permitFiltered
     }
 }
 
@@ -64,10 +70,10 @@ public let helpText = """
     microvm \(MicroVMInfo.version) — local Linux microVMs on macOS
 
     USAGE
-      microvm run --name <name> [--cpus N] [--memory MB] [--ttl SEC] [--network none|nat] [--boot-timeout SEC]
+      microvm run --name <name> [--cpus N] [--memory MB] [--ttl SEC] [--network none|nat|filtered] [--boot-timeout SEC]
       microvm exec <name> [--timeout SEC] [--cwd DIR] [--env KEY=VAL] -- <command> [args...]
       microvm runtime prepare [REPO] [--runtime node:22]
-      microvm task start PATH|URL [--runtime node:22] [--network none|nat] [--ttl SEC] [--ref NAME]
+      microvm task start PATH|URL [--runtime node:22] [--network none|nat|filtered] [--ttl SEC] [--ref NAME]
                     [--git-token-env VAR] [--ssh-key PATH]
       microvm task exec ID -- COMMAND [ARGS...]
       microvm task finish ID
@@ -86,7 +92,8 @@ public let helpText = """
     Images are built with scripts/fetch-image.sh and stored under $MICROVM_HOME
     (default ~/.microvm). The CLI starts a per-user daemon if one is not running.
     Network defaults to none (no virtual NIC). nat explicitly enables unrestricted outbound access.
-    A repository URL without a credential is cloned inside the guest and requires nat.
+    filtered allows HTTPS only to registry.npmjs.org and, for a repository URL, that URL's host.
+    A repository URL without a credential is cloned inside the guest and requires nat or filtered.
     --git-token-env or --ssh-key fetches on the host. The credential is not imported.
     TTL defaults to 1800 seconds, including boot; allowed range is 1–86400, with no unlimited mode.
     VMs do not outlive that daemon; the next command reaps leftover records.
@@ -183,7 +190,7 @@ private func parseRun(_ args: [String]) throws -> RunRequest {
             ttl = try takeInt(args, &i, flag, min: 1)
         case "--network":
             let value = try takeValue(args, &i, flag)
-            guard let mode = NetworkMode(rawValue: value) else { throw MicroVMError("network must be none or nat") }
+            guard let mode = NetworkMode(rawValue: value) else { throw MicroVMError("network must be none, nat, or filtered") }
             network = mode
         case "--boot-timeout":
             bootTimeout = try takeInt(args, &i, flag, min: 1)
@@ -261,7 +268,7 @@ private func takeInt(_ args: [String], _ index: inout Int, _ flag: String, min: 
 
 private func parseTask(_ args: [String]) throws -> TaskCommand {
     guard let op = args.first else {
-        throw MicroVMError("usage: microvm task start PATH|URL [--network none|nat] | finish ID | exec ID -- COMMAND")
+        throw MicroVMError("usage: microvm task start PATH|URL [--network none|nat|filtered] | finish ID | exec ID -- COMMAND")
     }
     if op == "start", args.count >= 2 {
         var cmd = TaskCommand(op: "start")
@@ -276,7 +283,7 @@ private func parseTask(_ args: [String]) throws -> TaskCommand {
             let value = args[i + 1]
             switch args[i] {
             case "--network":
-                guard let network = NetworkMode(rawValue: value) else { throw MicroVMError("network must be none or nat") }
+                guard let network = NetworkMode(rawValue: value) else { throw MicroVMError("network must be none, nat, or filtered") }
                 cmd.network = network
             case "--ttl":
                 guard let ttl = Int(value) else { throw MicroVMError("invalid TTL") }

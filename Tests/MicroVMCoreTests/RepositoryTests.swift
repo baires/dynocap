@@ -18,9 +18,29 @@ final class RepositoryTests: XCTestCase {
         XCTAssertEqual(repo.ref, "main")
         XCTAssertNil(repo.token)
         let argv = GuestGit.clone(url: repo.url, ref: repo.ref)
+        XCTAssertTrue(argv.contains("--branch"))
+        XCTAssertTrue(argv.contains("main"))
+        XCTAssertFalse(argv.contains("--no-checkout"))
         XCTAssertTrue(argv.contains("core.hooksPath=/dev/null"))
+        XCTAssertTrue(argv.contains("credential.helper="))
         XCTAssertTrue(argv.contains("protocol.file.allow=never"))
         XCTAssertEqual(argv.suffix(3), ["--", repo.url, "/workspace"])
+        command.network = .filtered
+        guard case .guestClone = try TaskSourceResolver.resolve(command) else {
+            return XCTFail("filtered public clone")
+        }
+        let sha = "d6de9f4b36f175b11586f89339689c1fe3c88805"
+        let commit = GuestGit.clone(url: repo.url, ref: sha)
+        XCTAssertFalse(commit.contains("--branch"))
+        XCTAssertTrue(commit.contains("--no-checkout"))
+        XCTAssertTrue(commit.contains("--no-recurse-submodules"))
+        XCTAssertEqual(commit.suffix(3), ["--", repo.url, "/workspace"])
+        let fetch = GuestGit.fetchCommit(sha)
+        XCTAssertTrue(fetch.contains("fetch"))
+        XCTAssertTrue(fetch.contains(sha))
+        XCTAssertTrue(fetch.contains("core.hooksPath=/dev/null"))
+        XCTAssertTrue(fetch.contains("--no-recurse-submodules"))
+        XCTAssertTrue(fetch.contains("credential.helper="))
     }
 
     func testCredentialSelectsHostFetchAndRecordOmitsIt() throws {

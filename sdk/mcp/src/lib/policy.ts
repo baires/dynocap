@@ -10,6 +10,7 @@ export async function presentExec(
   command: string,
   options: {
     requireOffline?: boolean;
+    permitFiltered?: boolean;
     cwd?: string;
     env?: Record<string, string>;
     timeoutSeconds?: number;
@@ -17,6 +18,9 @@ export async function presentExec(
 ): Promise<string> {
   const result = await sandbox.exec(command, {
     requireOffline: options.requireOffline,
+    ...(options.permitFiltered === undefined
+      ? {}
+      : { permitFiltered: options.permitFiltered }),
     cwd: options.cwd,
     env: options.env,
     timeoutSeconds: options.timeoutSeconds ?? EXEC_TIMEOUT_SECONDS,

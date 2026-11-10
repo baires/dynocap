@@ -203,9 +203,19 @@ function handle(
           writeFrame(socket, 20, Buffer.from(`no VM named ${name}`));
           return;
         }
+        const network = behavior.execNetwork ?? recorded.network;
+        if (network === "filtered" && request.permitFiltered !== true) {
+          writeFrame(
+            socket,
+            20,
+            Buffer.from("filtered networking is disabled")
+          );
+          return;
+        }
         if (
           request.requireOffline &&
-          (behavior.execNetwork ?? recorded.network) !== "none"
+          network !== "none" &&
+          network !== "filtered"
         ) {
           writeFrame(
             socket,

@@ -17,11 +17,12 @@ export type TaskOptions = ClientOptions & {
   gitToken?: string;
   sshKeyPath?: string;
   runtimes?: RuntimeSelection[];
-  network?: "none" | "nat";
+  network?: "none" | "nat" | "filtered";
   ttlSeconds?: number;
   cpus?: number;
   memoryMB?: number;
   requireOffline?: boolean;
+  permitFiltered?: boolean;
 };
 export type TaskInfo = {
   id: string;
@@ -53,12 +54,19 @@ export class Task {
   readonly sourceRevision?: string;
   readonly #home: string;
   readonly #requireOffline: boolean;
-  private constructor(info: TaskInfo, home: string, requireOffline: boolean) {
+  readonly #permitFiltered: boolean | undefined;
+  private constructor(
+    info: TaskInfo,
+    home: string,
+    requireOffline: boolean,
+    permitFiltered: boolean | undefined
+  ) {
     this.id = info.id;
     this.sourceUrl = info.sourceUrl;
     this.sourceRevision = info.sourceRevision;
     this.#home = home;
     this.#requireOffline = requireOffline;
+    this.#permitFiltered = permitFiltered;
   }
   static async start(options: TaskOptions): Promise<Task> {
     const hasPath = options.projectPath !== undefined;
@@ -79,6 +87,9 @@ export class Task {
         cpus: options.cpus,
         memoryMB: options.memoryMB,
         requireOffline: options.requireOffline,
+        ...(options.permitFiltered === undefined
+          ? {}
+          : { permitFiltered: options.permitFiltered }),
         ...(options.projectPath
           ? { projectPath: path.resolve(options.projectPath) }
           : {}),
@@ -90,11 +101,19 @@ export class Task {
         ...(options.sshKeyPath ? { sshKeyPath: options.sshKeyPath } : {}),
       })
     );
-    return new Task(info, home, options.requireOffline === true);
+    return new Task(
+      info,
+      home,
+      options.requireOffline === true,
+      options.permitFiltered
+    );
   }
   static connect(
     id: string,
-    options: ClientOptions & { requireOffline?: boolean } = {}
+    options: ClientOptions & {
+      requireOffline?: boolean;
+      permitFiltered?: boolean;
+    } = {}
   ): Task {
     if (!/^task-[a-z0-9-]+$/.test(id))
       throw new SandboxError("daemon", "invalid task id");
@@ -107,7 +126,8 @@ export class Task {
         expiresAtUnix: 0,
       },
       resolveHome(options.home),
-      options.requireOffline === true
+      options.requireOffline === true,
+      options.permitFiltered
     );
   }
   async exec(
@@ -121,6 +141,9 @@ export class Task {
       timeoutSeconds: options.timeoutSeconds ?? 300,
       maxOutputBytes: options.maxOutputBytes ?? 32 * 1024,
       requireOffline: this.#requireOffline || options.requireOffline,
+      ...(this.#permitFiltered === undefined
+        ? {}
+        : { permitFiltered: this.#permitFiltered }),
     });
     return { ...result, logDirectory: path.join(this.#home, "tasks", this.id) };
   }
@@ -130,6 +153,9 @@ export class Task {
         op: "finish",
         id: this.id,
         requireOffline: this.#requireOffline,
+        ...(this.#permitFiltered === undefined
+          ? {}
+          : { permitFiltered: this.#permitFiltered }),
       })
     );
   }

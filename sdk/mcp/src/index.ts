@@ -29,7 +29,11 @@ export type { ExecInput, RunInput, ToolResult, ToolOptions } from "./tools.ts";
 
 /** MCP server over the sandbox client. Tools call the client; they do not speak the daemon socket. */
 export function createServer(options: ToolOptions = {}): McpServer {
-  const host = { ...options, allowNat: options.allowNat === true };
+  const host = {
+    ...options,
+    allowNat: options.allowNat === true,
+    allowFiltered: options.allowFiltered === true,
+  };
   const server = new McpServer({ name: "microvm", version: "0.1.0" });
 
   server.registerTool(
@@ -38,10 +42,10 @@ export function createServer(options: ToolOptions = {}): McpServer {
       description: toolDescriptions.microvm_run,
       inputSchema: {
         network: z
-          .enum(["none", "nat"])
+          .enum(["none", "nat", "filtered"])
           .optional()
           .describe(
-            "Defaults to none; nat enables unrestricted outbound access and requires host permission"
+            "Defaults to none. nat is unrestricted and requires host permission. filtered allows registry.npmjs.org and the task Git host and requires its own host permission."
           ),
         name: z.string().describe("Sandbox name"),
         cpus: z.number().int().positive().optional(),
@@ -92,7 +96,7 @@ export function createServer(options: ToolOptions = {}): McpServer {
     "microvm_task_start",
     {
       description:
-        "Start a Node task from a local directory or a repository URL. A URL without gitToken or sshKeyPath is cloned in the guest and requires explicit NAT. A token or SSH key fetches on the host and is not imported. Results require finish before TTL.",
+        "Start a Node task from a local directory or a repository URL. A URL without gitToken or sshKeyPath is cloned in the guest and requires nat or filtered. A token or SSH key fetches on the host and is not imported. Results require finish before TTL.",
       inputSchema: {
         projectPath: z.string().optional(),
         repositoryUrl: z.string().optional(),
@@ -107,7 +111,7 @@ export function createServer(options: ToolOptions = {}): McpServer {
         runtimes: z
           .array(z.object({ name: z.string(), version: z.string() }))
           .optional(),
-        network: z.enum(["none", "nat"]).optional(),
+        network: z.enum(["none", "nat", "filtered"]).optional(),
         ttlSeconds: z.number().int().min(1).max(86400).optional(),
         cpus: z.number().int().positive().optional(),
         memoryMB: z.number().int().min(128).optional(),

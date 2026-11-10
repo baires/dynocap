@@ -15,6 +15,7 @@ public struct TaskCommand: Codable, Equatable {
     public var memoryMB: Int?
     public var argv: [String]?
     public var requireOffline: Bool?
+    public var permitFiltered: Bool?
     public init(op: String) { self.op = op }
 }
 
@@ -241,9 +242,12 @@ final class TaskManager {
             network: command.network ?? NetworkMode.none)
         request.runtimeDirectory = runtime.path
         request.workspaceDisk = disk.path
+        if request.network == .filtered, case .guestClone(let repo) = resolved {
+            request.filteredRepositoryHost = FilteredEgress.repositoryHost(repo.url)
+        }
         _ = try boot(request)
         measured("boot")
-        if record.network == .nat {
+        if record.network == .nat || record.network == .filtered {
             _ = try execute(
                 id,
                 [
@@ -261,10 +265,19 @@ final class TaskManager {
             }
         case .guestClone(let repo):
             _ = try execute(id, GuestGit.clone(url: repo.url, ref: repo.ref), nil, nil, 4 << 20)
+            let pinned = repo.ref.flatMap { CommitID.isValid($0) ? $0 : nil }
+            if let pinned {
+                _ = try execute(id, GuestGit.fetchCommit(pinned), nil, nil, 4 << 20)
+                _ = try execute(id, GuestGit.detach(pinned), nil, nil, 1 << 20)
+            }
             let data = try execute(id, GuestGit.revision(), nil, nil, 1 << 20)
             let revision = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             guard CommitID.isValid(revision) else { throw MicroVMError("git did not return a commit") }
-            _ = try execute(id, GuestGit.detach(revision), nil, nil, 1 << 20)
+            if let pinned {
+                guard revision == pinned else { throw MicroVMError("git did not return a commit") }
+            } else {
+                _ = try execute(id, GuestGit.detach(revision), nil, nil, 1 << 20)
+            }
             for argv in GuestGit.configure(url: repo.url) {
                 _ = try execute(id, argv, nil, nil, 1 << 20)
             }
@@ -362,7 +375,11 @@ final class TaskManager {
         busy = false
         condition.broadcast()
     }
-    func finish(_ id: String, requireOffline: Bool) throws -> TaskRecord {
+    func recordedNetwork(_ id: String) -> NetworkMode? {
+        try? load(id).network
+    }
+
+    func finish(_ id: String, requireOffline: Bool, permitFiltered: Bool? = nil) throws -> TaskRecord {
         var mark = ProcessInfo.processInfo.systemUptime
         let saved = try load(id)
         if saved.resultDirectory != nil {
@@ -374,9 +391,12 @@ final class TaskManager {
             condition.unlock()
             throw MicroVMError("task is interrupted or already finalizing; unexported edits are unavailable")
         }
-        if requireOffline && record.network != .none {
+        if let message = NetworkAdmission.rejection(
+            network: record.network, requireOffline: requireOffline, permitFiltered: permitFiltered,
+            offlineMessage: "task requires offline networking"
+        ) {
             condition.unlock()
-            throw MicroVMError("task requires offline networking")
+            throw MicroVMError(message)
         }
         record.phase = "finalizing"
         current = record

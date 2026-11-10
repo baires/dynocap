@@ -75,7 +75,7 @@ An address that reaches one port of a sandbox.
 _Avoid_: tunnel, ingress
 
 **Network mode**:
-Whether a sandbox is offline or has unrestricted outbound connectivity.
+Whether a sandbox is offline, filtered to the install and public-clone allowlist, or unrestricted.
 
 **Egress**:
 Which outbound destinations a sandbox may open.

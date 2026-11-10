@@ -43,7 +43,9 @@ enum TaskSourceResolver {
         let repo = RepositorySource(url: parsed.url, ref: ref, token: token, sshKeyPath: key, kind: parsed.kind)
         if token == nil && key == nil {
             guard parsed.kind == "https" else { throw MicroVMError("ssh repository requires --ssh-key") }
-            guard command.network == .nat else { throw MicroVMError("repository fetch requires --network nat") }
+            guard command.network == .nat || command.network == .filtered else {
+                throw MicroVMError("repository fetch requires --network nat")
+            }
             return .guestClone(repo)
         }
         return .hostFetch(repo)
@@ -139,9 +141,21 @@ enum GuestGit {
 
     static func clone(url: String, ref: String?) -> [String] {
         var args = ["env"] + lock + ["git"] + config + ["clone", "--no-recurse-submodules"]
-        if let ref { args += ["--branch", ref] }
+        if let ref {
+            if CommitID.isValid(ref) {
+                args += ["--no-checkout"]
+            } else {
+                args += ["--branch", ref]
+            }
+        }
         args += ["--", url, "/workspace"]
         return args
+    }
+
+    static func fetchCommit(_ revision: String) -> [String] {
+        ["env"] + lock + ["git", "-C", "/workspace"] + config + [
+            "fetch", "--no-recurse-submodules", "origin", revision,
+        ]
     }
 
     static func revision() -> [String] {

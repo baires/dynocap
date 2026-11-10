@@ -102,7 +102,9 @@ the `ARM\x64` magic. Intel Macs boot the bzImage as published.
 
 The default guest has **no virtual network device**. Exec still works over
 vsock. `--network nat` explicitly attaches `VZNATNetworkDeviceAttachment` for
-unrestricted outbound access with DHCP. No host filesystem is mounted.
+unrestricted outbound access with DHCP. `--network filtered` attaches a virtio
+NIC whose host forwarder allows HTTPS only to `registry.npmjs.org` and the
+task's Git host. No host filesystem is mounted.
 
 ## Isolation promise
 
@@ -114,8 +116,12 @@ still works; vsock is the daemon-to-agent control channel.
 `--network nat` is an explicit relaxation: the guest can reach destinations
 allowed by the host network, potentially including host services, private
 networks, link-local services, and cloud metadata endpoints. NAT does **not**
-filter destinations or prevent data exfiltration. The runtime does not publish
-inbound ports. Filtered internet access is future work.
+filter destinations or prevent data exfiltration. `--network filtered` is a
+separate explicit mode. The host forwarder allows TCP port 443 only to
+`registry.npmjs.org` and, for a repository URL, that URL's hostname, and
+denies the host, private networks, link-local, CGNAT, multicast, and metadata
+addresses. The runtime does not publish inbound ports. There is no general
+allowlist language.
 
 The host daemon and applications running as your user are trusted. The Unix
 socket is the local control boundary, not a boundary between applications

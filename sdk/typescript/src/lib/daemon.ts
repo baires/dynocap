@@ -8,7 +8,7 @@ import {
   type ExecStream,
 } from "./session.ts";
 
-export type NetworkMode = "none" | "nat";
+export type NetworkMode = "none" | "nat" | "filtered";
 
 export type SandboxInfo = {
   network: NetworkMode | null;
@@ -32,6 +32,7 @@ export type BootRequest = {
 
 export type ExecBody = {
   requireOffline?: boolean;
+  permitFiltered?: boolean;
   name: string;
   argv: string[];
   env: string[];
@@ -125,7 +126,9 @@ function asInfo(value: unknown): SandboxInfo {
   }
   return {
     network:
-      record.network === "none" || record.network === "nat"
+      record.network === "none" ||
+      record.network === "nat" ||
+      record.network === "filtered"
         ? record.network
         : null,
     name: record.name,

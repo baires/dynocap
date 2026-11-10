@@ -3,6 +3,7 @@ import Foundation
 public enum NetworkMode: String, Codable {
     case none
     case nat
+    case filtered
 }
 
 public enum IsolationPolicy {

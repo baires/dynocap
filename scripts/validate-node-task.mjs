@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Run against a deliberately selected checkout; online installation requires explicit NAT.
+// Run against a deliberately selected checkout. Install uses filtered egress.
+// One later NAT task checks that NAT can still reach a name the filter denies.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -19,6 +20,12 @@ if (!projectArgument || !reportArgument || !process.env.MICROVM_HOME) {
 const projectPath = path.resolve(projectArgument);
 const reportPath = path.resolve(reportArgument);
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
+const denyScript =
+  "const net = require('net');\nconst targets = [['169.254.169.254', 80], ['10.1.2.3', 443], ['192.168.1.1', 443]];\nlet left = targets.length;\nconst opened = [];\nfor (const [host, port] of targets) {\n  const socket = net.connect({ host, port });\n  const finish = (open) => {\n    socket.destroy();\n    if (open) opened.push(host + ':' + port);\n    if (--left === 0) {\n      if (opened.length) { console.error(opened.join(',')); process.exit(1); }\n      process.exit(0);\n    }\n  };\n  socket.setTimeout(3000);\n  socket.once('connect', () => finish(true));\n  socket.once('timeout', () => finish(false));\n  socket.once('error', () => finish(false));\n}\n";
+const nxScript =
+  "require('dns').lookup('example.com', (error) => process.exit(error ? 0 : 1));";
+const natScript =
+  "const net = require('net');\nconst socket = net.connect(443, 'example.com');\nsocket.setTimeout(8000);\nsocket.once('connect', () => { socket.end(); process.exit(0); });\nsocket.once('timeout', () => process.exit(2));\nsocket.once('error', (error) => { console.error(error.message); process.exit(3); });\n";
 assert.equal(
   execFileSync("git", ["-C", projectPath, "rev-parse", "HEAD"], {
     encoding: "utf8",
@@ -57,7 +64,7 @@ let task, result, failure;
 const checks = [];
 try {
   task = await timed("start", () =>
-    Task.start({ projectPath, network: "nat", ttlSeconds: 600 })
+    Task.start({ projectPath, network: "filtered", ttlSeconds: 600 })
   );
   for (const label of ["npm ci", "jest before"]) {
     const command = label === "npm ci" ? "npm ci" : "npm test -- --runInBand";
@@ -70,6 +77,16 @@ try {
       0,
       `${label} failed; see ${check.logDirectory}`
     );
+    if (label === "npm ci") {
+      const blocked = await timed("filtered deny", () =>
+        task.exec(["node", "-e", denyScript])
+      );
+      assert.equal(blocked.exitCode, 0, blocked.stderr);
+      const foreign = await timed("filtered nxdomain", () =>
+        task.exec(["node", "-e", nxScript])
+      );
+      assert.equal(foreign.exitCode, 0, foreign.stderr);
+    }
   }
   const edit = `const fs = require('node:fs'); const file = '/workspace/helpers/time.ts'; const source = fs.readFileSync(file,'utf8'); const needle = "    this.customDate = new Date(customDate + 'T00:00:00Z')\\n"; if (source.split(needle).length !== 2) throw Error('constructor mismatch'); fs.writeFileSync(file,source.replace(needle,''));`;
   const applied = await timed("edit", () => task.exec(["node", "-e", edit]));
@@ -142,8 +159,31 @@ assert(
   !(await Sandbox.list()).some((s) => s.name === task?.id),
   "sandbox still exists"
 );
+let natProbe;
+try {
+  const probeDir = fs.mkdtempSync(
+    path.join(path.dirname(reportPath), "nat-probe-")
+  );
+  const natTask = await Task.start({
+    projectPath: probeDir,
+    network: "nat",
+    ttlSeconds: 180,
+  });
+  try {
+    natProbe = await natTask.exec(["node", "-e", natScript]);
+    assert.equal(natProbe.exitCode, 0, natProbe.stderr || natProbe.stdout);
+  } finally {
+    await natTask.finish();
+  }
+} catch (error) {
+  failure = [failure, `NAT regression: ${error}`].filter(Boolean).join("\n");
+}
 const report = {
   revision,
+  network: "filtered",
+  natProbe: natProbe
+    ? { exitCode: natProbe.exitCode, stderr: natProbe.stderr }
+    : undefined,
   lockfileHash,
   startedAt,
   totalMs,

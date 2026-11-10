@@ -134,6 +134,69 @@ test("NAT creation requires an explicit MCP host policy", async () => {
   }
 });
 
+test("filtered creation requires its own MCP host policy", async () => {
+  const daemon = await fakeDaemon();
+  try {
+    const denied = await microvmRun(
+      { name: "denied", network: "filtered" },
+      { home: daemon.home, allowNat: true }
+    );
+    assert.equal(denied.isError, true);
+    assert.match(denied.content[0].text, /MICROVM_MCP_ALLOW_FILTERED=1/);
+    assert.equal(daemon.runs.length, 0);
+    const natStillDenied = await microvmRun(
+      { name: "nat", network: "nat" },
+      { home: daemon.home, allowFiltered: true }
+    );
+    assert.equal(natStillDenied.isError, true);
+    assert.match(natStillDenied.content[0].text, /MICROVM_MCP_ALLOW_NAT=1/);
+    const allowed = await microvmRun(
+      { name: "allowed", network: "filtered" },
+      { home: daemon.home, allowFiltered: true }
+    );
+    assert.equal(allowed.isError, undefined);
+    assert.equal(daemon.runs[0]?.network, "filtered");
+    assert.equal(daemon.runs[0]?.permitFiltered, undefined);
+  } finally {
+    await daemon.close();
+  }
+});
+
+test("filtered exec permission does not follow NAT permission", async () => {
+  const daemon = await fakeDaemon({ recordedNetwork: "filtered" });
+  const home = { home: daemon.home };
+  try {
+    await Sandbox.create({ ...home, name: "existing", network: "filtered" });
+    const deniedByNat = await microvmExec(
+      { name: "existing", command: "true" },
+      { ...home, allowNat: true }
+    );
+    assert.equal(deniedByNat.isError, true);
+    assert.match(deniedByNat.content[0].text, /MICROVM_MCP_ALLOW_FILTERED=1/);
+    assert.equal(daemon.execs.length, 0);
+    const deniedByFiltered = await microvmExec(
+      { name: "existing", command: "true" },
+      { ...home, allowFiltered: true, allowNat: false }
+    );
+    assert.equal(deniedByFiltered.isError, undefined);
+    const nat = await fakeDaemon({ recordedNetwork: "nat" });
+    try {
+      await Sandbox.create({ home: nat.home, name: "natbox", network: "nat" });
+      const natDenied = await microvmExec(
+        { name: "natbox", command: "true" },
+        { home: nat.home, allowFiltered: true }
+      );
+      assert.equal(natDenied.isError, true);
+      assert.match(natDenied.content[0].text, /offline sandbox/);
+      assert.equal(nat.execs.length, 0);
+    } finally {
+      await nat.close();
+    }
+  } finally {
+    await daemon.close();
+  }
+});
+
 test("MCP cannot exec existing NAT or unknown sandboxes without host permission", async () => {
   for (const recordedNetwork of ["nat", "unknown"] as const) {
     const daemon = await fakeDaemon({ recordedNetwork });
@@ -248,6 +311,34 @@ test("stdio entrypoint only enables NAT for the literal host environment value 1
   }
 });
 
+test("stdio entrypoint only enables filtered networking for the literal value 1", async () => {
+  for (const value of [undefined, "0", "true", "1"]) {
+    const daemon = await fakeDaemon();
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [fileURLToPath(new URL("../dist/bin.js", import.meta.url))],
+      env: {
+        MICROVM_HOME: daemon.home,
+        MICROVM_MCP_ALLOW_NAT: "1",
+        ...(value === undefined ? {} : { MICROVM_MCP_ALLOW_FILTERED: value }),
+      },
+    });
+    const client = new Client({ name: "test", version: "0.0.0" });
+    try {
+      await client.connect(transport);
+      const result = await client.callTool({
+        name: "microvm_run",
+        arguments: { name: "filtered", network: "filtered" },
+      });
+      assert.equal(result.isError === true, value !== "1");
+      assert.equal(daemon.runs.length, value === "1" ? 1 : 0);
+    } finally {
+      await client.close();
+      await daemon.close();
+    }
+  }
+});
+
 test("task tools preserve MCP NAT permission and return retained result references", async () => {
   const { microvmTaskStart, microvmTaskExec, microvmTaskFinish } =
     await import("../src/tools.ts");
@@ -259,7 +350,24 @@ test("task tools preserve MCP NAT permission and return retained result referenc
         .isError,
       true
     );
-    assert.equal(daemon.runs.length, 0);
+    assert.match(
+      (
+        await microvmTaskStart(
+          { projectPath: ".", network: "filtered" },
+          options
+        )
+      ).content[0].text,
+      /MICROVM_MCP_ALLOW_FILTERED=1|filtered networking is disabled/
+    );
+    const filtered = await microvmTaskStart(
+      { projectPath: ".", network: "filtered" },
+      { ...options, allowFiltered: true }
+    );
+    assert.equal(filtered.isError, undefined);
+    assert.equal(daemon.runs.at(-1)?.network, "filtered");
+    assert.equal(daemon.runs.at(-1)?.permitFiltered, true);
+    assert.equal(daemon.runs.at(-1)?.requireOffline, true);
+    assert.equal(daemon.runs.length, 1);
     assert.equal(
       (await microvmTaskStart({ projectPath: "." }, options)).isError,
       undefined
