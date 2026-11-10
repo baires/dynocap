@@ -4,8 +4,14 @@ A local Linux microVM runtime for AI agents on macOS. One CLI boots an
 isolated Linux guest with Apple's Virtualization.framework, runs a command
 inside it, and tears it down.
 
-This is a spike: one image, one user, one machine. No cluster, no registry,
-no host filesystem share.
+For project work, start with the **[Git-style workflow guide](docs/git-style-workflow.md)**:
+clone a local directory or repository into a named Node 22 task, run commands,
+review a verified diff, and retain results after teardown. It includes CLI,
+TypeScript SDK, and MCP setup. Project tasks currently require Apple Silicon.
+
+The tool is local-first: one user and one machine, with no hosted account,
+cluster, or host filesystem share. Tasks have finite lifetimes; persistent
+workspaces and resume are not implemented.
 
 ## Architecture
 
