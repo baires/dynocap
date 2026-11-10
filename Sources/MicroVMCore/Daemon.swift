@@ -250,6 +250,7 @@ public final class Daemon {
         var namespaceLocked = true
         defer { if namespaceLocked { tasks.namespace.unlock() } }
         if request.runtimeDirectory == nil { try tasks.checkRawName(request.name) }
+        if request.name.hasPrefix("task-") { try tasks.ensureStarting(request.name) }
         let lifecycle = lifecycle(request.name)
         lifecycle.lock.lock()
         // Release while waiting for the guest, allowing expiry and explicit destroy during boot.

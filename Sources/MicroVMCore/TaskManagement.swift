@@ -54,15 +54,54 @@ extension TaskManager {
         }
     }
 
-    func remove(_ id: String, purge: Bool) throws {
-        try destroy(id)  // Failed teardown must keep the alias, disk and record.
+    func cleanupFailedStart(_ id: String) {
+        do {
+            try destroy(id)
+            try? fm.removeItem(at: dir(id))
+            release()
+        } catch {
+            condition.lock()
+            defer { condition.unlock() }
+            if var record = current, record.id == id {
+                record.phase = "interrupted"
+                record.message = "startup failed; teardown must be retried: \(error)"
+                current = record
+                try? save(record)
+                // Keep admission occupied until explicit removal or TTL teardown succeeds.
+            } else {
+                busy = false
+                condition.broadcast()
+            }
+        }
+    }
+
+    func ensureStarting(_ id: String) throws {
         condition.lock()
-        while reviewing { condition.wait() }
+        defer { condition.unlock() }
+        guard current?.id == id, current?.phase == "starting" else {
+            throw MicroVMError("task was removed during startup")
+        }
+    }
+
+    func remove(_ id: String, purge: Bool) throws {
+        var duringStartup = false
+        do {
+            // Serialize cancellation with boot's record registration.
+            namespace.lock()
+            defer { namespace.unlock() }
+            duringStartup = (try? load(id))?.phase == "starting"
+            try destroy(id)  // Failed teardown must keep the alias, disk and record.
+            stopped(id, reason: "sandbox removed")
+        }
+        condition.lock()
+        while reviewing || (duringStartup && busy && current == nil) { condition.wait() }
         condition.unlock()
         namespace.lock()
         defer { namespace.unlock() }
         condition.lock()
         defer { condition.unlock() }
+        // Cancelled startup may already have removed its unpublished record.
+        guard fm.fileExists(atPath: dir(id).path) else { return }
         var record = try load(id)
         if purge {
             try fm.removeItem(at: dir(id))

@@ -210,9 +210,7 @@ final class TaskManager {
         var completed = false
         defer {
             if !completed {
-                try? destroy(id)
-                try? fm.removeItem(at: directory)
-                release()
+                cleanupFailedStart(id)
             }
         }
         try fm.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -249,10 +247,14 @@ final class TaskManager {
             id: id, name: command.name, runtimes: artifact.runtimes, phase: "starting", runtimeDigest: artifact.artifactDigest,
             createdAtUnix: unixNow(),
             expiresAtUnix: unixNow() + 7 * 86400, network: command.network ?? NetworkMode.none)
-        try save(record)
-        condition.lock()
-        current = record
-        condition.unlock()
+        do {
+            namespace.lock()
+            defer { namespace.unlock() }
+            try save(record)
+            condition.lock()
+            current = record
+            condition.unlock()
+        }
         var request = RunRequest(
             name: id, cpus: command.cpus ?? 2, memoryMB: command.memoryMB ?? 2048, ttlSeconds: command.ttlSeconds, bootTimeoutSeconds: 60,
             network: command.network ?? NetworkMode.none)
@@ -365,6 +367,7 @@ final class TaskManager {
         condition.lock()
         defer { condition.unlock() }
         guard var record = current, record.id == name else { return }
+        let wasStarting = record.phase == "starting"
         if record.resultDirectory == nil {
             record.phase = "interrupted"
             record.message = reason
@@ -382,7 +385,8 @@ final class TaskManager {
         }
         current = nil
         active = 0
-        busy = false
+        // Startup owns admission until its deferred cleanup has finished.
+        busy = wasStarting
         condition.broadcast()
     }
     func recordedNetwork(_ id: String) -> NetworkMode? {

@@ -7,7 +7,12 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { createHash } from "node:crypto";
-import { Task, Sandbox, listManaged } from "../sdk/typescript/dist/index.js";
+import {
+  Task,
+  Sandbox,
+  listManaged,
+  removeManaged,
+} from "../sdk/typescript/dist/index.js";
 import { microvmDiff, microvmLs } from "../sdk/mcp/dist/tools.js";
 
 const home = process.env.MICROVM_HOME;
@@ -29,7 +34,7 @@ const revision = "d6de9f4b36f175b11586f89339689c1fe3c88805";
 const lockfileHash =
   "de16b9dbcde39f75b41e7f5acc9a3a44af7a62ebc0ad077ecc51c5936843c129";
 const marks = [];
-let daemon, task, result, failure, totalMs, restartFiles;
+let daemon, task, result, failure, totalMs, restartFiles, startupCancelled;
 function command(args) {
   return new Promise((resolve, reject) => {
     const child = spawn(binary, ["--home", home, ...args]);
@@ -76,7 +81,7 @@ async function startDaemon() {
   throw Error("private daemon did not become ready");
 }
 async function stopDaemon() {
-  if (!daemon || daemon.exitCode !== null) return;
+  if (!daemon || daemon.exitCode !== null || daemon.signalCode !== null) return;
   const exited = once(daemon, "exit");
   daemon.kill("SIGTERM");
   await exited;
@@ -223,8 +228,52 @@ try {
   await task.remove({ purge: true });
   assert.equal(fs.existsSync(result.resultDirectory), false);
   assert.equal((await Task.open("interview", { home })).id, replacement.id);
+  const replacementTask = await Task.open("interview", { home });
+  const waiting = replacementTask.exec("sleep 30");
+  const cancelled = assert.rejects(waiting);
+  await new Promise((resolve) => setTimeout(resolve, 100));
   await run("remove replacement", ["rm", "interview", "--purge"]);
+  await cancelled;
   assert.deepEqual(await listManaged({ home }), []);
+  const pending = Task.start({
+    home,
+    projectPath: empty,
+    name: "boot-cancel",
+    ttlSeconds: 120,
+  }).then(
+    (value) => ({ value }),
+    (error) => ({ error })
+  );
+  const deadline = Date.now() + 15000;
+  let observedStarting = false;
+  while (Date.now() < deadline && !observedStarting) {
+    for (const directory of fs.readdirSync(path.join(home, "tasks"))) {
+      try {
+        const record = JSON.parse(
+          fs.readFileSync(
+            path.join(home, "tasks", directory, "task.json"),
+            "utf8"
+          )
+        );
+        if (record.name === "boot-cancel" && record.phase === "starting")
+          observedStarting = true;
+      } catch {
+        /* A record can be published between polls. */
+      }
+    }
+    if (!observedStarting)
+      await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert(observedStarting, "did not observe the startup cancellation window");
+  await removeManaged("boot-cancel", { home, purge: true });
+  const cancelledStart = await pending;
+  assert(
+    "error" in cancelledStart,
+    "removed task unexpectedly finished booting"
+  );
+  assert.deepEqual(await listManaged({ home }), []);
+  assert.deepEqual(await Sandbox.list({ home }), []);
+  startupCancelled = true;
 } catch (error) {
   failure = String(error?.stack ?? error);
   if (task && !result) {
@@ -246,6 +295,7 @@ try {
         budgetMs: 180000,
         withinBudget: totalMs <= 180000,
         restartFiles,
+        startupCancelled,
         result,
         marks,
         failure,

@@ -84,6 +84,55 @@ final class TaskManagementTests: XCTestCase {
         XCTAssertEqual(winners, 1)
     }
 
+    func testCancelledStartupKeepsAdmissionUntilItsCleanupReturns() throws {
+        let (root, tasks) = try setup()
+        var record = try seed(root)
+        record.phase = "starting"
+        record.resultDirectory = nil
+        tasks.current = record
+        tasks.busy = true
+        try tasks.save(record)
+        XCTAssertNoThrow(try tasks.ensureStarting(record.id))
+        tasks.stopped(record.id, reason: "removed during boot")
+        XCTAssertThrowsError(try tasks.ensureStarting(record.id))
+        XCTAssertNil(tasks.current)
+        XCTAssertThrowsError(try tasks.admit())
+        // The original start's failure defer releases admission after cleanup.
+        tasks.release()
+        XCTAssertNoThrow(try tasks.admit())
+        tasks.release()
+        try FileManager.default.removeItem(at: root.appendingPathComponent("tasks/task-old"))
+        XCTAssertNoThrow(try tasks.remove(record.id, purge: true))
+    }
+
+    func testFailedStartupTeardownKeepsDiskNameAndAdmissionForRetry() throws {
+        let (root, _) = try setup()
+        var record = try seed(root)
+        record.phase = "starting"
+        record.resultDirectory = nil
+        let disk = root.appendingPathComponent("tasks/task-old/workspace.ext4")
+        try Data("disk".utf8).write(to: disk)
+        var failTeardown = true
+        let tasks = TaskManager(
+            paths: MicroVMPaths(home: root), arch: "aarch64", boot: { _ in throw MicroVMError("boot") },
+            execute: { _, _, _, _, _, _ in throw MicroVMError("exec") },
+            destroy: { _ in
+                if failTeardown { throw MicroVMError("teardown failed") }
+            })
+        tasks.current = record
+        tasks.busy = true
+        try tasks.save(record)
+        tasks.cleanupFailedStart(record.id)
+        XCTAssertEqual(try tasks.resolve("interview").phase, "interrupted")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: disk.path))
+        XCTAssertThrowsError(try tasks.admit())
+        failTeardown = false
+        try tasks.remove(record.id, purge: true)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: disk.path))
+        XCTAssertNoThrow(try tasks.admit())
+        tasks.release()
+    }
+
     func testFailedTeardownPreservesNameAndResult() throws {
         let (root, _) = try setup()
         _ = try seed(root)

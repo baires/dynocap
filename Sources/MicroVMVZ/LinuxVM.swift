@@ -81,6 +81,7 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
     private var bootFinished = false
     private var exited = false
     private var stopping = false
+    private var pendingStops: [(Result<Void, Error>) -> Void] = []
     private let bootLock = NSLock()
     private let handlerLock = NSLock()
     private var handlers: [UInt32: (GuestMessage) -> Void] = [:]
@@ -176,6 +177,11 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
                 completion(.success(()))
                 return
             }
+            if vm.state == .starting {
+                // VZ rejects stop during start. Its completion will drain these requests.
+                self.pendingStops.append(completion)
+                return
+            }
             if vm.state == .stopped {
                 self.teardown(message: nil)
                 completion(.success(()))
@@ -264,6 +270,20 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
         vm.start { [weak self] result in
             guard let self = self else { return }
             self.queue.async {
+                if self.stopping {
+                    let completions = self.pendingStops
+                    self.pendingStops = []
+                    guard !completions.isEmpty else { return }
+                    if case .failure(let error) = result {
+                        self.teardown(message: error.localizedDescription)
+                        for completion in completions { completion(.success(())) }
+                    } else {
+                        self.destroy { outcome in
+                            for completion in completions { completion(outcome) }
+                        }
+                    }
+                    return
+                }
                 if case .failure(let error) = result {
                     self.finishBoot(.failure(error))
                     return
