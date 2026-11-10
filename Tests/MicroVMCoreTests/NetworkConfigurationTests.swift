@@ -1,4 +1,5 @@
 #if os(macOS)
+import Darwin
 import XCTest
 import MicroVMCore
 import Virtualization
@@ -51,6 +52,61 @@ final class NetworkConfigurationTests: XCTestCase {
         XCTAssertEqual(queried, ["github.com."])
         XCTAssertEqual(forwarder.names(for: first), ["registry.npmjs.org", "github.com"])
     }
+    func testFilteredDownloadBackpressureAndWindowRecovery() throws {
+        let forwarder = try FilteredForwarder.testing(repositoryHost: nil)
+        defer { forwarder.stop() }
+        var pair: [Int32] = [-1, -1]
+        XCTAssertEqual(socketpair(AF_UNIX, SOCK_STREAM, 0, &pair), 0)
+        let relay = Relay(fd: pair[0], guestMAC: [0, 1, 2, 3, 4, 5], guestPort: 4000, destination: 0x01010101)
+        defer { relay.close(); Darwin.close(pair[1]) }
+        for fd in pair {
+            let flags = fcntl(fd, F_GETFL)
+            XCTAssertEqual(fcntl(fd, F_SETFL, flags | O_NONBLOCK), 0)
+            var size: Int32 = 1 << 20
+            XCTAssertEqual(setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &size, socklen_t(MemoryLayout<Int32>.size)), 0)
+        }
+        relay.phase = .open
+        relay.sniAccepted = true
+        relay.window = 0
+        relay.sndUna = 100
+        relay.sndNxt = 100
+        let chunk = [UInt8](repeating: 42, count: 16_384)
+        for _ in 0..<32 {
+            let count = chunk.withUnsafeBytes { Darwin.write(pair[1], $0.baseAddress, $0.count) }
+            XCTAssertEqual(count, chunk.count)
+            _ = forwarder.readHost(relay)
+            XCTAssertTrue(forwarder.pumpGuest(relay).isEmpty)
+        }
+        XCTAssertEqual(relay.outbound.count + relay.unacked.count, 262_144)
+        XCTAssertEqual(relay.pollEvents & Int16(POLLIN), 0)
+        _ = forwarder.readHost(relay) // A stale readiness event must not bypass the bound.
+        XCTAssertEqual(relay.outbound.count, 262_144)
+        var received: [UInt8] = []
+        func drain() {
+            for frame in forwarder.pumpGuest(relay) { received += frame.dropFirst(54) }
+        }
+        relay.window = 1
+        drain()
+        XCTAssertEqual(received.count, 1)
+        XCTAssertEqual(relay.outbound.count + relay.unacked.count, 262_144)
+        forwarder.acceptAck(relay, relay.sndNxt)
+        XCTAssertNotEqual(relay.pollEvents & Int16(POLLIN), 0)
+        _ = forwarder.readHost(relay)
+        XCTAssertEqual(relay.outbound.count + relay.unacked.count, 262_144)
+        Darwin.shutdown(pair[1], SHUT_WR)
+        relay.window = 65_535
+        for _ in 0..<128 {
+            _ = forwarder.readHost(relay)
+            drain()
+            forwarder.acceptAck(relay, relay.sndNxt)
+            XCTAssertLessThanOrEqual(relay.outbound.count + relay.unacked.count, 262_144)
+            if relay.hostClosed && relay.outbound.isEmpty && relay.unacked.isEmpty { break }
+        }
+        XCTAssertEqual(received, [UInt8](repeating: 42, count: 32 * chunk.count))
+        XCTAssertTrue(relay.hostClosed)
+        XCTAssertEqual(relay.pollEvents & Int16(POLLIN), 0)
+    }
+
 }
 
 private func ethernet(from source: [UInt8], type: UInt16, payload: [UInt8]) -> [UInt8] {

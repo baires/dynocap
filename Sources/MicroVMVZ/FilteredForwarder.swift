@@ -116,14 +116,7 @@ public final class FilteredForwarder {
             var polls = [pollfd(fd: hostFD, events: Int16(POLLIN), revents: 0)]
             var keys: [Flow?] = [nil]
             for (key, relay) in flows where relay.fd >= 0 {
-                var events = Int16(0)
-                if relay.phase == .dialing {
-                    events = Int16(POLLOUT)
-                } else {
-                    if relay.inbound.count < 262_144 { events |= Int16(POLLIN) }
-                    if !relay.inbound.isEmpty { events |= Int16(POLLOUT) }
-                }
-                polls.append(pollfd(fd: relay.fd, events: events, revents: 0))
+                polls.append(pollfd(fd: relay.fd, events: relay.pollEvents, revents: 0))
                 keys.append(key)
             }
             let ready = polls.withUnsafeMutableBufferPointer { buffer -> Int32 in
@@ -289,7 +282,7 @@ public final class FilteredForwarder {
             let relay = Relay(fd: fd, guestMAC: guestMAC, guestPort: srcPort, destination: destination)
             relay.allowedNames = names
             relay.rcvNxt = seq &+ 1
-            relay.window = max(window, 1)
+            relay.window = window
             relay.iss = UInt32.random(in: 1...UInt32.max - 1024)
             relay.sndUna = relay.iss
             relay.sndNxt = relay.iss
@@ -298,7 +291,7 @@ public final class FilteredForwarder {
             return []
         }
         guard let relay = flows[flow] else { return [] }
-        relay.window = max(window, 1)
+        relay.window = window
         relay.guestMAC = guestMAC
         var replies: [[UInt8]] = []
         if flags & 0x04 != 0 {
@@ -312,7 +305,7 @@ public final class FilteredForwarder {
         }
         if ack != 0 { acceptAck(relay, ack) }
         if relay.phase == .open && !payload.isEmpty && seq == relay.rcvNxt
-            && relay.inbound.count + payload.count <= 262_144 {
+            && relay.inbound.count + payload.count <= Relay.bufferLimit {
             let decision = takeGuestPayload(relay, payload, flow: flow)
             if flows[flow] == nil { return decision }
             replies += decision
@@ -413,9 +406,9 @@ public final class FilteredForwarder {
         return []
     }
 
-    private func readHost(_ relay: Relay) -> [[UInt8]] {
-        guard relay.phase == .open || relay.phase == .handshake else { return [] }
-        var buffer = [UInt8](repeating: 0, count: 16_384)
+    func readHost(_ relay: Relay) -> [[UInt8]] {
+        guard relay.phase == .open || relay.phase == .handshake, relay.hostReadCapacity > 0 else { return [] }
+        var buffer = [UInt8](repeating: 0, count: min(16_384, relay.hostReadCapacity))
         let count = buffer.withUnsafeMutableBytes { raw -> Int in
             guard let base = raw.baseAddress else { return -1 }
             return Darwin.recv(relay.fd, base, raw.count, 0)
@@ -433,7 +426,7 @@ public final class FilteredForwarder {
         return []
     }
 
-    private func pumpGuest(_ relay: Relay) -> [[UInt8]] {
+    func pumpGuest(_ relay: Relay) -> [[UInt8]] {
         guard relay.phase == .open else { return [] }
         var replies: [[UInt8]] = []
         let inFlight = relay.sndNxt &- relay.sndUna
@@ -492,7 +485,7 @@ public final class FilteredForwarder {
         return replies
     }
 
-    private func acceptAck(_ relay: Relay, _ ack: UInt32) {
+    func acceptAck(_ relay: Relay, _ ack: UInt32) {
         if seqBefore(relay.sndNxt &+ 1, ack) { return }
         if seqBefore(ack, relay.sndUna) { return }
         let advance = Int(ack &- relay.sndUna)
@@ -736,7 +729,8 @@ private struct Flow: Hashable {
     var destination: UInt32
 }
 
-private final class Relay {
+final class Relay {
+    static let bufferLimit = 256 << 10
     let fd: Int32
     var guestMAC: [UInt8]
     var guestPort: UInt16
@@ -767,6 +761,18 @@ private final class Relay {
         self.destination = destination
     }
 
+    var hostReadCapacity: Int {
+        hostClosed ? 0 : max(0, Self.bufferLimit - outbound.count - unacked.count)
+    }
+
+    var pollEvents: Int16 {
+        if phase == .dialing { return Int16(POLLOUT) }
+        var events: Int16 = 0
+        if hostReadCapacity > 0 { events |= Int16(POLLIN) }
+        if !inbound.isEmpty { events |= Int16(POLLOUT) }
+        return events
+    }
+
     var done: Bool {
         guestClosed && hostClosed && outbound.isEmpty && unacked.isEmpty && (finSeq == nil || sndUna == sndNxt)
     }
@@ -778,7 +784,7 @@ private final class Relay {
     }
 }
 
-private enum Phase {
+enum Phase {
     case dialing
     case handshake
     case open
