@@ -36,7 +36,8 @@ public final class FilteredForwarder {
     private var loggedFirst = false
     private var guestMAC = [UInt8](repeating: 0, count: 6)
     private var ipIdentity: UInt16 = 1
-    private var allowedUntil: [UInt32: TimeInterval] = [:]
+    var resolver: ((String) -> [UInt32])?
+    private var allowedNames: [UInt32: [String: TimeInterval]] = [:]
     private var dnsCache: [String: (TimeInterval, [UInt32])] = [:]
     private var flows: [Flow: Relay] = [:]
     private var loggedDrops: Set<UInt32> = []
@@ -250,9 +251,9 @@ public final class FilteredForwarder {
         guard let reply = FilteredDNS.reply(
             query: payload, repositoryHost: repositoryHost, hostAddresses: hosts,
             resolve: { [self] name in
-                let found = lookup(name)
-                remember(FilteredEgress.usable(found, hostAddresses: hosts))
-                return found
+                let selected = FilteredEgress.publishable(lookup(name), hostAddresses: hosts)
+                remember(selected, name: name)
+                return selected
             }
         ) else { return [] }
         return [udpFrame(UDPPacket(
@@ -275,7 +276,8 @@ public final class FilteredForwarder {
         let payload = Array(packet[dataOffset...])
         let flow = Flow(guestPort: srcPort, destination: destination)
         if flags & 0x02 != 0 && flags & 0x10 == 0 {
-            guard FilteredEgress.permitsTCP(
+            let names = namesNow(destination)
+            guard !names.isEmpty, FilteredEgress.permitsTCP(
                 destination: destination, port: Int(dstPort), resolved: resolvedNow(), hostAddresses: hostAddresses()
             ) else {
                 if loggedDrops.insert(destination).inserted {
@@ -285,6 +287,7 @@ public final class FilteredForwarder {
             }
             guard flows[flow] == nil, flows.count < 128, let fd = dial(destination) else { return [] }
             let relay = Relay(fd: fd, guestMAC: guestMAC, guestPort: srcPort, destination: destination)
+            relay.allowedNames = names
             relay.rcvNxt = seq &+ 1
             relay.window = max(window, 1)
             relay.iss = UInt32.random(in: 1...UInt32.max - 1024)
@@ -310,14 +313,15 @@ public final class FilteredForwarder {
         if ack != 0 { acceptAck(relay, ack) }
         if relay.phase == .open && !payload.isEmpty && seq == relay.rcvNxt
             && relay.inbound.count + payload.count <= 262_144 {
-            relay.inbound.append(contentsOf: payload)
-            relay.rcvNxt &+= UInt32(payload.count)
-            replies += flushHost(relay)
-            replies.append(segment(relay, payload: [], flags: 0x10))
+            let decision = takeGuestPayload(relay, payload, flow: flow)
+            if flows[flow] == nil { return decision }
+            replies += decision
         } else if !payload.isEmpty && seqBefore(seq, relay.rcvNxt) {
             replies.append(segment(relay, payload: [], flags: 0x10))
         }
+        guard flows[flow] != nil else { return replies }
         if flags & 0x01 != 0 && seq == relay.rcvNxt && !relay.guestClosed {
+            if !relay.sniAccepted { return reject(flow) }
             relay.guestClosed = true
             relay.rcvNxt &+= 1
             replies.append(segment(relay, payload: [], flags: 0x10))
@@ -355,7 +359,44 @@ public final class FilteredForwarder {
         return replies
     }
 
+    private func takeGuestPayload(_ relay: Relay, _ payload: [UInt8], flow: Flow) -> [[UInt8]] {
+        if relay.sniAccepted {
+            relay.inbound.append(contentsOf: payload)
+            relay.rcvNxt &+= UInt32(payload.count)
+            var replies = flushHost(relay)
+            replies.append(segment(relay, payload: [], flags: 0x10))
+            return replies
+        }
+        let candidate = relay.inbound + payload
+        switch FilteredTLS.firstFlight(candidate, names: relay.allowedNames) {
+        case .needMore:
+            if candidate.count > 16_384 + 5 { return reject(flow) }
+            relay.inbound = candidate
+            relay.rcvNxt &+= UInt32(payload.count)
+            return [segment(relay, payload: [], flags: 0x10)]
+        case .accept:
+            relay.sniAccepted = true
+            relay.inbound = candidate
+            relay.rcvNxt &+= UInt32(payload.count)
+            var replies = flushHost(relay)
+            replies.append(segment(relay, payload: [], flags: 0x10))
+            return replies
+        case .reject:
+            return reject(flow)
+        }
+    }
+
+    private func reject(_ flow: Flow) -> [[UInt8]] {
+        guard let relay = flows[flow] else { return [] }
+        note("drop sni \(format(relay.destination))")
+        let reset = segment(relay, payload: [], flags: 0x04)
+        relay.close()
+        flows[flow] = nil
+        return [reset]
+    }
+
     private func flushHost(_ relay: Relay) -> [[UInt8]] {
+        guard relay.sniAccepted else { return [] }
         while !relay.inbound.isEmpty {
             let wrote = relay.inbound.withUnsafeBytes { raw -> Int in
                 guard let base = raw.baseAddress else { return -1 }
@@ -579,35 +620,70 @@ public final class FilteredForwarder {
         let key = FilteredEgress.normalize(name)
         let now = ProcessInfo.processInfo.systemUptime
         if let cached = dnsCache[key], cached.0 > now { return cached.1 }
+        let query = FilteredEgress.absoluteLookupName(key)
+        let found = resolver?(query) ?? systemLookup(query)
+        dnsCache[key] = (now + TimeInterval(FilteredEgress.answerTTL), found)
+        return found
+    }
+
+    private func systemLookup(_ query: String) -> [UInt32] {
         var hints = addrinfo()
         hints.ai_family = AF_INET
         hints.ai_socktype = SOCK_STREAM
         var result: UnsafeMutablePointer<addrinfo>?
         var found: [UInt32] = []
-        if getaddrinfo(key, nil, &hints, &result) == 0, let result {
-            defer { freeaddrinfo(result) }
-            var cursor: UnsafeMutablePointer<addrinfo>? = result
-            while let item = cursor {
-                if item.pointee.ai_family == AF_INET, let addr = item.pointee.ai_addr {
-                    let value = addr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee.sin_addr.s_addr }
-                    found.append(UInt32(bigEndian: value))
-                }
-                cursor = item.pointee.ai_next
-            }
+        let status = query.withCString { pointer in
+            getaddrinfo(pointer, nil, &hints, &result)
         }
-        dnsCache[key] = (now + TimeInterval(FilteredEgress.answerTTL), found)
+        guard status == 0, let result else { return found }
+        defer { freeaddrinfo(result) }
+        var cursor: UnsafeMutablePointer<addrinfo>? = result
+        while let item = cursor {
+            if item.pointee.ai_family == AF_INET, let addr = item.pointee.ai_addr {
+                let value = addr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee.sin_addr.s_addr }
+                found.append(UInt32(bigEndian: value))
+            }
+            cursor = item.pointee.ai_next
+        }
         return found
     }
 
-    private func remember(_ addresses: [UInt32]) {
-        let expiry = ProcessInfo.processInfo.systemUptime + 120
-        for address in addresses { allowedUntil[address] = expiry }
+    private func remember(_ addresses: [UInt32], name: String) {
+        let expiry = ProcessInfo.processInfo.systemUptime + TimeInterval(FilteredEgress.answerTTL)
+        let normalized = FilteredEgress.normalize(name)
+        let now = ProcessInfo.processInfo.systemUptime
+        for address in addresses {
+            var grants = allowedNames[address] ?? [:]
+            grants = grants.filter { $0.value > now }
+            grants[normalized] = expiry
+            allowedNames[address] = grants
+        }
+    }
+
+    func names(for address: UInt32) -> Set<String> {
+        namesNow(address)
+    }
+
+    private func namesNow(_ address: UInt32) -> Set<String> {
+        let now = ProcessInfo.processInfo.systemUptime
+        let grants = (allowedNames[address] ?? [:]).filter { $0.value > now }
+        if grants.isEmpty {
+            allowedNames[address] = nil
+        } else {
+            allowedNames[address] = grants
+        }
+        return Set(grants.keys)
     }
 
     private func resolvedNow() -> Set<UInt32> {
         let now = ProcessInfo.processInfo.systemUptime
-        allowedUntil = allowedUntil.filter { $0.value > now }
-        return Set(allowedUntil.keys)
+        var live: [UInt32: [String: TimeInterval]] = [:]
+        for (address, grants) in allowedNames {
+            let current = grants.filter { $0.value > now }
+            if !current.isEmpty { live[address] = current }
+        }
+        allowedNames = live
+        return Set(live.keys)
     }
 
     private func hostAddresses() -> Set<UInt32> {
@@ -674,6 +750,8 @@ private final class Relay {
     var unacked: [UInt8] = []
     var outbound: [UInt8] = []
     var inbound: [UInt8] = []
+    var allowedNames: Set<String> = []
+    var sniAccepted = false
     var guestClosed = false
     var hostClosed = false
     var finSeq: UInt32?

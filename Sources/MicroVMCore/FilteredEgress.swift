@@ -76,12 +76,24 @@ public enum FilteredEgress {
         return normalize(String(host))
     }
 
+    public static let maximumAnswers = 8
+
+    /// Absolute DNS name. The trailing dot stops the host resolver from appending search domains.
+    public static func absoluteLookupName(_ name: String) -> String {
+        normalize(name) + "."
+    }
+
     public static func usable(_ addresses: [UInt32], hostAddresses: Set<UInt32>) -> [UInt32] {
         var kept: [UInt32] = []
         for address in addresses where !denies(address, hostAddresses: hostAddresses) && !kept.contains(address) {
             kept.append(address)
         }
         return kept
+    }
+
+    /// Addresses that may appear in one DNS reply, in reply order.
+    public static func publishable(_ addresses: [UInt32], hostAddresses: Set<UInt32>) -> [UInt32] {
+        Array(usable(addresses, hostAddresses: hostAddresses).prefix(maximumAnswers))
     }
 
     public static func permitsTCP(destination: UInt32, port: Int, resolved: Set<UInt32>, hostAddresses: Set<UInt32>) -> Bool {
@@ -137,8 +149,8 @@ public enum FilteredDNS {
         if !allowed {
             rcode = 3
         } else if qtype == 1 || qtype == 255 {
-            let usable = FilteredEgress.usable(resolve(name), hostAddresses: hostAddresses)
-            for address in usable.prefix(8) {
+            let usable = FilteredEgress.publishable(resolve(name), hostAddresses: hostAddresses)
+            for address in usable {
                 answers += [0xC0, 0x0C, 0x00, 0x01, 0x00, 0x01]
                 answers += put32(FilteredEgress.answerTTL)
                 answers += [0x00, 0x04]
@@ -252,5 +264,109 @@ public enum FilteredDHCP {
             index += 2 + length
         }
         return nil
+    }
+}
+
+/// First guest flight on a filtered connection. Approval is per connection, not per address.
+public enum FilteredTLS {
+    public enum FirstFlight: Equatable {
+        case needMore
+        case accept
+        case reject
+    }
+
+    public static func firstFlight(_ bytes: [UInt8], names: Set<String>) -> FirstFlight {
+        if bytes.isEmpty { return .needMore }
+        if bytes[0] != 22 { return .reject }
+        if bytes.count < 5 { return .needMore }
+        let version = read16(bytes, 1)
+        if version < 0x0301 || version > 0x0304 { return .reject }
+        let length = Int(read16(bytes, 3))
+        if length < 4 || length > 16_384 { return .reject }
+        if bytes.count < 5 + length { return .needMore }
+        let fragment = Array(bytes[5..<(5 + length)])
+        return clientHello(fragment, names: names) ? .accept : .reject
+    }
+
+    private static func clientHello(_ fragment: [UInt8], names: Set<String>) -> Bool {
+        guard fragment.count >= 4, fragment[0] == 1 else { return false }
+        let helloLength = (Int(fragment[1]) << 16) | (Int(fragment[2]) << 8) | Int(fragment[3])
+        let end = 4 + helloLength
+        guard helloLength >= 38, end <= fragment.count else { return false }
+        var index = 4 + 2 + 32
+        guard skip(fragment, &index, end, lengthBytes: 1),
+            skip(fragment, &index, end, lengthBytes: 2),
+            skip(fragment, &index, end, lengthBytes: 1)
+        else { return false }
+        if index == end { return false }
+        guard index + 2 <= end else { return false }
+        let extensionsLength = Int(read16(fragment, index))
+        index += 2
+        let extensionsEnd = index + extensionsLength
+        guard extensionsEnd <= end else { return false }
+        var serverName: String?
+        var hidesName = false
+        while index < extensionsEnd {
+            guard index + 4 <= extensionsEnd else { return false }
+            let type = read16(fragment, index)
+            let size = Int(read16(fragment, index + 2))
+            index += 4
+            guard index + size <= extensionsEnd else { return false }
+            if type == 0 {
+                guard let name = readServerName(Array(fragment[index..<(index + size)])) else { return false }
+                if let previous = serverName, previous != name { return false }
+                serverName = name
+            } else if type == 0xFE0D {
+                hidesName = true
+            }
+            index += size
+        }
+        if hidesName { return false }
+        guard let serverName else { return false }
+        return names.contains(FilteredEgress.normalize(serverName))
+    }
+
+    private static func readServerName(_ data: [UInt8]) -> String? {
+        guard data.count >= 5 else { return nil }
+        let listLength = Int(read16(data, 0))
+        guard listLength >= 3, 2 + listLength <= data.count else { return nil }
+        let end = 2 + listLength
+        var index = 2
+        var host: String?
+        while index < end {
+            guard index + 3 <= end else { return nil }
+            let kind = data[index]
+            let size = Int(read16(data, index + 1))
+            index += 3
+            guard index + size <= end else { return nil }
+            if kind == 0 {
+                let bytes = data[index..<(index + size)]
+                guard !bytes.isEmpty, let name = String(bytes: bytes, encoding: .ascii) else { return nil }
+                if let host, host != name { return nil }
+                host = name
+            }
+            index += size
+        }
+        return host
+    }
+
+    private static func skip(_ data: [UInt8], _ index: inout Int, _ end: Int, lengthBytes: Int) -> Bool {
+        let size: Int
+        if lengthBytes == 1 {
+            guard index < end else { return false }
+            size = Int(data[index])
+            index += 1
+        } else {
+            guard index + 2 <= end else { return false }
+            size = Int(read16(data, index))
+            index += 2
+        }
+        guard index + size <= end else { return false }
+        index += size
+        return true
+    }
+
+    private static func read16(_ data: [UInt8], _ offset: Int) -> UInt16 {
+        (UInt16(data[offset]) << 8) | UInt16(data[offset + 1])
     }
 }

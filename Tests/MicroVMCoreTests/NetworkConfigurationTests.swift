@@ -28,6 +28,29 @@ final class NetworkConfigurationTests: XCTestCase {
         XCTAssertTrue(forwarder.handleGuestFrame(tcpSyn(from: guest, destination: [10, 1, 2, 3], port: 443)).isEmpty)
         XCTAssertTrue(forwarder.handleGuestFrame(tcpSyn(from: guest, destination: [192, 168, 1, 1], port: 443)).isEmpty)
     }
+
+    func testLookupQueriesTheAbsoluteNameAndGrantsOnlyPublishedAddresses() throws {
+        let forwarder = try FilteredForwarder.testing(repositoryHost: "github.com")
+        defer { forwarder.stop() }
+        var queried: [String] = []
+        let addresses = (1...9).map { IPv4Address(1, 2, 3, UInt8($0)).value }
+        forwarder.resolver = { name in
+            queried.append(name)
+            return addresses
+        }
+        let guest = [UInt8](repeating: 0x02, count: 5) + [0x15]
+        let reply = try XCTUnwrap(forwarder.handleGuestFrame(dnsQueryFrame(name: "Registry.NPMJS.org", from: guest)).first)
+        XCTAssertEqual(queried, ["registry.npmjs.org."])
+        XCTAssertEqual(reply[14 + 20 + 8 + 7], 8)
+        let first = IPv4Address(1, 2, 3, 1).value
+        let ninth = IPv4Address(1, 2, 3, 9).value
+        XCTAssertEqual(forwarder.names(for: first), ["registry.npmjs.org"])
+        XCTAssertTrue(forwarder.names(for: ninth).isEmpty)
+        queried.removeAll()
+        _ = forwarder.handleGuestFrame(dnsQueryFrame(name: "github.com", from: guest))
+        XCTAssertEqual(queried, ["github.com."])
+        XCTAssertEqual(forwarder.names(for: first), ["registry.npmjs.org", "github.com"])
+    }
 }
 
 private func ethernet(from source: [UInt8], type: UInt16, payload: [UInt8]) -> [UInt8] {

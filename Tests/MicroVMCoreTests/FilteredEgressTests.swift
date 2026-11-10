@@ -170,6 +170,67 @@ final class FilteredEgressTests: XCTestCase {
         )
         XCTAssertEqual(record.network, .filtered)
     }
+
+    func testClientHelloSNIMustMatchANameForThatAddress() {
+        let registry: Set<String> = ["registry.npmjs.org"]
+        let shared: Set<String> = ["registry.npmjs.org", "github.com"]
+        XCTAssertEqual(FilteredTLS.firstFlight(clientHello(serverName: "registry.npmjs.org"), names: registry), .accept)
+        XCTAssertEqual(FilteredTLS.firstFlight(clientHello(serverName: "Registry.NPMJS.org"), names: registry), .accept)
+        XCTAssertEqual(FilteredTLS.firstFlight(clientHello(serverName: "github.com"), names: registry), .reject)
+        XCTAssertEqual(FilteredTLS.firstFlight(clientHello(serverName: "github.com"), names: shared), .accept)
+        XCTAssertEqual(FilteredTLS.firstFlight(clientHello(serverName: "evil.example"), names: shared), .reject)
+        XCTAssertEqual(FilteredTLS.firstFlight(clientHello(serverName: nil), names: registry), .reject)
+        XCTAssertEqual(
+            FilteredTLS.firstFlight(clientHello(serverName: "registry.npmjs.org", ech: true), names: registry),
+            .reject
+        )
+        let cleartext = Array("GET / HTTP/1.1\r\nHost: registry.npmjs.org\r\n\r\n".utf8)
+        XCTAssertEqual(FilteredTLS.firstFlight(cleartext, names: registry), .reject)
+        let hello = clientHello(serverName: "registry.npmjs.org")
+        XCTAssertEqual(FilteredTLS.firstFlight(Array(hello.prefix(4)), names: registry), .needMore)
+    }
+
+    func testLookupNameIsQueriedWithATrailingDot() {
+        XCTAssertEqual(FilteredEgress.absoluteLookupName("Registry.NPMJS.org"), "registry.npmjs.org.")
+        XCTAssertEqual(FilteredEgress.absoluteLookupName("registry.npmjs.org."), "registry.npmjs.org.")
+    }
+
+    func testDNSReplyPublishesAtMostEightAddresses() throws {
+        let addresses = (1...9).map { IPv4Address(1, 2, 3, UInt8($0)).value } + [IPv4Address(10, 1, 2, 3).value]
+        let published = FilteredEgress.publishable(addresses, hostAddresses: [])
+        XCTAssertEqual(published.count, 8)
+        XCTAssertFalse(published.contains(IPv4Address(1, 2, 3, 9).value))
+        XCTAssertFalse(published.contains(IPv4Address(10, 1, 2, 3).value))
+        let reply = try XCTUnwrap(FilteredDNS.reply(
+            query: dnsQuery("registry.npmjs.org"), repositoryHost: nil, hostAddresses: [], resolve: { _ in addresses }
+        ))
+        XCTAssertEqual(reply[7], 8)
+    }
+}
+
+private func clientHello(serverName: String?, ech: Bool = false) -> [UInt8] {
+    var body: [UInt8] = [0x03, 0x03] + [UInt8](repeating: 0x11, count: 32) + [0]
+    body += [0x00, 0x02, 0x13, 0x01, 0x01, 0x00]
+    var extensions: [UInt8] = []
+    if let serverName {
+        let host = Array(serverName.utf8)
+        let contents = u16(UInt16(3 + host.count)) + [0] + u16(UInt16(host.count)) + host
+        extensions += u16(0) + u16(UInt16(contents.count)) + contents
+    }
+    if ech {
+        extensions += u16(0xFE0D) + u16(1) + [0]
+    }
+    body += u16(UInt16(extensions.count)) + extensions
+    let handshake = [UInt8(1)] + u24(body.count) + body
+    return [22, 0x03, 0x01] + u16(UInt16(handshake.count)) + handshake
+}
+
+private func u16(_ value: UInt16) -> [UInt8] {
+    [UInt8(value >> 8), UInt8(value & 0xFF)]
+}
+
+private func u24(_ value: Int) -> [UInt8] {
+    [UInt8((value >> 16) & 0xFF), UInt8((value >> 8) & 0xFF), UInt8(value & 0xFF)]
 }
 
 private func dnsQuery(_ name: String, type: UInt16 = 1) -> [UInt8] {
