@@ -17,7 +17,7 @@ import {
 } from "../src/tools.ts";
 import { fakeDaemon } from "../../typescript/tests/daemon.ts";
 
-test("the server exposes the four sandbox tools", async () => {
+test("the server exposes sandbox and task tools", async () => {
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
   const server = createServer();
@@ -34,6 +34,9 @@ test("the server exposes the four sandbox tools", async () => {
       "microvm_exec",
       "microvm_ps",
       "microvm_run",
+      "microvm_task_exec",
+      "microvm_task_finish",
+      "microvm_task_start",
     ]);
     const exec = listed.tools.find((tool) => tool.name === "microvm_exec");
     assert.match(exec?.description ?? "", /not a cloud sandbox/i);
@@ -242,5 +245,37 @@ test("stdio entrypoint only enables NAT for the literal host environment value 1
       await client.close();
       await daemon.close();
     }
+  }
+});
+
+test("task tools preserve MCP NAT permission and return retained result references", async () => {
+  const { microvmTaskStart, microvmTaskExec, microvmTaskFinish } =
+    await import("../src/tools.ts");
+  const daemon = await fakeDaemon();
+  const options = { home: daemon.home };
+  try {
+    assert.equal(
+      (await microvmTaskStart({ projectPath: ".", network: "nat" }, options))
+        .isError,
+      true
+    );
+    assert.equal(daemon.runs.length, 0);
+    assert.equal(
+      (await microvmTaskStart({ projectPath: "." }, options)).isError,
+      undefined
+    );
+    const result = await microvmTaskExec(
+      { name: "task-fake", command: "big" },
+      options
+    );
+    assert.match(result.content[0].text, /logs:/);
+    assert(Buffer.byteLength(result.content[0].text) <= 65536);
+    assert.equal(
+      (await microvmTaskFinish("task-fake", options)).isError,
+      undefined
+    );
+    assert.equal(daemon.runs.at(-1)?.requireOffline, true);
+  } finally {
+    await daemon.close();
   }
 });

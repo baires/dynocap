@@ -1,5 +1,8 @@
 import { SandboxError } from "./lib/errors.ts";
 import { boot, destroy, exec, list, type SandboxInfo } from "./lib/daemon.ts";
+import { transfer } from "./lib/tasks.ts";
+export { Task } from "./task.ts";
+export type { TaskOptions, TaskInfo, RuntimeSelection } from "./task.ts";
 import { resolveHome } from "./lib/paths.ts";
 
 export { SandboxError } from "./lib/errors.ts";
@@ -32,6 +35,8 @@ export type CreateOptions = ClientOptions & {
 };
 
 export type ExecOptions = {
+  /** Bound captured output per stream; callbacks still receive all bytes. */
+  maxOutputBytes?: number;
   /** Require daemon-enforced offline networking, including for existing sandboxes. */
   requireOffline?: boolean;
   cwd?: string;
@@ -43,6 +48,7 @@ export type ExecOptions = {
 };
 
 export type ExecResult = {
+  outputTruncated?: boolean;
   stdout: string;
   stderr: string;
   /** Guest status. A signal is `128 + signal`. */
@@ -131,10 +137,39 @@ export class Sandbox {
     );
     const exitCode = outcome.signal > 0 ? 128 + outcome.signal : outcome.code;
     return {
+      ...(outcome.truncated ? { outputTruncated: true } : {}),
       stdout: text.decode(outcome.stdout),
       stderr: text.decode(outcome.stderr),
       exitCode,
     };
+  }
+
+  async upload(
+    localPath: string,
+    guestPath: string,
+    options: { requireOffline?: boolean } = {}
+  ): Promise<void> {
+    await transfer(this.#home, {
+      name: this.name,
+      direction: "upload",
+      localPath,
+      guestPath,
+      ...options,
+    });
+  }
+
+  async download(
+    guestPath: string,
+    localPath: string,
+    options: { requireOffline?: boolean } = {}
+  ): Promise<void> {
+    await transfer(this.#home, {
+      name: this.name,
+      direction: "download",
+      localPath,
+      guestPath,
+      ...options,
+    });
   }
 
   async destroy(): Promise<void> {

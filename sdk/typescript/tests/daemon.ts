@@ -84,6 +84,7 @@ export async function fakeDaemon(
 
 type FakeBehavior = {
   policyVersion: number | null;
+  taskVersion: number | null;
   execNetwork: "none" | "nat";
   recordedNetwork: "none" | "nat" | "unknown";
   onRun: (name: string) => "running" | "error";
@@ -111,12 +112,54 @@ function handle(
           Buffer.from(
             JSON.stringify({
               ok: true,
+              taskVersion:
+                behavior.taskVersion === null
+                  ? undefined
+                  : (behavior.taskVersion ?? 1),
+              transferVersion: 1,
               ...(behavior.policyVersion === null
                 ? {}
                 : { isolationPolicyVersion: behavior.policyVersion ?? 1 }),
             })
           )
         );
+        return;
+      case 7: {
+        const request = json();
+        runs.push(request);
+        const id = "task-fake";
+        if (request.op === "start")
+          sandboxes.set(id, {
+            name: id,
+            phase: "running",
+            network: String(request.network ?? "none"),
+            cpus: 2,
+            memoryMB: 2048,
+            daemonToken: "token",
+            createdAtUnix: 1,
+            ttlSeconds: 1800,
+            message: null,
+          });
+        else sandboxes.delete(id);
+        writeFrame(
+          socket,
+          16,
+          Buffer.from(
+            JSON.stringify({
+              id,
+              phase: request.op === "start" ? "running" : "completed",
+              runtimeDigest: "digest",
+              createdAtUnix: 1,
+              expiresAtUnix: 100,
+              resultDirectory: request.op === "finish" ? "/result" : undefined,
+            })
+          )
+        );
+        return;
+      }
+      case 8:
+        runs.push(json());
+        writeFrame(socket, 16, Buffer.from(JSON.stringify({ ok: true })));
         return;
       case 1: {
         const request = json();

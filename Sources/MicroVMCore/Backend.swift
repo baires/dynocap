@@ -1,6 +1,8 @@
 import Foundation
 
 public struct BootRequest: Equatable {
+    public var runtimeDirectory: URL?
+    public var workspaceDisk: URL?
     public var name: String
     public var cpus: Int
     public var memoryMB: Int
@@ -20,8 +22,11 @@ public struct BootRequest: Equatable {
         consoleLogURL: URL,
         bootTimeoutSeconds: Int,
         network: NetworkMode = .none,
-        generation: UUID = UUID()
+        generation: UUID = UUID(),
+        runtimeDirectory: URL? = nil, workspaceDisk: URL? = nil
     ) {
+        self.runtimeDirectory = runtimeDirectory
+        self.workspaceDisk = workspaceDisk
         self.name = name
         self.cpus = cpus
         self.memoryMB = memoryMB
@@ -35,6 +40,7 @@ public struct BootRequest: Equatable {
 }
 
 public struct ExecRequest: Equatable {
+    public var stdinFile: URL?
     public var name: String
     public var id: UInt32
     public var argv: [String]
@@ -74,9 +80,11 @@ public final class UnsupportedBackend: VMBackend {
     public init() {}
 
     public func boot(_ request: BootRequest, completion: @escaping (Result<Void, Error>) -> Void) {
-        completion(.failure(MicroVMError(
-            "Linux microVMs require macOS 13 or later and the com.apple.security.virtualization entitlement. This host cannot boot \(request.name)."
-        )))
+        completion(
+            .failure(
+                MicroVMError(
+                    "Linux microVMs require macOS 13 or later and the com.apple.security.virtualization entitlement. This host cannot boot \(request.name)."
+                )))
     }
 
     public func exec(_ request: ExecRequest, emit: @escaping (ExecEvent) -> Void) {

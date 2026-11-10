@@ -154,3 +154,32 @@ func TestExecCwd(t *testing.T) {
 		t.Fatalf("pwd %q", got)
 	}
 }
+
+// A transfer payload must not fill the pipe before its child has been started.
+func TestLargeStdinAfterStarted(t *testing.T) {
+	const id = 9123
+	s := registerSession(id)
+	defer finishSession(id)
+	done := make(chan struct{})
+	var output bytes.Buffer
+	go func() {
+		defer close(done)
+		Execute(protocol.Message{Type: protocol.TypeExec, ID: id, Argv: []string{"cat"}, TimeoutMS: 2000}, func(m protocol.Message) error {
+			if m.Type == protocol.TypeStarted {
+				go func() { s.writeStdin(bytes.Repeat([]byte{'a'}, 1<<20)); s.closeStdin() }()
+			}
+			if m.Type == protocol.TypeStdout {
+				output.Write(m.Data)
+			}
+			return nil
+		})
+	}()
+	select {
+	case <-done:
+	case <-time.After(4 * time.Second):
+		t.Fatal("stdin transfer blocked")
+	}
+	if output.Len() != 1<<20 {
+		t.Fatalf("got %d bytes", output.Len())
+	}
+}

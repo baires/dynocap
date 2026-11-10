@@ -1,6 +1,12 @@
-import { Sandbox, SandboxError, type ClientOptions } from "@microvm/sdk";
+import {
+  Task,
+  type TaskOptions,
+  Sandbox,
+  SandboxError,
+  type ClientOptions,
+} from "@microvm/sdk";
 
-import { presentExec } from "./lib/policy.ts";
+import { cap, presentExec } from "./lib/policy.ts";
 
 const local =
   "This is a local Linux sandbox on the user's Mac, through their microvm daemon. It is not a cloud sandbox.";
@@ -110,4 +116,52 @@ async function guard(run: () => Promise<ToolResult>): Promise<ToolResult> {
       content: [{ type: "text", text: `daemon: ${message}` }],
     };
   }
+}
+
+export async function microvmTaskStart(
+  input: Omit<TaskOptions, "home" | "requireOffline">,
+  options?: ToolOptions
+): Promise<ToolResult> {
+  return guard(async () => {
+    if (input.network === "nat" && options?.allowNat !== true)
+      throw new Error("NAT is disabled by this MCP host");
+    const task = await Task.start({
+      ...input,
+      home: options?.home,
+      requireOffline: options?.allowNat !== true,
+    });
+    return ok(JSON.stringify({ id: task.id }));
+  });
+}
+export async function microvmTaskExec(
+  input: ExecInput,
+  options?: ToolOptions
+): Promise<ToolResult> {
+  return guard(async () => {
+    const task = Task.connect(input.name, {
+      home: options?.home,
+      requireOffline: options?.allowNat !== true,
+    });
+    const result = await task.exec(input.command, input);
+    return ok(
+      cap(
+        `exit ${result.exitCode}\nlogs: ${result.logDirectory}\n${result.stdout}\nstderr:\n${result.stderr}`
+      )
+    );
+  });
+}
+export async function microvmTaskFinish(
+  id: string,
+  options?: ToolOptions
+): Promise<ToolResult> {
+  return guard(async () =>
+    ok(
+      JSON.stringify(
+        await Task.connect(id, {
+          home: options?.home,
+          requireOffline: options?.allowNat !== true,
+        }).finish()
+      )
+    )
+  );
 }

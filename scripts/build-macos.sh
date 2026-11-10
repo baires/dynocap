@@ -7,6 +7,7 @@ if [ "$(uname -s)" != "Darwin" ]; then
     exit 1
 fi
 swift build -c release
+(cd guest && go build -o ../.build/release/microvm-workspace ./workspace && go build -o ../.build/release/microvm-mkruntime ./mkruntime)
 bin=".build/release/microvm"
 codesign --sign - --entitlements entitlements/microvm.entitlements --force "$bin"
 echo "signed $bin"

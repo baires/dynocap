@@ -6,6 +6,8 @@ export const ControlType = {
   ps: 3,
   destroy: 4,
   ping: 6,
+  task: 7,
+  transfer: 8,
   result: 16,
   stdout: 17,
   stderr: 18,

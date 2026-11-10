@@ -116,6 +116,7 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
             env: request.env,
             cwd: request.cwd
         )
+        let started = DispatchSemaphore(value: 0)
         handlerLock.lock()
         handlers[request.id] = { [weak self] message in
             switch message {
@@ -130,7 +131,7 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
                 self?.clearHandler(request.id)
                 emit(.failed(text))
             case .started:
-                break
+                started.signal()
             default:
                 break
             }
@@ -138,6 +139,16 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
         handlerLock.unlock()
         do {
             try link.write(.exec(start))
+            if let file = request.stdinFile {
+                guard started.wait(timeout: .now() + .seconds(max(1, bounded))) == .success else {
+                    throw MicroVMError("guest did not acknowledge stdin command")
+                }
+                let input = try FileHandle(forReadingFrom: file)
+                defer { try? input.close() }
+                while let data = try input.read(upToCount: 256 << 10), !data.isEmpty {
+                    try link.write(.stdin(id: request.id, data: data))
+                }
+            }
             try link.write(.stdinEOF(id: request.id))
         } catch {
             clearHandler(request.id)
@@ -208,6 +219,14 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
         boot.initialRamdiskURL = request.initrdURL
         // hvc0 is the virtio console. rdinit skips Alpine's /sbin/init.
         boot.commandLine = "console=hvc0 rdinit=/init panic=1"
+        if let runtime = request.runtimeDirectory, let workspace = request.workspaceDisk {
+            boot.commandLine += " microvm.task=1"
+            config.storageDevices = try [
+                VZVirtioBlockDeviceConfiguration(
+                    attachment: VZDiskImageStorageDeviceAttachment(url: runtime.appendingPathComponent("runtime.ext4"), readOnly: true)),
+                VZVirtioBlockDeviceConfiguration(attachment: VZDiskImageStorageDeviceAttachment(url: workspace, readOnly: false)),
+            ]
+        }
         config.bootLoader = boot
         config.entropyDevices = [VZVirtioEntropyDeviceConfiguration()]
 
@@ -303,7 +322,10 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
     }
 
     private func accept(_ connection: VZVirtioSocketConnection) {
-        guard !exited, !stopping else { connection.close(); return }
+        guard !exited, !stopping else {
+            connection.close()
+            return
+        }
         let raw = connection.fileDescriptor
         guard raw >= 0 else {
             finishBoot(.failure(MicroVMError("vsock connection has no file descriptor")))

@@ -22,6 +22,7 @@ type Options struct {
 	CacheDir string
 	RepoRoot string
 	Log      io.Writer
+	RootDir  string
 }
 
 // Manifest is written next to the kernel and initrd.
@@ -117,6 +118,11 @@ func Build(opts Options) (Manifest, error) {
 
 	if err := writeFileAtomic(filepath.Join(opts.OutDir, "kernel"), kernel, 0o644); err != nil {
 		return Manifest{}, err
+	}
+	if opts.RootDir != "" {
+		if out, err := exec.Command("cp", "-a", root, opts.RootDir).CombinedOutput(); err != nil {
+			return Manifest{}, fmt.Errorf("copy runtime root: %s: %w", out, err)
+		}
 	}
 	initrdPath := filepath.Join(opts.OutDir, "initrd")
 	fmt.Fprintf(opts.Log, "packing initrd\n")
@@ -272,6 +278,9 @@ func installGuest(root string, agent []byte, plan modulePlan, release string) er
 		vsock = plan.Paths
 	}
 	if err := writeList("microvm-vsock-modules", vsock); err != nil {
+		return err
+	}
+	if err := writeList("microvm-storage-modules", plan.Storage); err != nil {
 		return err
 	}
 	if err := writeList("microvm-net-modules", net); err != nil {

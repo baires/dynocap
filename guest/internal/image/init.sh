@@ -28,6 +28,17 @@ load_modules() {
 # a slow DHCP client used to delay the first exec.
 load_modules /etc/microvm-vsock-modules
 
+# Task runtime is attached read-only by the host; the workspace is a separate disk.
+if grep -q 'microvm.task=1' /proc/cmdline; then
+    load_modules /etc/microvm-storage-modules
+    mkdir -p /runtime
+    mount -t ext4 -o ro /dev/vda /runtime || exec sh
+    mount --move /proc /runtime/proc
+    mount --move /sys /runtime/sys
+    mount --move /dev /runtime/dev
+    exec switch_root /runtime /sbin/microvm-task-init
+fi
+
 hostname microvm >/dev/null 2>&1 || true
 ip link set lo up 2>/dev/null || true
 

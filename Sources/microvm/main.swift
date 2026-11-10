@@ -25,6 +25,34 @@ struct Main {
     static func run(_ args: [String]) throws {
         let invocation = try parseCommand(args)
         switch invocation.command {
+        case .runtimePrepare(let preparation):
+            let paths = try ready(invocation)
+            try DaemonClient(socketPath: paths.socket.path).requireTasks()
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: args[0]).standardizedFileURL.resolvingSymlinksInPath().deletingLastPathComponent()
+                .appendingPathComponent("microvm-mkruntime")
+            process.arguments = [
+                preparation.repo, paths.home.path, HostArch.guest,
+                String(data: try JSONEncoder().encode(preparation.runtimes), encoding: .utf8) ?? "",
+            ]
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { throw MicroVMError("runtime preparation failed") }
+            var verification = TaskCommand(op: "runtimeVerify")
+            verification.runtimes = preparation.runtimes
+            let data = try DaemonClient(socketPath: paths.socket.path).task(verification)
+            print(String(data: data, encoding: .utf8) ?? "")
+        case .task(let command):
+            let paths = try ready(invocation)
+            let client = DaemonClient(socketPath: paths.socket.path)
+            if command.op == "exec", let id = command.id, let argv = command.argv {
+                let result = try client.exec(
+                    ExecCommand(name: id, argv: argv, env: [], cwd: "/workspace", timeoutSeconds: 300),
+                    onStdout: { try? FileHandle.standardOutput.write(contentsOf: $0) },
+                    onStderr: { try? FileHandle.standardError.write(contentsOf: $0) })
+                exit(result.signal > 0 ? 128 + result.signal : result.code)
+            }
+            print(String(data: try client.task(command), encoding: .utf8) ?? "")
         case .help:
             print(helpText)
         case .version:

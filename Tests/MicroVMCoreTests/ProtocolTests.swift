@@ -16,6 +16,7 @@ final class ProtocolTests: XCTestCase {
             ("exec-uname", .exec(ExecStart(id: 7, timeoutMS: 5000, argv: ["uname", "-a"], env: [], cwd: ""))),
             ("exec-shell", .exec(ExecStart(id: 9, timeoutMS: 0, argv: ["sh", "-c", "echo hello"], env: ["FOO=bar"], cwd: "/tmp"))),
             ("stdin-eof", .stdinEOF(id: 7)),
+            ("stdin-binary", .stdin(id: 7, data: Data([0, 255, 10]))),
             ("kill", .kill(id: 7)),
             ("shutdown", .shutdown),
             ("started", .started(id: 7)),

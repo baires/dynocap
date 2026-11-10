@@ -48,6 +48,7 @@ func TestGoldenVectors(t *testing.T) {
 		{"exec-uname", Message{Type: TypeExec, ID: 7, TimeoutMS: 5000, Argv: []string{"uname", "-a"}}},
 		{"exec-shell", Message{Type: TypeExec, ID: 9, Argv: []string{"sh", "-c", "echo hello"}, Env: []string{"FOO=bar"}, Cwd: "/tmp"}},
 		{"stdin-eof", Message{Type: TypeStdinEOF, ID: 7}},
+		{"stdin-binary", Message{Type: TypeStdin, ID: 7, Data: []byte{0, 255, 10}}},
 		{"kill", Message{Type: TypeKill, ID: 7}},
 		{"shutdown", Message{Type: TypeShutdown}},
 		{"started", Message{Type: TypeStarted, ID: 7}},

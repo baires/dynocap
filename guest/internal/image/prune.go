@@ -71,7 +71,7 @@ func pruneRoot(root string) error {
 func keepGuestFile(root, rel string, d fs.DirEntry) bool {
 	switch rel {
 	case "init", "bin/busybox", "etc/passwd", "etc/group",
-		"etc/microvm-vsock-modules", "etc/microvm-net-modules",
+		"etc/microvm-vsock-modules", "etc/microvm-storage-modules", "etc/microvm-net-modules",
 		"usr/local/bin/microvm-agent", "usr/share/udhcpc/default.script":
 		return true
 	}

@@ -21,3 +21,4 @@ sdk/mcp/dist/
 !.env.example
 *.pem
 *.p12
+validation/

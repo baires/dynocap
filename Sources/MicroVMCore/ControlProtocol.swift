@@ -12,6 +12,8 @@ public enum ControlMessage: Equatable {
     case destroy(String)
     case shutdown
     case ping
+    case task(TaskCommand)
+    case transfer(TransferCommand)
     case result(Data)
     case stdout(Data)
     case stderr(Data)
@@ -26,6 +28,8 @@ public enum ControlType {
     public static let destroy: UInt8 = 4
     public static let shutdown: UInt8 = 5
     public static let ping: UInt8 = 6
+    public static let task: UInt8 = 7
+    public static let transfer: UInt8 = 8
     public static let result: UInt8 = 16
     public static let stdout: UInt8 = 17
     public static let stderr: UInt8 = 18
@@ -38,6 +42,12 @@ public enum ControlCodec {
         let payload: Data
         let type: UInt8
         switch message {
+        case .task(let command):
+            type = ControlType.task
+            payload = try JSONEncoder().encode(command)
+        case .transfer(let command):
+            type = ControlType.transfer
+            payload = try JSONEncoder().encode(command)
         case .run(let request):
             type = ControlType.run
             payload = try JSONEncoder().encode(request)
@@ -91,6 +101,10 @@ public enum ControlCodec {
         let type = body[body.startIndex]
         let payload = body.dropFirst()
         switch type {
+        case ControlType.task:
+            return .task(try JSONDecoder().decode(TaskCommand.self, from: Data(payload)))
+        case ControlType.transfer:
+            return .transfer(try JSONDecoder().decode(TransferCommand.self, from: Data(payload)))
         case ControlType.run:
             return .run(try JSONDecoder().decode(RunRequest.self, from: Data(payload)))
         case ControlType.exec:
@@ -192,4 +206,21 @@ public struct ExecOutcome: Equatable {
 public struct PolicyCapabilities: Codable {
     public var ok: Bool = true
     public var isolationPolicyVersion: Int = IsolationPolicy.version
+    public var taskVersion: Int? = 1
+    public var transferVersion: Int? = 1
+}
+
+public struct TransferCommand: Codable, Equatable {
+    public var name: String
+    public var direction: String
+    public var localPath: String
+    public var guestPath: String
+    public var requireOffline: Bool?
+    public init(name: String, direction: String, localPath: String, guestPath: String, requireOffline: Bool? = nil) {
+        self.name = name
+        self.direction = direction
+        self.localPath = localPath
+        self.guestPath = guestPath
+        self.requireOffline = requireOffline
+    }
 }

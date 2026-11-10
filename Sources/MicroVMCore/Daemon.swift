@@ -19,6 +19,9 @@ public final class Daemon {
     private var nextExecID: UInt32 = 0
     private var lifecycles: [String: SandboxLifecycle] = [:]
     private var ttlTimer: DispatchSourceTimer?
+    private lazy var tasks = TaskManager(
+        paths: paths, arch: guestArch, boot: { try self.boot($0) },
+        execute: { try self.executeInternal($0, $1, input: $2, output: $3, limit: $4) }, destroy: { try self.destroyVM($0) })
 
     public init(home: URL, backend: VMBackend, guestArch: String = HostArch.guest) {
         self.paths = MicroVMPaths(home: home)
@@ -36,6 +39,7 @@ public final class Daemon {
         if reaped > 0 {
             log("reaped \(reaped) leftover VM\(reaped == 1 ? "" : "s")")
         }
+        try tasks.recover()
         listenFD = try POSIX.listenUnix(paths.socket.path)
         signal(SIGPIPE, SIG_IGN)
         backend.onGuestExit = { [weak self] name, generation, message in
@@ -114,6 +118,22 @@ public final class Daemon {
         do {
             let message = try ControlCodec.read(fd)
             switch message {
+            case .task(let command):
+                let data: Data
+                switch command.op {
+                case "start":
+                    if command.requireOffline == true && command.network == .nat { throw MicroVMError("task requires offline networking") }
+                    data = try JSONEncoder().encode(TaskDescriptor(tasks.start(command)))
+                case "finish":
+                    guard let id = command.id else { throw MicroVMError("task id required") }
+                    data = try JSONEncoder().encode(TaskDescriptor(tasks.finish(id, requireOffline: command.requireOffline == true)))
+                case "runtimeVerify": data = try JSONEncoder().encode(tasks.verifyRuntime(command.runtimes))
+                default: throw MicroVMError("unknown task operation")
+                }
+                try ControlCodec.write(fd, .result(data))
+            case .transfer(let command):
+                try transfer(command)
+                try ControlCodec.write(fd, .result(try JSONEncoder().encode(OKResult(ok: true))))
             case .ping:
                 try ControlCodec.write(fd, .result(try JSONEncoder().encode(PolicyCapabilities())))
             case .ps:
@@ -121,8 +141,9 @@ public final class Daemon {
                 try ControlCodec.write(fd, .result(try JSONEncoder().encode(PSResult(vms: records))))
             case .run(let request):
                 let record = try boot(request)
-                let status = StatusResult(name: record.name, phase: record.phase.rawValue,
-                                          network: record.network, ttlSeconds: record.ttlSeconds)
+                let status = StatusResult(
+                    name: record.name, phase: record.phase.rawValue,
+                    network: record.network, ttlSeconds: record.ttlSeconds)
                 try ControlCodec.write(fd, .result(try JSONEncoder().encode(status)))
             case .exec(let command):
                 try performExec(fd, command)
@@ -170,17 +191,19 @@ public final class Daemon {
                 throw MicroVMError("VM \(request.name) is \(existing.phase.rawValue). Run microvm destroy \(request.name) first.")
             }
         }
-        let kernel = paths.kernel(guestArch)
-        let initrd = paths.initrd(guestArch)
+        let kernel = request.runtimeDirectory.map { URL(fileURLWithPath: $0).appendingPathComponent("kernel") } ?? paths.kernel(guestArch)
+        let initrd = request.runtimeDirectory.map { URL(fileURLWithPath: $0).appendingPathComponent("initrd") } ?? paths.initrd(guestArch)
         guard FileManager.default.fileExists(atPath: kernel.path),
-              FileManager.default.fileExists(atPath: initrd.path) else {
-            throw MicroVMError("""
-            Linux image not found for \(guestArch).
-            From the microvm repo on this Mac, run ./scripts/fetch-image.sh
-            Expected:
-              \(kernel.path)
-              \(initrd.path)
-            """)
+            FileManager.default.fileExists(atPath: initrd.path)
+        else {
+            throw MicroVMError(
+                """
+                Linux image not found for \(guestArch).
+                From the microvm repo on this Mac, run ./scripts/fetch-image.sh
+                Expected:
+                  \(kernel.path)
+                  \(initrd.path)
+                """)
         }
         try FileManager.default.createDirectory(at: paths.vmDir(request.name), withIntermediateDirectories: true)
         _ = FileManager.default.createFile(atPath: paths.consoleLog(request.name).path, contents: nil)
@@ -207,7 +230,9 @@ public final class Daemon {
             consoleLogURL: paths.consoleLog(request.name),
             bootTimeoutSeconds: request.bootTimeoutSeconds,
             network: request.network ?? NetworkMode.none,
-            generation: live.generation
+            generation: live.generation,
+            runtimeDirectory: request.runtimeDirectory.map { URL(fileURLWithPath: $0) },
+            workspaceDisk: request.workspaceDisk.map { URL(fileURLWithPath: $0) }
         )
         backend.boot(boot) { live.boot.complete($0) }
         lifecycle.lock.unlock()
@@ -237,6 +262,14 @@ public final class Daemon {
 
     private func performExec(_ fd: Int32, _ command: ExecCommand) throws {
         try POSIX.setWriteTimeout(fd, seconds: 5)
+        let taskIndex: Int?
+        do { taskIndex = try tasks.begin(command.name, argv: command.argv, env: command.env) } catch {
+            if String(describing: error).contains("limit") { DispatchQueue.global().async { try? self.destroyVM(command.name) } }
+            throw error
+        }
+        var taskCode: Int32?
+        var taskError: String?
+        defer { tasks.end(command.name, index: taskIndex, code: taskCode, error: taskError) }
         let lifecycle = lifecycle(command.name)
         lifecycle.lock.lock()
         var locked = true
@@ -271,7 +304,7 @@ public final class Daemon {
         let writeLock = NSLock()
         let state = ExecWait()
         let sem = DispatchSemaphore(value: 0)
-        var transportFailed = false // Protected by writeLock, including terminal writes.
+        var transportFailed = false  // Protected by writeLock, including terminal writes.
         func send(_ message: ControlMessage, terminal: Bool = false) {
             writeLock.lock()
             defer { writeLock.unlock() }
@@ -305,16 +338,44 @@ public final class Daemon {
         backend.exec(request) { event in
             switch event {
             case .stdout(let data):
-                if !state.isFinished { send(.stdout(data)) }
+                if !state.isFinished {
+                    do {
+                        try self.tasks.append(command.name, index: taskIndex, data: data, stderr: false)
+                        send(.stdout(data))
+                    } catch {
+                        taskError = String(describing: error)
+                        self.backend.cancelExec(name: command.name, id: id)
+                        if state.markFinished() {
+                            send(.error(taskError!), terminal: true)
+                            sem.signal()
+                        }
+                        DispatchQueue.global().async { try? self.destroyVM(command.name) }
+                    }
+                }
             case .stderr(let data):
-                if !state.isFinished { send(.stderr(data)) }
+                if !state.isFinished {
+                    do {
+                        try self.tasks.append(command.name, index: taskIndex, data: data, stderr: true)
+                        send(.stderr(data))
+                    } catch {
+                        taskError = String(describing: error)
+                        self.backend.cancelExec(name: command.name, id: id)
+                        if state.markFinished() {
+                            send(.error(taskError!), terminal: true)
+                            sem.signal()
+                        }
+                        DispatchQueue.global().async { try? self.destroyVM(command.name) }
+                    }
+                }
             case .finished(let code, let signal):
                 if state.markFinished() {
+                    taskCode = signal > 0 ? 128 + signal : code
                     send(.exit(code: code, signal: signal), terminal: true)
                     sem.signal()
                 }
             case .failed(let message):
                 if state.markFinished() {
+                    taskError = message
                     send(.error(message), terminal: true)
                     sem.signal()
                 }
@@ -383,6 +444,7 @@ public final class Daemon {
         } else {
             try store.remove(name)
         }
+        tasks.stopped(name, reason: reason)
         log("destroyed \(name): \(reason)")
     }
 
@@ -391,7 +453,8 @@ public final class Daemon {
         lifecycle.lock.lock()
         defer { lifecycle.lock.unlock() }
         guard let live = lifecycle.live, live.generation == generation,
-              var record = try? store.load(name) else { return }
+            var record = try? store.load(name)
+        else { return }
         // Explicit teardown owns this transition and retries until confirmed.
         guard record.phase != .stopping else { return }
         live.boot.complete(.failure(MicroVMError(message ?? "guest exited")))
@@ -399,18 +462,21 @@ public final class Daemon {
         lifecycle.live = nil
         record.phase = message == nil ? .stopped : .failed
         record.message = message
+        tasks.stopped(name, reason: message ?? "guest exited")
         try? store.save(record)
         log("\(name) \(record.phase.rawValue)")
     }
 
     private func reapExpired() {
+        tasks.sweepExpired()
         guard let records = try? store.list() else { return }
         for record in records {
             let lifecycle = lifecycle(record.name)
             lifecycle.lock.lock()
             defer { lifecycle.lock.unlock() }
             guard let current = try? store.load(record.name),
-                  current.phase == .stopping || vmIsExpired(current, now: unixNow()) else { continue }
+                current.phase == .stopping || vmIsExpired(current, now: unixNow())
+            else { continue }
             do {
                 try destroyLocked(record.name, lifecycle: lifecycle, reason: current.message ?? "sandbox lifetime expired")
             } catch {
@@ -428,11 +494,128 @@ public final class Daemon {
         stop()
     }
 
+    private func executeInternal(
+        _ name: String, _ argv: [String], input: URL?, output: URL?, limit: Int64, requireOffline: Bool = false
+    ) throws -> Data {
+        let lifecycle = lifecycle(name)
+        lifecycle.lock.lock()
+        var locked = true
+        defer { if locked { lifecycle.lock.unlock() } }
+        guard let record = try store.load(name), record.phase == .running, !vmIsExpired(record, now: unixNow()), let live = lifecycle.live
+        else {
+            throw MicroVMError("sandbox is stopped or expired")
+        }
+        if requireOffline && record.network != NetworkMode.none { throw MicroVMError("transfer requires an offline sandbox") }
+        lock.lock()
+        nextExecID &+= 1
+        let id = nextExecID
+        lock.unlock()
+        let timeout = Int(min(300, max(1, (record.createdAtUnix + Int64(record.ttlSeconds ?? 1800)) - unixNow())))
+        var request = ExecRequest(name: name, id: id, argv: argv, env: [], cwd: "/", timeoutSeconds: timeout)
+        request.stdinFile = input
+        let state = NSLock()
+        let sem = DispatchSemaphore(value: 0)
+        var data = Data()
+        var problem: String?
+        var done = false
+        var bytes: Int64 = 0
+        var file: FileHandle?
+        if let output {
+            FileManager.default.createFile(atPath: output.path, contents: nil)
+            file = try FileHandle(forWritingTo: output)
+        }
+        defer { try? file?.close() }
+        func fail(_ message: String) {
+            state.lock()
+            if !done {
+                done = true
+                problem = message
+                sem.signal()
+            }
+            state.unlock()
+        }
+        live.execs[id] = { fail($0) }
+        backend.exec(request) { event in
+            state.lock()
+            defer { state.unlock() }
+            guard !done else { return }
+            switch event {
+            case .stdout(let chunk):
+                bytes += Int64(chunk.count)
+                if bytes > limit {
+                    problem = "transfer/output exceeds byte limit"
+                    done = true
+                    sem.signal()
+                    self.backend.cancelExec(name: name, id: id)
+                } else {
+                    do { if let file { try file.write(contentsOf: chunk) } else { data.append(chunk) } } catch {
+                        problem = String(describing: error)
+                        done = true
+                        sem.signal()
+                    }
+                }
+            case .stderr(let chunk):
+                if (problem?.utf8.count ?? 0) < 8192 { problem = (problem ?? "") + (String(data: chunk, encoding: .utf8) ?? "<non-UTF8 error>") }
+            case .finished(let code, let signal):
+                if code == 0 && signal == 0 {
+                    problem = nil
+                } else {
+                    problem = "command failed (\(code), signal \(signal)): " + (problem ?? "")
+                }
+                done = true
+                sem.signal()
+            case .failed(let message):
+                problem = message
+                done = true
+                sem.signal()
+            }
+        }
+        lifecycle.lock.unlock()
+        locked = false
+        if sem.wait(timeout: .now() + .seconds(timeout + 2)) == .timedOut {
+            fail("internal command timed out")
+            backend.cancelExec(name: name, id: id)
+        }
+        lifecycle.lock.lock()
+        live.execs[id] = nil
+        lifecycle.lock.unlock()
+        state.lock()
+        defer { state.unlock() }
+        if let problem { throw MicroVMError(problem) }
+        return data
+    }
+
+    private func transfer(_ command: TransferCommand) throws {
+        if command.requireOffline == true {
+            guard let record = try store.load(command.name), record.network == NetworkMode.none else {
+                throw MicroVMError("transfer requires an offline sandbox")
+            }
+        }
+        let index = try tasks.begin(command.name, argv: ["transfer", command.direction, command.guestPath])
+        defer { tasks.end(command.name, index: index, code: 0, error: nil) }
+        let temp = paths.cache.appendingPathComponent("transfer-" + UUID().uuidString + ".tar")
+        try FileManager.default.createDirectory(at: paths.cache, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temp) }
+        if command.direction == "upload" {
+            _ = try HostTree.run("microvm-workspace", ["pack", command.localPath, "project"], output: temp)
+            _ = try executeInternal(
+                command.name, ["/usr/local/bin/microvm-agent", "unpack", command.guestPath], input: temp, output: nil, limit: 256 << 20,
+                requireOffline: command.requireOffline == true)
+        } else if command.direction == "download" {
+            _ = try executeInternal(
+                command.name, ["/usr/local/bin/microvm-agent", "pack", command.guestPath], input: nil, output: temp, limit: 256 << 20,
+                requireOffline: command.requireOffline == true)
+            _ = try HostTree.run("microvm-workspace", ["unpack", command.localPath], input: temp)
+        } else {
+            throw MicroVMError("transfer direction must be upload or download")
+        }
+    }
+
     private func log(_ message: String) {
         let line = "\(unixNow()) \(message)\n"
         guard let data = line.data(using: .utf8) else { return }
         if FileManager.default.fileExists(atPath: paths.log.path),
-           let handle = try? FileHandle(forWritingTo: paths.log) {
+            let handle = try? FileHandle(forWritingTo: paths.log) {
             _ = try? handle.seekToEnd()
             try? handle.write(contentsOf: data)
             try? handle.close()
@@ -469,6 +652,20 @@ public struct DaemonClient {
         self.socketPath = socketPath
     }
 
+    public func requireTasks() throws {
+        let reply = try roundTrip(.ping)
+        guard case .result(let data) = reply,
+              let capability = try? JSONDecoder().decode(PolicyCapabilities.self, from: data), capability.taskVersion == 1 else {
+            throw MicroVMError("daemon lacks task v1; rebuild and manually restart the daemon before creating tasks")
+        }
+    }
+    public func task(_ command: TaskCommand) throws -> Data {
+        try requireTasks()
+        let reply = try roundTrip(.task(command))
+        guard case .result(let data) = reply else { throw messageError(reply) }
+        return data
+    }
+
     public func ping() throws {
         let fd = try POSIX.connectUnix(socketPath)
         defer { _ = closeFD(fd) }
@@ -480,9 +677,11 @@ public struct DaemonClient {
     public func requirePolicy() throws {
         let reply = try roundTrip(.ping)
         guard case .result(let data) = reply,
-              let capability = try? JSONDecoder().decode(PolicyCapabilities.self, from: data),
-              capability.ok, capability.isolationPolicyVersion == IsolationPolicy.version else {
-            throw MicroVMError("daemon lacks isolation policy v1; rebuild microvm and manually restart the daemon before creating sandboxes")
+            let capability = try? JSONDecoder().decode(PolicyCapabilities.self, from: data),
+            capability.ok, capability.isolationPolicyVersion == IsolationPolicy.version
+        else {
+            throw MicroVMError(
+                "daemon lacks isolation policy v1; rebuild microvm and manually restart the daemon before creating sandboxes")
         }
     }
 

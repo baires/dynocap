@@ -4,6 +4,7 @@ import { SandboxError, classifyDaemonMessage } from "./errors.ts";
 import { FrameReader, decodeBody, type Inbound } from "./framing.ts";
 
 export type ExecHandlers = {
+  maxOutputBytes?: number;
   onStdout?: (chunk: Uint8Array) => void;
   onStderr?: (chunk: Uint8Array) => void;
 };
@@ -11,6 +12,7 @@ export type ExecHandlers = {
 export type ExecStream = {
   code: number;
   signal: number;
+  truncated: boolean;
   stdout: Uint8Array;
   stderr: Uint8Array;
 };
@@ -44,20 +46,32 @@ export async function execStream(
     await writeFrame(socket, frame);
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
+    let stdoutBytes = 0,
+      stderrBytes = 0;
+    const limit = handlers.maxOutputBytes ?? Infinity;
     for (;;) {
       const message = await incoming.next();
       if (!message) break;
       switch (message.kind) {
         case "stdout":
-          stdout.push(Buffer.from(message.data));
+          if (stdoutBytes < limit)
+            stdout.push(
+              Buffer.from(message.data).subarray(0, limit - stdoutBytes)
+            );
+          stdoutBytes += message.data.length;
           handlers.onStdout?.(message.data);
           break;
         case "stderr":
-          stderr.push(Buffer.from(message.data));
+          if (stderrBytes < limit)
+            stderr.push(
+              Buffer.from(message.data).subarray(0, limit - stderrBytes)
+            );
+          stderrBytes += message.data.length;
           handlers.onStderr?.(message.data);
           break;
         case "exit":
           return {
+            truncated: stdoutBytes > limit || stderrBytes > limit,
             code: message.code,
             signal: message.signal,
             stdout: concat(stdout),

@@ -91,7 +91,7 @@ kernel/net/vmw_vsock/vsock.ko.gz:
 kernel/net/vmw_vsock/vmw_vsock_virtio_transport_common.ko.gz: kernel/net/vmw_vsock/vsock.ko.gz
 kernel/net/vmw_vsock/vmw_vsock_virtio_transport.ko.gz: kernel/net/vmw_vsock/vmw_vsock_virtio_transport_common.ko.gz kernel/net/vmw_vsock/vsock.ko.gz
 `
-	cfg := "CONFIG_VIRTIO_NET=m\nCONFIG_VIRTIO_VSOCKETS=m\n"
+	cfg := "CONFIG_VIRTIO_NET=m\nCONFIG_VIRTIO_VSOCKETS=m\nCONFIG_VIRTIO_BLK=y\nCONFIG_EXT4_FS=y\nCONFIG_PACKET=y\n"
 	plan, err := planModules(dep, cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -123,8 +123,8 @@ kernel/net/vmw_vsock/vmw_vsock_virtio_transport.ko.gz: kernel/net/vmw_vsock/vmw_
 		t.Fatalf("net %v", plan.Net)
 	}
 
-	builtin := "CONFIG_VIRTIO_NET=y\nCONFIG_VIRTIO_VSOCKETS=y\n"
-	plan, err = planModules("kernel/fs/ext4/ext4.ko.gz:\n", builtin)
+	builtin := "CONFIG_VIRTIO_NET=y\nCONFIG_VIRTIO_VSOCKETS=y\nCONFIG_PACKET=y\nCONFIG_VIRTIO_BLK=y\nCONFIG_EXT4_FS=y\n"
+	plan, err = planModules("kernel/example.ko.gz:\n", builtin)
 	if err != nil {
 		t.Fatal(err)
 	}

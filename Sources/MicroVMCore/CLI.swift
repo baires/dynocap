@@ -1,6 +1,8 @@
 import Foundation
 
 public struct RunRequest: Codable, Equatable {
+    public var runtimeDirectory: String?
+    public var workspaceDisk: String?
     public var name: String
     public var cpus: Int
     public var memoryMB: Int
@@ -44,6 +46,8 @@ public enum CLICommand: Equatable {
     case run(RunRequest)
     case exec(ExecCommand)
     case destroy(String)
+    case task(TaskCommand)
+    case runtimePrepare(RuntimePreparation)
 }
 
 public struct CLIInvocation: Equatable {
@@ -57,30 +61,34 @@ public struct CLIInvocation: Equatable {
 }
 
 public let helpText = """
-microvm \(MicroVMInfo.version) — local Linux microVMs on macOS
+    microvm \(MicroVMInfo.version) — local Linux microVMs on macOS
 
-USAGE
-  microvm run --name <name> [--cpus N] [--memory MB] [--ttl SEC] [--network none|nat] [--boot-timeout SEC]
-  microvm exec <name> [--timeout SEC] [--cwd DIR] [--env KEY=VAL] -- <command> [args...]
-  microvm ps
-  microvm destroy <name>
-  microvm daemon
-  microvm version
+    USAGE
+      microvm run --name <name> [--cpus N] [--memory MB] [--ttl SEC] [--network none|nat] [--boot-timeout SEC]
+      microvm exec <name> [--timeout SEC] [--cwd DIR] [--env KEY=VAL] -- <command> [args...]
+      microvm runtime prepare [REPO] [--runtime node:22]
+      microvm task start PATH [--runtime node:22] [--network none|nat] [--ttl SEC]
+      microvm task exec ID -- COMMAND [ARGS...]
+      microvm task finish ID
+      microvm ps
+      microvm destroy <name>
+      microvm daemon
+      microvm version
 
-EXAMPLES
-  microvm run --name demo --cpus 2 --memory 1024
-  microvm exec demo -- uname -a
-  microvm exec demo -- sh -c 'echo hello'
-  microvm ps
-  microvm destroy demo
+    EXAMPLES
+      microvm run --name demo --cpus 2 --memory 1024
+      microvm exec demo -- uname -a
+      microvm exec demo -- sh -c 'echo hello'
+      microvm ps
+      microvm destroy demo
 
-Images are built with scripts/fetch-image.sh and stored under $MICROVM_HOME
-(default ~/.microvm). The CLI starts a per-user daemon if one is not running.
-Network defaults to none (no virtual NIC). nat explicitly enables unrestricted outbound access.
-TTL defaults to 1800 seconds, including boot; allowed range is 1–86400, with no unlimited mode.
-VMs do not outlive that daemon; the next command reaps leftover records.
+    Images are built with scripts/fetch-image.sh and stored under $MICROVM_HOME
+    (default ~/.microvm). The CLI starts a per-user daemon if one is not running.
+    Network defaults to none (no virtual NIC). nat explicitly enables unrestricted outbound access.
+    TTL defaults to 1800 seconds, including boot; allowed range is 1–86400, with no unlimited mode.
+    VMs do not outlive that daemon; the next command reaps leftover records.
 
-"""
+    """
 
 public func parseCommand(_ args: [String]) throws -> CLIInvocation {
     var rest = Array(args.dropFirst())
@@ -108,6 +116,26 @@ public func parseCommand(_ args: [String]) throws -> CLIInvocation {
     }
     rest.removeFirst()
     switch sub {
+    case "runtime":
+        guard rest.first == "prepare" else { throw MicroVMError("usage: microvm runtime prepare [REPO] [--runtime NAME:VERSION]") }
+        var repo = FileManager.default.currentDirectoryPath
+        var runtimes = RuntimeArtifact.defaultRuntimes
+        var i = 1
+        if i < rest.count && !rest[i].hasPrefix("--") {
+            repo = rest[i]
+            i += 1
+        }
+        if i < rest.count {
+            guard rest.count == i + 2, rest[i] == "--runtime" else {
+                throw MicroVMError("usage: microvm runtime prepare [REPO] [--runtime NAME:VERSION]")
+            }
+            let parts = rest[i + 1].split(separator: ":")
+            guard parts.count == 2 else { throw MicroVMError("runtime must be NAME:VERSION") }
+            runtimes = [RuntimeSelection(name: String(parts[0]), version: String(parts[1]))]
+        }
+        return CLIInvocation(home: homeURL, command: .runtimePrepare(RuntimePreparation(repo: repo, runtimes: runtimes)))
+    case "task":
+        return CLIInvocation(home: homeURL, command: .task(try parseTask(rest)))
     case "help", "-h", "--help":
         return CLIInvocation(home: homeURL, command: .help)
     case "version", "--version":
@@ -226,4 +254,46 @@ private func takeInt(_ args: [String], _ index: inout Int, _ flag: String, min: 
         throw MicroVMError("\(flag) expects an integer >= \(min)")
     }
     return value
+}
+
+private func parseTask(_ args: [String]) throws -> TaskCommand {
+    guard let op = args.first else {
+        throw MicroVMError("usage: microvm task start PATH [--network none|nat] | finish ID | exec ID -- COMMAND")
+    }
+    if op == "start", args.count >= 2 {
+        var cmd = TaskCommand(op: "start")
+        cmd.projectPath = URL(fileURLWithPath: args[1]).path
+        var i = 2
+        while i < args.count {
+            guard i + 1 < args.count else { throw MicroVMError("missing task option value") }
+            let value = args[i + 1]
+            switch args[i] {
+            case "--network":
+                guard let network = NetworkMode(rawValue: value) else { throw MicroVMError("network must be none or nat") }
+                cmd.network = network
+            case "--ttl":
+                guard let ttl = Int(value) else { throw MicroVMError("invalid TTL") }
+                cmd.ttlSeconds = ttl
+            case "--runtime":
+                let parts = value.split(separator: ":")
+                guard parts.count == 2 else { throw MicroVMError("runtime must be NAME:VERSION") }
+                cmd.runtimes = [RuntimeSelection(name: String(parts[0]), version: String(parts[1]))]
+            default: throw MicroVMError("unknown task option")
+            }
+            i += 2
+        }
+        return cmd
+    }
+    if op == "finish", args.count == 2 {
+        var cmd = TaskCommand(op: op)
+        cmd.id = args[1]
+        return cmd
+    }
+    if op == "exec", args.count >= 4, args[2] == "--" {
+        var cmd = TaskCommand(op: op)
+        cmd.id = args[1]
+        cmd.argv = Array(args.dropFirst(3))
+        return cmd
+    }
+    throw MicroVMError("invalid task command")
 }

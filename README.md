@@ -254,3 +254,10 @@ testdata/protocol-vectors.json
 ## License
 
 Apache 2.0. See [LICENSE](LICENSE).
+
+## Agent task loop
+
+The Node 22 project/task/result path, runtime preparation, SDK/MCP usage and
+retention limits are documented in [Task loop](docs/task-loop.md). Runtime tools
+are read-only, workspaces are copied, and finalization exports results before
+sandbox destruction.

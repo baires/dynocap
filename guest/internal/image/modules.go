@@ -9,9 +9,10 @@ import (
 // Vsock is loaded before the agent listens. Net is loaded after.
 type modulePlan struct {
 	// Paths is Vsock then Net, relative to /lib/modules/<release>/, ending in .ko.
-	Paths []string
-	Vsock []string
-	Net   []string
+	Paths   []string
+	Vsock   []string
+	Net     []string
+	Storage []string
 }
 
 // planModules reads modules.dep plus the kernel config and returns the
@@ -28,6 +29,9 @@ func planModules(depText, config string) (modulePlan, error) {
 	}{
 		{"vmw_vsock_virtio_transport", "CONFIG_VIRTIO_VSOCKETS"},
 		{"virtio_net", "CONFIG_VIRTIO_NET"},
+		{"af_packet", "CONFIG_PACKET"},
+		{"virtio_blk", "CONFIG_VIRTIO_BLK"},
+		{"ext4", "CONFIG_EXT4_FS"},
 	}
 	seen := map[string]bool{}
 	var order []string
@@ -49,7 +53,7 @@ func planModules(depText, config string) (modulePlan, error) {
 		order = append(order, rel)
 		return nil
 	}
-	var vsock, net []string
+	var vsock, net, storage []string
 	for _, target := range targets {
 		before := len(order)
 		if _, ok := paths[target.name]; ok {
@@ -59,8 +63,10 @@ func planModules(depText, config string) (modulePlan, error) {
 			added := append([]string(nil), order[before:]...)
 			if target.name == "vmw_vsock_virtio_transport" {
 				vsock = append(vsock, added...)
-			} else {
+			} else if target.name == "virtio_net" || target.name == "af_packet" {
 				net = append(net, added...)
+			} else {
+				storage = append(storage, added...)
 			}
 			continue
 		}
@@ -73,7 +79,7 @@ func planModules(depText, config string) (modulePlan, error) {
 			return modulePlan{}, fmt.Errorf("kernel has no %s (%s)", target.name, target.config)
 		}
 	}
-	return modulePlan{Paths: order, Vsock: vsock, Net: net}, nil
+	return modulePlan{Paths: order, Vsock: vsock, Net: net, Storage: storage}, nil
 }
 
 func configValue(config, key string) string {

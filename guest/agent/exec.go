@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"os"
 	"os/exec"
@@ -53,11 +54,6 @@ func Execute(req protocol.Message, write func(protocol.Message) error) {
 	}
 
 	sess := lookupSession(req.ID)
-	if sess != nil {
-		sess.attach(stdin)
-	} else {
-		_ = stdin.Close()
-	}
 
 	if err := cmd.Start(); err != nil {
 		failStart(req.ID, err, write)
@@ -65,6 +61,9 @@ func Execute(req protocol.Message, write func(protocol.Message) error) {
 	}
 	if sess != nil {
 		sess.setPID(cmd.Process.Pid)
+		sess.attach(stdin)
+	} else {
+		_ = stdin.Close()
 	}
 	_ = write(protocol.Message{Type: protocol.TypeStarted, ID: req.ID})
 
@@ -175,6 +174,15 @@ func mergeEnv(overrides []string) []string {
 		"LANG": "C.UTF-8",
 	}
 	order := []string{"PATH", "HOME", "TERM", "LANG"}
+	var environment map[string]string
+	if data, err := os.ReadFile("/etc/microvm-environment.json"); err == nil && json.Unmarshal(data, &environment) == nil {
+		for key, value := range environment {
+			if _, ok := base[key]; !ok {
+				order = append(order, key)
+			}
+			base[key] = value
+		}
+	}
 	for _, e := range overrides {
 		key, val, _ := splitEnv(e)
 		if _, ok := base[key]; !ok {

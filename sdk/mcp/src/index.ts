@@ -2,6 +2,9 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 
 import {
+  microvmTaskStart,
+  microvmTaskExec,
+  microvmTaskFinish,
   microvmDestroy,
   microvmExec,
   microvmPs,
@@ -13,6 +16,9 @@ import {
 } from "./tools.ts";
 
 export {
+  microvmTaskStart,
+  microvmTaskExec,
+  microvmTaskFinish,
   microvmDestroy,
   microvmExec,
   microvmPs,
@@ -82,5 +88,47 @@ export function createServer(options: ToolOptions = {}): McpServer {
     async ({ name }) => microvmDestroy(name, host)
   );
 
+  server.registerTool(
+    "microvm_task_start",
+    {
+      description:
+        "Copy a local project into a Node task. Runtime must be prepared. NAT is unrestricted and explicit. Results require finish before TTL.",
+      inputSchema: {
+        projectPath: z.string(),
+        runtimes: z
+          .array(z.object({ name: z.string(), version: z.string() }))
+          .optional(),
+        network: z.enum(["none", "nat"]).optional(),
+        ttlSeconds: z.number().int().min(1).max(86400).optional(),
+        cpus: z.number().int().positive().optional(),
+        memoryMB: z.number().int().min(128).optional(),
+      },
+    },
+    async (input) => microvmTaskStart(input, host)
+  );
+  server.registerTool(
+    "microvm_task_exec",
+    {
+      description:
+        "Run a task command with a 300-second default deadline. Returns bounded output and a host log directory.",
+      inputSchema: {
+        name: z.string(),
+        command: z.string(),
+        cwd: z.string().optional(),
+        env: z.record(z.string(), z.string()).optional(),
+        timeoutSeconds: z.number().int().min(1).max(86400).optional(),
+      },
+    },
+    async (input) => microvmTaskExec(input, host)
+  );
+  server.registerTool(
+    "microvm_task_finish",
+    {
+      description:
+        "Export reviewable changes and logs to the host, then destroy the sandbox. Returns result path and expiry.",
+      inputSchema: { id: z.string() },
+    },
+    async (input) => microvmTaskFinish(input.id, host)
+  );
   return server;
 }
