@@ -602,6 +602,133 @@ func TestLocalSubmoduleIsRejected(t *testing.T) {
 	}
 }
 
+func TestGitfileDoesNotImportUnrelatedRepository(t *testing.T) {
+	secret := t.TempDir()
+	gitCmd(t, secret, "init", "-b", "main")
+	must(t, os.WriteFile(filepath.Join(secret, "secret.txt"), []byte("TOP-SECRET-HISTORY\n"), 0644))
+	gitCmd(t, secret, "add", "secret.txt")
+	gitCmd(t, secret, "commit", "-m", "secret")
+	checkout := t.TempDir()
+	must(t, os.WriteFile(filepath.Join(checkout, "README"), []byte("visible\n"), 0644))
+	must(t, os.WriteFile(filepath.Join(checkout, ".git"), []byte("gitdir: "+filepath.Join(secret, ".git")+"\n"), 0644))
+	beforeCheckout := treeDigest(t, checkout)
+	beforeSecret := treeDigest(t, secret)
+	dest := filepath.Join(t.TempDir(), "history")
+	err := ImportGit(checkout, dest)
+	if err == nil || errors.Is(err, ErrNoGit) {
+		t.Fatalf("expected import failure, got %v", err)
+	}
+	if treeDigest(t, checkout) != beforeCheckout || treeDigest(t, secret) != beforeSecret {
+		t.Fatal("source checkout changed")
+	}
+	if treeContains(t, dest, "TOP-SECRET-HISTORY") {
+		t.Fatal("imported unrelated history")
+	}
+}
+
+func TestNestedGitMetadataIsStripped(t *testing.T) {
+	source := t.TempDir()
+	gitCmd(t, source, "init", "-b", "main")
+	must(t, os.WriteFile(filepath.Join(source, "README"), []byte("hello\n"), 0644))
+	gitCmd(t, source, "add", "README")
+	gitCmd(t, source, "commit", "-m", "initial")
+	gitDir := filepath.Join(source, ".git")
+	module := filepath.Join(gitDir, "modules", "vendor")
+	must(t, os.MkdirAll(filepath.Join(module, "hooks"), 0755))
+	must(t, os.MkdirAll(filepath.Join(module, "objects", "info"), 0755))
+	must(t, os.WriteFile(filepath.Join(module, "hooks", "post-checkout"), []byte("#!/bin/sh\necho nested-hook\n"), 0755))
+	must(t, os.WriteFile(filepath.Join(module, "config"), []byte("[core]\n\trepositoryformatversion = 0\n[credential]\n\thelper = store\n[credential \"https://example.invalid\"]\n\thelper = osxkeychain\n"), 0644))
+	must(t, os.MkdirAll(filepath.Join(gitDir, "objects", "info"), 0755))
+	must(t, os.WriteFile(filepath.Join(gitDir, "objects", "info", "http-alternates"), []byte("https://example.invalid/objects\n"), 0644))
+	must(t, os.WriteFile(filepath.Join(module, "objects", "info", "alternates"), []byte("/host/objects\n"), 0644))
+	before := treeDigest(t, source)
+	dest := filepath.Join(t.TempDir(), "history")
+	if err := ImportGit(source, dest); err != nil {
+		t.Fatal(err)
+	}
+	if treeDigest(t, source) != before {
+		t.Fatal("source checkout changed")
+	}
+	destGit := filepath.Join(dest, ".git")
+	for _, rel := range []string{
+		"hooks",
+		"modules/vendor/hooks",
+		"modules/vendor/hooks/post-checkout",
+		"objects/info/http-alternates",
+		"modules/vendor/objects/info/alternates",
+	} {
+		if _, err := os.Lstat(filepath.Join(destGit, rel)); !os.IsNotExist(err) {
+			t.Fatal(rel)
+		}
+	}
+	nested, err := os.ReadFile(filepath.Join(destGit, "modules", "vendor", "config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(bytes.ToLower(nested), []byte("helper")) {
+		t.Fatalf("nested config:\n%s", nested)
+	}
+	if !bytes.Contains(nested, []byte("repositoryformatversion = 0")) {
+		t.Fatalf("nested config:\n%s", nested)
+	}
+	var packed bytes.Buffer
+	if err := PackGit(dest, &packed, Limit); err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(packed.Bytes(), []byte("nested-hook")) || bytes.Contains(packed.Bytes(), []byte("osxkeychain")) || bytes.Contains(packed.Bytes(), []byte("http-alternates")) || bytes.Contains(packed.Bytes(), []byte("/host/objects")) {
+		t.Fatal("unsafe metadata packed")
+	}
+}
+
+func TestPackGitRejectsRemainingNestedMetadata(t *testing.T) {
+	cases := []struct {
+		name  string
+		plant func(gitDir string)
+	}{
+		{
+			name: "hooks",
+			plant: func(gitDir string) {
+				must(t, os.MkdirAll(filepath.Join(gitDir, "modules", "vendor", "hooks"), 0755))
+				must(t, os.WriteFile(filepath.Join(gitDir, "modules", "vendor", "hooks", "post-checkout"), []byte("#!/bin/sh\n"), 0755))
+			},
+		},
+		{
+			name: "http-alternates",
+			plant: func(gitDir string) {
+				must(t, os.MkdirAll(filepath.Join(gitDir, "objects", "info"), 0755))
+				must(t, os.WriteFile(filepath.Join(gitDir, "objects", "info", "http-alternates"), []byte("https://example.invalid/objects\n"), 0644))
+			},
+		},
+		{
+			name: "alternates",
+			plant: func(gitDir string) {
+				must(t, os.MkdirAll(filepath.Join(gitDir, "modules", "vendor", "objects", "info"), 0755))
+				must(t, os.WriteFile(filepath.Join(gitDir, "modules", "vendor", "objects", "info", "alternates"), []byte("/host/objects\n"), 0644))
+			},
+		},
+		{
+			name: "credential.helper",
+			plant: func(gitDir string) {
+				must(t, os.MkdirAll(filepath.Join(gitDir, "modules", "vendor"), 0755))
+				must(t, os.WriteFile(filepath.Join(gitDir, "modules", "vendor", "config"), []byte("[credential]\n\thelper = store\n"), 0644))
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			gitDir := filepath.Join(root, ".git")
+			must(t, os.MkdirAll(gitDir, 0755))
+			must(t, os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("ref: refs/heads/main\n"), 0644))
+			tc.plant(gitDir)
+			var packed bytes.Buffer
+			if err := PackGit(root, &packed, Limit); err == nil {
+				t.Fatal("packed unsafe history")
+			}
+		})
+	}
+}
+
 func workspaceFromLocal(t *testing.T, source string) string {
 	t.Helper()
 	ws := t.TempDir()
@@ -675,6 +802,31 @@ func treeDigest(t *testing.T, root string) string {
 		t.Fatal(err)
 	}
 	return hex.EncodeToString(sum.Sum(nil))
+}
+
+func treeContains(t *testing.T, root, needle string) bool {
+	t.Helper()
+	if _, err := os.Stat(root); os.IsNotExist(err) {
+		return false
+	}
+	found := false
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || found || d.IsDir() || !d.Type().IsRegular() {
+			return err
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		if bytes.Contains(data, []byte(needle)) {
+			found = true
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return found
 }
 
 func gitOutputIn(t *testing.T, dir string, args ...string) string {

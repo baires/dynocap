@@ -285,7 +285,119 @@ func Sanitize(root, cleanURL, branch, token string) error {
 		return err
 	}
 	_ = os.Remove(filepath.Join(gitDir, "objects", "info", "alternates"))
+	if err := scrubCopiedGit(gitDir); err != nil {
+		return err
+	}
 	return scrubMetadata(gitDir, token)
+}
+
+// scrubCopiedGit removes hooks, alternates, and credential helpers anywhere
+// under the copied git directory, including a deinitialized modules tree.
+func scrubCopiedGit(gitDir string) error {
+	return filepath.WalkDir(gitDir, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if p == gitDir {
+			return nil
+		}
+		name := d.Name()
+		if d.IsDir() && name == "hooks" {
+			if err := os.RemoveAll(p); err != nil {
+				return err
+			}
+			return filepath.SkipDir
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if name == "alternates" || name == "http-alternates" {
+			return os.Remove(p)
+		}
+		if name == "config" {
+			return stripCredentialHelperFile(p)
+		}
+		return nil
+	})
+}
+
+func stripCredentialHelperFile(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	stripped := stripCredentialHelpers(data)
+	if configHasCredentialHelper(stripped) {
+		return fmt.Errorf("repository history contains credentials")
+	}
+	if bytes.Equal(data, stripped) {
+		return nil
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, stripped, info.Mode().Perm())
+}
+
+func stripCredentialHelpers(data []byte) []byte {
+	lines := strings.Split(string(data), "\n")
+	out := make([]string, 0, len(lines))
+	inCredential := false
+	for _, line := range lines {
+		trim := strings.TrimSpace(line)
+		if strings.HasPrefix(trim, "[") {
+			inCredential = credentialSection(trim)
+		}
+		if dropCredentialHelperLine(trim, inCredential) {
+			continue
+		}
+		out = append(out, line)
+	}
+	return []byte(strings.Join(out, "\n"))
+}
+
+func dropCredentialHelperLine(trim string, inCredential bool) bool {
+	if trim == "" || strings.HasPrefix(trim, "#") || strings.HasPrefix(trim, ";") {
+		return false
+	}
+	if inCredential {
+		key, _, ok := strings.Cut(trim, "=")
+		if ok && strings.EqualFold(strings.TrimSpace(key), "helper") {
+			return true
+		}
+	}
+	lower := strings.ToLower(trim)
+	return strings.Contains(lower, "credential.helper") && strings.Contains(trim, "=")
+}
+
+func credentialSection(header string) bool {
+	if !strings.HasPrefix(header, "[") || !strings.HasSuffix(header, "]") {
+		return false
+	}
+	body := strings.TrimSpace(header[1 : len(header)-1])
+	name, _, _ := strings.Cut(body, " ")
+	name, _, _ = strings.Cut(name, "\t")
+	name = strings.Trim(name, `"`)
+	return strings.EqualFold(name, "credential")
+}
+
+func configHasCredentialHelper(data []byte) bool {
+	inCredential := false
+	for _, line := range strings.Split(string(data), "\n") {
+		trim := strings.TrimSpace(line)
+		if trim == "" || strings.HasPrefix(trim, "#") || strings.HasPrefix(trim, ";") {
+			continue
+		}
+		if strings.HasPrefix(trim, "[") {
+			inCredential = credentialSection(trim)
+			continue
+		}
+		if dropCredentialHelperLine(trim, inCredential) {
+			return true
+		}
+	}
+	return false
 }
 
 func scrubMetadata(gitDir, token string) error {
@@ -360,9 +472,6 @@ func PackGit(root string, w io.Writer, limit int64) error {
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("repository history is not a directory")
 	}
-	if _, err := os.Lstat(filepath.Join(gitDir, "objects", "info", "alternates")); err == nil {
-		return fmt.Errorf("repository history has alternates")
-	}
 	var names []string
 	err = filepath.WalkDir(gitDir, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -373,11 +482,11 @@ func PackGit(root string, w io.Writer, limit int64) error {
 		if rel == "." {
 			return nil
 		}
-		if rel == "hooks" || strings.HasPrefix(rel, "hooks/") {
-			if d.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
+		if d.IsDir() && filepath.Base(rel) == "hooks" {
+			return fmt.Errorf("repository history has hooks")
+		}
+		if !d.IsDir() && (filepath.Base(rel) == "alternates" || filepath.Base(rel) == "http-alternates") {
+			return fmt.Errorf("repository history has alternates")
 		}
 		if d.IsDir() {
 			return nil
@@ -407,6 +516,9 @@ func PackGit(root string, w io.Writer, limit int64) error {
 			return err
 		}
 		if !strings.Contains(name, "/objects/") && containsCredential(data, "") {
+			return fmt.Errorf("repository history contains credentials")
+		}
+		if filepath.Base(name) == "config" && configHasCredentialHelper(data) {
 			return fmt.Errorf("repository history contains credentials")
 		}
 		total += int64(len(data))
@@ -567,7 +679,7 @@ func headBranch(gitDir string) string {
 }
 
 // importLinkedCheckout builds a normal repository for a linked worktree.
-// Host Git resolves the worktree. The gitfile is never copied or parsed.
+// Host Git must list this checkout before cloning. The gitfile is never copied or parsed.
 func importLinkedCheckout(src, dest string) error {
 	bin, err := hostGit()
 	if err != nil {
@@ -579,6 +691,9 @@ func importLinkedCheckout(src, dest string) error {
 	}
 	defer os.RemoveAll(home)
 	env := gitEnv(home)
+	if err := requireRegisteredWorktree(bin, home, env, src); err != nil {
+		return err
+	}
 	head, err := runGit(bin, home, env, linkedGitArgs("-C", src, "rev-parse", "HEAD"))
 	if err != nil {
 		return err
@@ -608,6 +723,44 @@ func importLinkedCheckout(src, dest string) error {
 	}
 	url, token := cleanOrigin(remote)
 	return Sanitize(dest, url, branch, token)
+}
+
+// requireRegisteredWorktree refuses a gitfile that names some other repository.
+// Host Git must list this checkout itself. The gitfile is not parsed or followed.
+func requireRegisteredWorktree(bin, home string, env []string, checkout string) error {
+	out, err := runGit(bin, home, env, linkedGitArgs("-C", checkout, "worktree", "list", "--porcelain"))
+	if err != nil {
+		return err
+	}
+	if !worktreeListContains(string(out), checkout) {
+		return fmt.Errorf("checkout is not a registered worktree")
+	}
+	return nil
+}
+
+func worktreeListContains(porcelain, checkout string) bool {
+	for _, line := range strings.Split(porcelain, "\n") {
+		path, ok := strings.CutPrefix(strings.TrimRight(line, "\r"), "worktree ")
+		if !ok || path == "" {
+			continue
+		}
+		if samePath(path, checkout) {
+			return true
+		}
+	}
+	return false
+}
+
+func samePath(a, b string) bool {
+	ar, errA := filepath.EvalSymlinks(a)
+	br, errB := filepath.EvalSymlinks(b)
+	if errA != nil {
+		ar = a
+	}
+	if errB != nil {
+		br = b
+	}
+	return filepath.Clean(ar) == filepath.Clean(br)
 }
 
 func linkedGitArgs(args ...string) []string {
