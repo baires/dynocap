@@ -49,6 +49,8 @@ public enum CLICommand: Equatable {
     case version
     case daemon
     case ps
+    case ls(json: Bool)
+    case managed(TaskCommand)
     case run(RunRequest)
     case exec(ExecCommand)
     case destroy(String)
@@ -70,6 +72,10 @@ public let helpText = """
     microvm \(MicroVMInfo.version) — local Linux microVMs on macOS
 
     USAGE
+      microvm clone SOURCE NAME [--runtime node:22] [--network none|nat|filtered] [--ttl SEC]
+      microvm ls [--json]
+      microvm finish NAME_OR_ID
+      microvm rm NAME_OR_ID [--purge]
       microvm run --name <name> [--cpus N] [--memory MB] [--ttl SEC] [--network none|nat|filtered] [--boot-timeout SEC]
       microvm exec <name> [--timeout SEC] [--cwd DIR] [--env KEY=VAL] -- <command> [args...]
       microvm runtime prepare [REPO] [--runtime node:22]
@@ -127,6 +133,23 @@ public func parseCommand(_ args: [String]) throws -> CLIInvocation {
     }
     rest.removeFirst()
     switch sub {
+    case "ls":
+        guard rest.isEmpty || rest == ["--json"] else { throw MicroVMError("usage: microvm ls [--json]") }
+        return CLIInvocation(home: homeURL, command: .ls(json: !rest.isEmpty))
+    case "clone":
+        guard rest.count >= 2 else { throw MicroVMError("usage: microvm clone SOURCE NAME [OPTIONS]") }
+        try validateTaskName(rest[1])
+        let taskArgs = ["start", rest[0], "--name", rest[1]] + Array(rest.dropFirst(2))
+        return CLIInvocation(home: homeURL, command: .managed(try parseTask(taskArgs)))
+    case "finish", "rm":
+        guard rest.count == 1 || (sub == "rm" && rest.count == 2 && rest[1] == "--purge") else {
+            throw MicroVMError("usage: microvm \(sub) NAME_OR_ID" + (sub == "rm" ? " [--purge]" : ""))
+        }
+        try validateVMName(rest[0])
+        var command = TaskCommand(op: sub == "rm" ? "remove" : sub)
+        command.id = rest[0]
+        command.purge = sub == "rm" && rest.count == 2
+        return CLIInvocation(home: homeURL, command: .managed(command))
     case "runtime":
         guard rest.first == "prepare" else { throw MicroVMError("usage: microvm runtime prepare [REPO] [--runtime NAME:VERSION]") }
         var repo = FileManager.default.currentDirectoryPath
@@ -283,6 +306,15 @@ private func parseTask(_ args: [String]) throws -> TaskCommand {
             guard i + 1 < args.count else { throw MicroVMError("missing task option value") }
             let value = args[i + 1]
             switch args[i] {
+            case "--name":
+                try validateTaskName(value)
+                cmd.name = value
+            case "--cpus":
+                guard let cpus = Int(value), cpus >= 1 else { throw MicroVMError("cpus must be >= 1") }
+                cmd.cpus = cpus
+            case "--memory":
+                guard let memory = Int(value), memory >= 128 else { throw MicroVMError("memory must be >= 128 MB") }
+                cmd.memoryMB = memory
             case "--network":
                 guard let network = NetworkMode(rawValue: value) else { throw MicroVMError("network must be none, nat, or filtered") }
                 cmd.network = network

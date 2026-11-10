@@ -333,6 +333,11 @@ public final class Daemon {
     }
 
     private func performExec(_ fd: Int32, _ command: ExecCommand) throws {
+        var command = command
+        if let task = try tasks.records().first(where: { $0.id == command.name || $0.name == command.name }) {
+            command.name = task.id
+            if command.cwd.isEmpty { command.cwd = "/workspace" }
+        }
         try POSIX.setWriteTimeout(fd, seconds: 5)
         let taskIndex: Int?
         do { taskIndex = try tasks.begin(command.name, argv: command.argv, env: command.env) } catch {
@@ -746,8 +751,19 @@ public struct DaemonClient {
             throw MicroVMError("daemon lacks task v1; rebuild and manually restart the daemon before creating tasks")
         }
     }
+    public func requireTaskManagement() throws {
+        let reply = try roundTrip(.ping)
+        guard case .result(let data) = reply,
+              let capabilities = try? JSONDecoder().decode(PolicyCapabilities.self, from: data),
+              capabilities.taskManagementVersion == 1 else {
+            throw MicroVMError("daemon lacks task management v1; rebuild and restart it")
+        }
+    }
     public func task(_ command: TaskCommand) throws -> Data {
         try requireTasks()
+        if command.name != nil || ["list", "resolve", "entries", "remove", "diff"].contains(command.op) {
+            try requireTaskManagement()
+        }
         let reply = try roundTrip(.task(command))
         guard case .result(let data) = reply else { throw messageError(reply) }
         return data

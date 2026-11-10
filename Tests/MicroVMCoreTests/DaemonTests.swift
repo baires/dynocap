@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import MicroVMCore
 
 final class DaemonTests: XCTestCase {
@@ -33,15 +34,42 @@ final class DaemonTests: XCTestCase {
         XCTAssertNil(backend.booted["demo"])
     }
 
+    func testNamedExecUsesTaskWorkingDirectoryAndKeepsOverrides() throws {
+        let home = tempHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let backend = FakeBackend()
+        let daemon = Daemon(home: home, backend: backend)
+        try daemon.start()
+        defer { daemon.stop() }
+        try touchImages(daemon.paths)
+        let client = DaemonClient(socketPath: daemon.paths.socket.path)
+        _ = try client.run(RunRequest(name: "underlying", cpus: 1, memoryMB: 256, ttlSeconds: 60, bootTimeoutSeconds: 5))
+        let directory = home.appendingPathComponent("tasks/underlying")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let record = TaskRecord(
+            id: "underlying", name: "interview", phase: "running", runtimeDigest: "digest",
+            createdAtUnix: unixNow(), expiresAtUnix: unixNow() + 86400, network: .none)
+        try JSONEncoder().encode(record).write(to: directory.appendingPathComponent("task.json"))
+        _ = try client.exec(ExecCommand(name: "interview", argv: ["pwd"], env: [], cwd: "", timeoutSeconds: 5))
+        XCTAssertEqual(backend.lastExec?.cwd, "/workspace")
+        backend.exitCode = 7
+        let outcome = try client.exec(ExecCommand(name: "interview", argv: ["false"], env: ["CI=1"], cwd: "/tmp", timeoutSeconds: 12))
+        XCTAssertEqual(backend.lastExec?.cwd, "/tmp")
+        XCTAssertEqual(backend.lastExec?.env, ["CI=1"])
+        XCTAssertEqual(outcome.code, 7)
+        try client.destroy("underlying")
+    }
+
     func testReapOnStartAndUnsupportedBoot() throws {
         let home = tempHome()
         defer { try? FileManager.default.removeItem(at: home) }
         let paths = MicroVMPaths(home: home)
         try paths.ensure()
-        try StateStore(paths: paths).save(VMRecord(
-            name: "leaked", phase: .running, cpus: 1, memoryMB: 256,
-            daemonToken: "dead", createdAtUnix: 1, ttlSeconds: nil, message: nil
-        ))
+        try StateStore(paths: paths).save(
+            VMRecord(
+                name: "leaked", phase: .running, cpus: 1, memoryMB: 256,
+                daemonToken: "dead", createdAtUnix: 1, ttlSeconds: nil, message: nil
+            ))
         let daemon = Daemon(home: home, backend: UnsupportedBackend())
         try daemon.start()
         defer { daemon.stop() }
@@ -52,9 +80,12 @@ final class DaemonTests: XCTestCase {
         XCTAssertTrue(records[0].message?.contains("reaped") == true)
 
         try touchImages(paths)
-        XCTAssertThrowsError(try client.run(RunRequest(
-            name: "demo", cpus: 1, memoryMB: 256, ttlSeconds: nil, bootTimeoutSeconds: 5
-        ))) { error in
+        XCTAssertThrowsError(
+            try client.run(
+                RunRequest(
+                    name: "demo", cpus: 1, memoryMB: 256, ttlSeconds: nil, bootTimeoutSeconds: 5
+                ))
+        ) { error in
             XCTAssertTrue(String(describing: error).contains("macOS"))
         }
         let failed = try client.ps().first { $0.name == "demo" }
@@ -73,9 +104,11 @@ final class DaemonTests: XCTestCase {
         _ = try DaemonClient(socketPath: daemon.paths.socket.path).run(
             RunRequest(name: "demo", cpus: 1, memoryMB: 256, ttlSeconds: nil, bootTimeoutSeconds: 5)
         )
-        XCTAssertThrowsError(try DaemonClient(socketPath: daemon.paths.socket.path).exec(
-            ExecCommand(name: "demo", argv: ["sleep", "30"], env: [], cwd: "", timeoutSeconds: 1)
-        )) { error in
+        XCTAssertThrowsError(
+            try DaemonClient(socketPath: daemon.paths.socket.path).exec(
+                ExecCommand(name: "demo", argv: ["sleep", "30"], env: [], cwd: "", timeoutSeconds: 1)
+            )
+        ) { error in
             let micro = error as? MicroVMError
             XCTAssertEqual(micro?.exitCode, 124)
             XCTAssertTrue(micro?.message.contains("timed out") == true)
@@ -96,6 +129,8 @@ final class DaemonTests: XCTestCase {
 private final class FakeBackend: VMBackend {
     var onGuestExit: ((String, UUID, String?) -> Void)?
     var booted: [String: BootRequest] = [:]
+    var lastExec: ExecRequest?
+    var exitCode: Int32 = 0
     var hangExec = false
 
     func boot(_ request: BootRequest, completion: @escaping (Result<Void, Error>) -> Void) {
@@ -104,9 +139,10 @@ private final class FakeBackend: VMBackend {
     }
 
     func exec(_ request: ExecRequest, emit: @escaping (ExecEvent) -> Void) {
+        lastExec = request
         if hangExec { return }
         emit(.stdout(Data((request.argv.joined(separator: " ") + "\n").utf8)))
-        emit(.finished(code: 0, signal: 0))
+        emit(.finished(code: exitCode, signal: 0))
     }
 
     func cancelExec(name: String, id: UInt32) {}

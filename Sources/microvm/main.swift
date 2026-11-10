@@ -25,6 +25,33 @@ struct Main {
     static func run(_ args: [String]) throws {
         let invocation = try parseCommand(args)
         switch invocation.command {
+        case .ls(let json):
+            let paths = try ready(invocation)
+            let data = try DaemonClient(socketPath: paths.socket.path).task(TaskCommand(op: "entries"))
+            if json {
+                print(String(decoding: data, as: UTF8.self))
+            } else {
+                let entries = try JSONDecoder().decode([ManagedEntry].self, from: data)
+                print("NAME\tID\tKIND\tPHASE\tRUNTIME\tNETWORK\tEXPIRES\tRESULT")
+                for entry in entries {
+                    print(
+                        [
+                            entry.name ?? "-", entry.id, entry.kind, entry.phase, entry.runtime,
+                            entry.network?.rawValue ?? "unknown", entry.expiresAtUnix.map(String.init) ?? "-",
+                            entry.resultDirectory ?? "-",
+                        ].joined(separator: "\t"))
+                }
+            }
+        case .managed(let command):
+            let paths = try ready(invocation)
+            let client = DaemonClient(socketPath: paths.socket.path)
+            try client.requireTaskManagement()
+            let data = try client.task(command)
+            if command.op == "remove" {
+                print("removed \(command.id ?? "")")
+            } else {
+                print(String(decoding: data, as: UTF8.self))
+            }
         case .runtimePrepare(let preparation):
             let paths = try ready(invocation)
             try DaemonClient(socketPath: paths.socket.path).requireTasks()
