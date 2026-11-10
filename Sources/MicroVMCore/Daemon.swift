@@ -143,6 +143,10 @@ public final class Daemon {
                             tasks.finish(
                                 tasks.resolve(id).id, requireOffline: command.requireOffline == true, permitFiltered: command.permitFiltered
                             )))
+                case "diff":
+                    guard let target = command.id else { throw MicroVMError("task name or id required") }
+                    data = try JSONEncoder().encode(tasks.preview(tasks.resolve(target).id,
+                        requireOffline: command.requireOffline == true, permitFiltered: command.permitFiltered))
                 case "list": data = try JSONEncoder().encode(tasks.records().map(TaskDescriptor.init))
                 case "resolve":
                     guard let target = command.id else { throw MicroVMError("task name or id required") }

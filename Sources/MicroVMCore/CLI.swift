@@ -74,6 +74,7 @@ public let helpText = """
     USAGE
       microvm clone SOURCE NAME [--runtime node:22] [--network none|nat|filtered] [--ttl SEC]
       microvm ls [--json]
+      microvm diff NAME_OR_ID
       microvm finish NAME_OR_ID
       microvm rm NAME_OR_ID [--purge]
       microvm run --name <name> [--cpus N] [--memory MB] [--ttl SEC] [--network none|nat|filtered] [--boot-timeout SEC]
@@ -141,7 +142,7 @@ public func parseCommand(_ args: [String]) throws -> CLIInvocation {
         try validateTaskName(rest[1])
         let taskArgs = ["start", rest[0], "--name", rest[1]] + Array(rest.dropFirst(2))
         return CLIInvocation(home: homeURL, command: .managed(try parseTask(taskArgs)))
-    case "finish", "rm":
+    case "finish", "rm", "diff":
         guard rest.count == 1 || (sub == "rm" && rest.count == 2 && rest[1] == "--purge") else {
             throw MicroVMError("usage: microvm \(sub) NAME_OR_ID" + (sub == "rm" ? " [--purge]" : ""))
         }

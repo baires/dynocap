@@ -93,6 +93,8 @@ final class TaskManager {
     var current: TaskRecord?
     var busy = false
     var active = 0
+    var reviewing = false
+    let hostTree: (String, [String], URL?, URL?) throws -> Data
     let fm = FileManager.default
     var root: URL { paths.home.appendingPathComponent("tasks") }
     func dir(_ id: String) -> URL { root.appendingPathComponent(id) }
@@ -105,13 +107,15 @@ final class TaskManager {
     }
     init(
         paths: MicroVMPaths, arch: String, boot: @escaping (RunRequest) throws -> VMRecord, execute: @escaping Execute,
-        destroy: @escaping (String) throws -> Void
+        destroy: @escaping (String) throws -> Void,
+        hostTree: @escaping (String, [String], URL?, URL?) throws -> Data = { try HostTree.run($0, $1, input: $2, output: $3) }
     ) {
         self.paths = paths
         self.arch = arch
         self.boot = boot
         self.execute = execute
         self.destroy = destroy
+        self.hostTree = hostTree
     }
     func recover() throws {
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
@@ -132,7 +136,9 @@ final class TaskManager {
             try? fm.removeItem(at: entry.appendingPathComponent("workspace.ext4"))
             try? fm.removeItem(at: entry.appendingPathComponent("baseline"))
             try? fm.removeItem(at: entry.appendingPathComponent("final"))
-            for name in ["result.partial", "export.tar", "import.tar"] { try? fm.removeItem(at: entry.appendingPathComponent(name)) }
+            for name in ["result.partial", "export.tar", "import.tar", "preview", "preview.partial", "preview-export.tar", "preview-tree"] {
+                try? fm.removeItem(at: entry.appendingPathComponent(name))
+            }
         }
         try? fm.removeItem(at: paths.home.appendingPathComponent("runtime-candidate"))
         let seeds = paths.home.appendingPathComponent("npm-cache")
@@ -158,7 +164,7 @@ final class TaskManager {
     func admit() throws {
         condition.lock()
         defer { condition.unlock() }
-        guard !busy else { throw MicroVMError("one task or runtime preparation may run at a time") }
+        guard !busy, !reviewing else { throw MicroVMError("one task or runtime preparation may run at a time") }
         var used: Int64 = 0
         for entry in try fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) {
             if let record = try? load(entry.lastPathComponent), record.expiresAtUnix <= unixNow() {
@@ -311,7 +317,7 @@ final class TaskManager {
         condition.lock()
         defer { condition.unlock() }
         guard var record = current, record.id == name else { return nil }
-        guard record.phase == "running", record.logBytes < 32 << 20 else {
+        guard !reviewing, record.phase == "running", record.logBytes < 32 << 20 else {
             throw MicroVMError("task is finalizing or its log quota is exhausted")
         }
         if !DependencyCache.compatibleCommand(argv: argv, env: env) { record.dependencyCacheKey = nil }
@@ -371,6 +377,9 @@ final class TaskManager {
         try? fm.removeItem(at: dir(name).appendingPathComponent("workspace.ext4"))
         try? fm.removeItem(at: dir(name).appendingPathComponent("baseline"))
         try? fm.removeItem(at: dir(name).appendingPathComponent("final"))
+        for path in ["preview", "preview.partial", "preview-export.tar", "preview-tree"] {
+            try? fm.removeItem(at: dir(name).appendingPathComponent(path))
+        }
         current = nil
         active = 0
         busy = false
@@ -388,7 +397,7 @@ final class TaskManager {
             return saved
         }
         condition.lock()
-        guard var record = current, record.id == id, record.phase == "running" else {
+        guard !reviewing, var record = current, record.id == id, record.phase == "running" else {
             condition.unlock()
             throw MicroVMError("task is interrupted or already finalizing; unexported edits are unavailable")
         }
@@ -399,6 +408,7 @@ final class TaskManager {
             condition.unlock()
             throw MicroVMError(message)
         }
+        try? fm.removeItem(at: dir(id).appendingPathComponent("preview"))
         record.phase = "finalizing"
         current = record
         while active > 0 && current?.id == id { condition.wait() }

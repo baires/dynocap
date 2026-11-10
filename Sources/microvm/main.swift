@@ -47,7 +47,14 @@ struct Main {
             let client = DaemonClient(socketPath: paths.socket.path)
             try client.requireTaskManagement()
             let data = try client.task(command)
-            if command.op == "remove" {
+            if command.op == "diff" {
+                let preview = try JSONDecoder().decode(TaskPreview.self, from: data)
+                let file = try FileHandle(forReadingFrom: URL(fileURLWithPath: preview.patchPath))
+                defer { try? file.close() }
+                while let chunk = try file.read(upToCount: 64 << 10), !chunk.isEmpty {
+                    try FileHandle.standardOutput.write(contentsOf: chunk)
+                }
+            } else if command.op == "remove" {
                 print("removed \(command.id ?? "")")
             } else {
                 print(String(decoding: data, as: UTF8.self))

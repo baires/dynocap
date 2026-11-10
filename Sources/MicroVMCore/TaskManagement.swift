@@ -56,6 +56,9 @@ extension TaskManager {
 
     func remove(_ id: String, purge: Bool) throws {
         try destroy(id)  // Failed teardown must keep the alias, disk and record.
+        condition.lock()
+        while reviewing { condition.wait() }
+        condition.unlock()
         namespace.lock()
         defer { namespace.unlock() }
         condition.lock()
@@ -74,5 +77,63 @@ func validateTaskName(_ name: String) throws {
     try validateVMName(name)
     guard !name.hasPrefix("task-"), !name.hasPrefix("runtime-") else {
         throw MicroVMError("name is reserved: \(name)")
+    }
+}
+
+public struct TaskPreview: Codable {
+    public var directory: String
+    public var patchPath: String
+    public var reviewPath: String
+    public var changesPath: String
+    init(_ directory: URL) {
+        self.directory = directory.path
+        patchPath = directory.appendingPathComponent("changes.patch").path
+        reviewPath = directory.appendingPathComponent("review.txt").path
+        changesPath = directory.appendingPathComponent("changes.json").path
+    }
+}
+
+extension TaskManager {
+    func preview(_ id: String, requireOffline: Bool, permitFiltered: Bool?) throws -> TaskPreview {
+        let record = try load(id)
+        if let result = record.resultDirectory { return TaskPreview(URL(fileURLWithPath: result)) }
+        condition.lock()
+        guard !reviewing, current?.id == id, current?.phase == "running", active == 0 else {
+            condition.unlock()
+            throw MicroVMError("diff requires an idle running task; commands or another review may be active")
+        }
+        if let rejection = NetworkAdmission.rejection(
+            network: record.network, requireOffline: requireOffline,
+            permitFiltered: permitFiltered, offlineMessage: "task requires offline networking")
+        {
+            condition.unlock()
+            throw MicroVMError(rejection)
+        }
+        reviewing = true
+        condition.unlock()
+        let directory = dir(id)
+        let preview = directory.appendingPathComponent("preview")
+        let stage = directory.appendingPathComponent("preview.partial")
+        let archive = directory.appendingPathComponent("preview-export.tar")
+        let final = directory.appendingPathComponent("preview-tree")
+        defer {
+            for path in [stage, archive, final] { try? fm.removeItem(at: path) }
+            condition.lock()
+            reviewing = false
+            condition.broadcast()
+            condition.unlock()
+        }
+        try? fm.removeItem(at: preview)
+        try fm.createDirectory(at: stage, withIntermediateDirectories: true)
+        _ = try execute(id, ["/usr/local/bin/microvm-agent", "task-pack", "/workspace"], [], nil, archive, 256 << 20)
+        _ = try hostTree("microvm-workspace", ["unpack", final.path], archive, nil)
+        _ = try hostTree(
+            "microvm-workspace", ["result", directory.appendingPathComponent("baseline").path, final.path, stage.path], nil, nil)
+        guard try treeSize(stage) <= 256 << 20 else { throw MicroVMError("diff exceeds 256 MiB export limit") }
+        condition.lock()
+        defer { condition.unlock() }
+        guard current?.id == id, current?.phase == "running" else { throw MicroVMError("task stopped during diff") }
+        try fm.moveItem(at: stage, to: preview)
+        return TaskPreview(preview)
     }
 }
