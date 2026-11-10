@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -510,25 +511,16 @@ func reviewPatch(before, after string, ignored map[string]bool) ([]byte, map[str
 	if _, err := runGit(bin, root, env, []string{"init", "-q", "-b", "main", repo}); err != nil {
 		return nil, nil, err
 	}
-	if err := copyWorktree(before, repo); err != nil {
-		return nil, nil, err
-	}
-	if _, err := runGit(bin, repo, env, gitArgs(repo, "add", "-A", "--force")); err != nil {
+	if err := stageExactTree(bin, repo, env, before, nil); err != nil {
 		return nil, nil, err
 	}
 	if _, err := runGit(bin, repo, env, gitArgs(repo, "commit", "--quiet", "--allow-empty", "-m", "baseline")); err != nil {
 		return nil, nil, err
 	}
-	if err := clearWorktree(repo); err != nil {
+	if err := stageExactTree(bin, repo, env, after, ignored); err != nil {
 		return nil, nil, err
 	}
-	if err := copyWorktreeExcept(after, repo, ignored); err != nil {
-		return nil, nil, err
-	}
-	if _, err := runGit(bin, repo, env, gitArgs(repo, "add", "--all", "--force")); err != nil {
-		return nil, nil, err
-	}
-	patch, err := runGit(bin, repo, env, gitArgs(repo, "diff", "--cached", "--binary", "--find-renames", "--no-color", "HEAD"))
+	patch, err := runGit(bin, repo, env, gitArgs(repo, "diff", "--cached", "--binary", "--find-renames", "--no-ext-diff", "--no-textconv", "--no-color", "HEAD"))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -537,6 +529,9 @@ func reviewPatch(before, after string, ignored map[string]bool) ([]byte, map[str
 	}
 	status, err := runGit(bin, repo, env, gitArgs(repo, "diff", "--cached", "--name-status", "--find-renames", "-z", "HEAD"))
 	if err != nil {
+		return nil, nil, err
+	}
+	if err := verifyReviewPatch(bin, root, env, before, after, ignored, patch); err != nil {
 		return nil, nil, err
 	}
 	return patch, parseRenames(status), nil
@@ -625,17 +620,130 @@ func copyWorktreeExcept(src, dst string, ignored map[string]bool) error {
 	})
 }
 
-func clearWorktree(root string) error {
-	entries, err := os.ReadDir(root)
+// Git's index is built from transported bytes, never from project clean filters.
+func stageExactTree(bin, repo string, env []string, root string, ignored map[string]bool) error {
+	names, err := Names(root, false)
 	if err != nil {
 		return err
 	}
-	for _, entry := range entries {
-		if entry.Name() == ".git" {
+	if _, err = runGit(bin, repo, env, gitArgs(repo, "read-tree", "--empty")); err != nil {
+		return err
+	}
+	var entries bytes.Buffer
+	for _, name := range names {
+		if ignored[name] {
 			continue
 		}
-		if err := os.RemoveAll(filepath.Join(root, entry.Name())); err != nil {
+		path := filepath.Join(root, name)
+		info, err := os.Lstat(path)
+		if err != nil {
 			return err
+		}
+		object, err := hashGitEntry(bin, repo, env, path, info)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(&entries, "%o %s\t%s%c", gitFileMode(info.Mode()), object, name, 0)
+	}
+	cmd := exec.Command(bin, gitArgs(repo, "update-index", "-z", "--index-info")...)
+	cmd.Env = env
+	cmd.Stdin = &entries
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("stage exact review tree: %s: %w", output, err)
+	}
+	return nil
+}
+
+func hashGitEntry(bin, repo string, env []string, path string, info os.FileInfo) (string, error) {
+	var input io.Reader
+	if info.Mode()&os.ModeSymlink != 0 {
+		link, err := os.Readlink(path)
+		if err != nil {
+			return "", err
+		}
+		input = strings.NewReader(link)
+	} else {
+		if !info.Mode().IsRegular() {
+			return "", fmt.Errorf("unsupported review file %s", path)
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			return "", err
+		}
+		defer file.Close()
+		input = file
+	}
+	cmd := exec.Command(bin, gitArgs(repo, "hash-object", "-w", "--no-filters", "--stdin")...)
+	cmd.Env = env
+	cmd.Stdin = input
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("hash review file: %w", err)
+	}
+	object := strings.TrimSpace(string(output))
+	if !commitPattern.MatchString(object) {
+		return "", fmt.Errorf("invalid review object")
+	}
+	return object, nil
+}
+
+func gitFileMode(mode os.FileMode) uint32 {
+	if mode&os.ModeSymlink != 0 {
+		return 0o120000
+	}
+	if mode.Perm()&0o111 != 0 {
+		return 0o100755
+	}
+	return 0o100644
+}
+
+func verifyReviewPatch(bin, root string, env []string, before, after string, ignored map[string]bool, patch []byte) error {
+	applied := filepath.Join(root, "applied")
+	if err := os.MkdirAll(applied, 0700); err != nil {
+		return err
+	}
+	if err := copyWorktree(before, applied); err != nil {
+		return err
+	}
+	if len(patch) > 0 {
+		cmd := exec.Command(bin, gitArgs(applied, "apply", "--binary", "--whitespace=nowarn", "-")...)
+		cmd.Env = env
+		cmd.Stdin = bytes.NewReader(patch)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("review patch does not apply to imported bytes: %s: %w", output, err)
+		}
+	}
+	expected, err := Names(after, false)
+	if err != nil {
+		return err
+	}
+	actual, err := Names(applied, false)
+	if err != nil {
+		return err
+	}
+	selected := map[string]bool{}
+	for _, name := range expected {
+		if !ignored[name] {
+			selected[name] = true
+		}
+	}
+	if len(actual) != len(selected) {
+		return fmt.Errorf("review patch produced a different file selection")
+	}
+	for _, name := range actual {
+		if !selected[name] {
+			return fmt.Errorf("review patch produced unexpected file %s", name)
+		}
+		want, wm, _, err := identity(after, name)
+		if err != nil {
+			return err
+		}
+		got, gm, _, err := identity(applied, name)
+		if err != nil {
+			return err
+		}
+		if want != got || gitFileMode(wm) != gitFileMode(gm) {
+			return fmt.Errorf("review patch changed bytes or mode for %s", name)
 		}
 	}
 	return nil

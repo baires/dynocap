@@ -1038,3 +1038,48 @@ func TestPatchPreservesImportedIgnoredFilesAndFrozenNewFilePolicy(t *testing.T) 
 		t.Fatal("result included ignored new file")
 	}
 }
+
+func TestPatchPreservesRawBytesAcrossAttributes(t *testing.T) {
+	utf16LE := func(s string) []byte {
+		var b []byte
+		for _, r := range s {
+			b = append(b, byte(r), byte(r>>8))
+		}
+		return b
+	}
+	for _, test := range []struct {
+		name, attributes string
+		before, after    []byte
+	}{
+		{"crlf", "*.txt text\n", []byte("one\r\n"), []byte("two\r\n")},
+		{"mixed endings", "*.txt text eol=lf\n", []byte("one\r\nkeep\n"), []byte("two\r\nkeep\n")},
+		{"encoded", "*.txt working-tree-encoding=UTF-16LE\n", utf16LE("one\r\n"), utf16LE("two\r\n")},
+		{"unsupported encoding", "*.txt working-tree-encoding=NOT-AN-ENCODING\n", []byte("one\n"), []byte("two\n")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			before, after, out := t.TempDir(), t.TempDir(), t.TempDir()
+			for _, root := range []string{before, after} {
+				must(t, os.WriteFile(filepath.Join(root, ".gitattributes"), []byte(test.attributes), 0644))
+			}
+			must(t, os.WriteFile(filepath.Join(before, "note.txt"), test.before, 0644))
+			must(t, os.WriteFile(filepath.Join(after, "note.txt"), test.after, 0755))
+			must(t, Result(before, after, out))
+			applied := t.TempDir()
+			must(t, copyWorktree(before, applied))
+			bin, err := hostGit()
+			must(t, err)
+			_, err = runGit(bin, applied, gitEnv(t.TempDir()), []string{"apply", "--binary", "--whitespace=nowarn", filepath.Join(out, "changes.patch")})
+			must(t, err)
+			actual, err := os.ReadFile(filepath.Join(applied, "note.txt"))
+			must(t, err)
+			if !bytes.Equal(actual, test.after) {
+				t.Fatalf("patch converted bytes: got %x want %x", actual, test.after)
+			}
+			mode, err := os.Stat(filepath.Join(applied, "note.txt"))
+			must(t, err)
+			if mode.Mode().Perm() != 0755 {
+				t.Fatal("patch lost executable bit")
+			}
+		})
+	}
+}
