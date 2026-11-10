@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Task, Sandbox } from "../src/index.ts";
+import { Task, Sandbox, listManaged, removeManaged } from "../src/index.ts";
 import { fakeDaemon } from "./daemon.ts";
 
 test("task defaults, bounded capture, finish and opaque runtime selection", async () => {
@@ -83,6 +83,68 @@ test("directory transfer uses the same client and offline requirement", async ()
     assert.equal(daemon.runs.at(-2)?.direction, "upload");
     assert.equal(daemon.runs.at(-1)?.direction, "download");
     assert.equal(daemon.runs.at(-1)?.requireOffline, true);
+  } finally {
+    await daemon.close();
+  }
+});
+
+test("named task handles stay pinned after alias reuse and expose management operations", async () => {
+  const behavior = { resolveID: "task-original" };
+  const daemon = await fakeDaemon(behavior);
+  try {
+    const task = await Task.start({
+      home: daemon.home,
+      projectPath: ".",
+      name: "interview",
+    });
+    assert.equal(task.name, "interview");
+    assert.equal(daemon.runs[0]?.name, "interview");
+    const opened = await Task.open("interview", {
+      home: daemon.home,
+      requireOffline: true,
+      permitFiltered: false,
+    });
+    assert.equal(opened.id, "task-original");
+    behavior.resolveID = "task-replacement";
+    const preview = await opened.diff();
+    assert.match(preview.patchPath, /changes.patch$/);
+    assert.equal(daemon.runs.at(-1)?.id, "task-original");
+    assert.equal(daemon.runs.at(-1)?.requireOffline, true);
+    assert.equal(daemon.runs.at(-1)?.permitFiltered, false);
+    await opened.remove();
+    assert.equal(daemon.runs.at(-1)?.id, "task-original");
+    assert.equal(daemon.runs.at(-1)?.purge, false);
+    await removeManaged("interview", { home: daemon.home, purge: true });
+    assert.equal(daemon.runs.at(-1)?.purge, true);
+    assert.equal((await Task.list({ home: daemon.home })).length, 1);
+    assert.equal((await listManaged({ home: daemon.home }))[0]?.kind, "task");
+  } finally {
+    await daemon.close();
+  }
+});
+test("management and named starts fail clearly before sending operations to old daemons", async () => {
+  const daemon = await fakeDaemon({ taskManagementVersion: null });
+  try {
+    const options = { home: daemon.home };
+    await assert.rejects(
+      Task.open("interview", options),
+      /taskManagementVersion/
+    );
+    await assert.rejects(Task.list(options), /taskManagementVersion/);
+    await assert.rejects(
+      Task.start({ ...options, projectPath: ".", name: "interview" }),
+      /taskManagementVersion/
+    );
+    await assert.rejects(
+      Task.connect("task-old", options).diff(),
+      /taskManagementVersion/
+    );
+    await assert.rejects(
+      removeManaged("raw", options),
+      /taskManagementVersion/
+    );
+    assert.equal(daemon.runs.length, 0);
+    await Task.start({ ...options, projectPath: "." }); // Existing unnamed task interface still works.
   } finally {
     await daemon.close();
   }

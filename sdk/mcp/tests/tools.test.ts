@@ -31,8 +31,11 @@ test("the server exposes sandbox and task tools", async () => {
     const names = listed.tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, [
       "microvm_destroy",
+      "microvm_diff",
       "microvm_exec",
+      "microvm_ls",
       "microvm_ps",
+      "microvm_rm",
       "microvm_run",
       "microvm_task_exec",
       "microvm_task_finish",
@@ -393,6 +396,40 @@ test("task tools preserve MCP NAT permission and return retained result referenc
       undefined
     );
     assert.equal(daemon.runs.at(-1)?.requireOffline, true);
+  } finally {
+    await daemon.close();
+  }
+});
+
+test("named management tools return bounded previews, host paths, and explicit policy", async () => {
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const { microvmTaskStart, microvmDiff, microvmLs, microvmRm } =
+    await import("../src/tools.ts");
+  const daemon = await fakeDaemon();
+  const options = { home: daemon.home, allowFiltered: true };
+  try {
+    const created = await microvmTaskStart(
+      { name: "interview", projectPath: ".", network: "filtered" },
+      options
+    );
+    assert.match(created.content[0].text, /interview/);
+    const directory = path.join(daemon.home, "preview");
+    fs.mkdirSync(directory);
+    fs.writeFileSync(path.join(directory, "changes.patch"), "é".repeat(100000));
+    const preview = await microvmDiff("interview", options);
+    assert.equal(preview.isError, undefined);
+    assert.match(preview.content[0].text, /patchPath/);
+    assert.match(preview.content[0].text, /output truncated/);
+    assert(Buffer.byteLength(preview.content[0].text) <= 64 * 1024);
+    assert.equal(daemon.runs.at(-1)?.op, "diff");
+    assert.equal(daemon.runs.at(-1)?.requireOffline, true);
+    assert.equal(daemon.runs.at(-1)?.permitFiltered, true);
+    assert.match((await microvmLs(options)).content[0].text, /"kind": "task"/);
+    await microvmRm("interview", false, options);
+    assert.equal(daemon.runs.at(-1)?.purge, false);
+    await microvmRm("task-fake", true, options);
+    assert.equal(daemon.runs.at(-1)?.purge, true);
   } finally {
     await daemon.close();
   }

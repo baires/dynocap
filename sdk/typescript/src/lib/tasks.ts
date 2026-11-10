@@ -6,7 +6,7 @@ import { SandboxError } from "./errors.ts";
 
 export async function requireCapability(
   home: string,
-  capability: "taskVersion" | "transferVersion"
+  capability: "taskVersion" | "transferVersion" | "taskManagementVersion"
 ): Promise<void> {
   const result = await roundTrip(
     daemonSocket(home),
@@ -29,6 +29,12 @@ export async function taskOperation(
   body: Record<string, unknown>
 ): Promise<unknown> {
   await requireCapability(home, "taskVersion");
+  if (
+    body.name !== undefined ||
+    ["list", "resolve", "entries", "remove", "diff"].includes(String(body.op))
+  ) {
+    await requireCapability(home, "taskManagementVersion");
+  }
   return roundTrip(daemonSocket(home), encodeJSON(ControlType.task, body));
 }
 export async function transfer(

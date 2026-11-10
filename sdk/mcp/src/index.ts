@@ -2,6 +2,9 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 
 import {
+  microvmLs,
+  microvmRm,
+  microvmDiff,
   microvmTaskStart,
   microvmTaskExec,
   microvmTaskFinish,
@@ -16,6 +19,9 @@ import {
 } from "./tools.ts";
 
 export {
+  microvmLs,
+  microvmRm,
+  microvmDiff,
   microvmTaskStart,
   microvmTaskExec,
   microvmTaskFinish,
@@ -98,6 +104,7 @@ export function createServer(options: ToolOptions = {}): McpServer {
       description:
         "Start a Node task from a local directory or a repository URL. A URL is cloned in the guest and requires nat or filtered. A token or SSH key is held for that guest fetch and is not imported. An ssh URL requires nat. Results require finish before TTL.",
       inputSchema: {
+        name: z.string().optional(),
         projectPath: z.string().optional(),
         repositoryUrl: z.string().optional(),
         ref: z.string().optional(),
@@ -142,6 +149,33 @@ export function createServer(options: ToolOptions = {}): McpServer {
       inputSchema: { id: z.string() },
     },
     async (input) => microvmTaskFinish(input.id, host)
+  );
+  server.registerTool(
+    "microvm_ls",
+    {
+      description:
+        "List project tasks and raw sandboxes without duplicate task rows. Includes retained results and expiry.",
+      inputSchema: {},
+    },
+    async () => microvmLs(host)
+  );
+  server.registerTool(
+    "microvm_diff",
+    {
+      description:
+        "Capture verified changes against the imported baseline without destroying an idle task. Returns bounded patch text and host file references.",
+      inputSchema: { name: z.string() },
+    },
+    async (input) => microvmDiff(input.name, host)
+  );
+  server.registerTool(
+    "microvm_rm",
+    {
+      description:
+        "Remove a sandbox or task and release its name. Published results remain unless purge is explicitly true. Unexported edits are discarded.",
+      inputSchema: { name: z.string(), purge: z.boolean().optional() },
+    },
+    async (input) => microvmRm(input.name, input.purge === true, host)
   );
   return server;
 }

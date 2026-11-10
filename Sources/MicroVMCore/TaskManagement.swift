@@ -104,8 +104,7 @@ extension TaskManager {
         }
         if let rejection = NetworkAdmission.rejection(
             network: record.network, requireOffline: requireOffline,
-            permitFiltered: permitFiltered, offlineMessage: "task requires offline networking")
-        {
+            permitFiltered: permitFiltered, offlineMessage: "task requires offline networking") {
             condition.unlock()
             throw MicroVMError(rejection)
         }

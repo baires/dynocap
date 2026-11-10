@@ -11,6 +11,7 @@ import { SandboxError } from "./lib/errors.ts";
 
 export type RuntimeSelection = { name: string; version: string };
 export type TaskOptions = ClientOptions & {
+  name?: string;
   projectPath?: string;
   repositoryUrl?: string;
   ref?: string;
@@ -25,6 +26,8 @@ export type TaskOptions = ClientOptions & {
   permitFiltered?: boolean;
 };
 export type TaskInfo = {
+  name?: string;
+  network?: "none" | "nat" | "filtered";
   id: string;
   phase: string;
   runtimeDigest: string;
@@ -50,6 +53,7 @@ function taskInfo(value: unknown): TaskInfo {
 }
 export class Task {
   readonly id: string;
+  readonly name?: string;
   readonly sourceUrl?: string;
   readonly sourceRevision?: string;
   readonly #home: string;
@@ -62,6 +66,7 @@ export class Task {
     permitFiltered: boolean | undefined
   ) {
     this.id = info.id;
+    this.name = info.name;
     this.sourceUrl = info.sourceUrl;
     this.sourceRevision = info.sourceRevision;
     this.#home = home;
@@ -81,6 +86,7 @@ export class Task {
     const info = taskInfo(
       await taskOperation(home, {
         op: "start",
+        name: options.name,
         runtimes: options.runtimes,
         network: options.network,
         ttlSeconds: options.ttlSeconds,
@@ -107,6 +113,50 @@ export class Task {
       options.requireOffline === true,
       options.permitFiltered
     );
+  }
+  static async list(options: ClientOptions = {}): Promise<TaskInfo[]> {
+    const value = await taskOperation(resolveHome(options.home), {
+      op: "list",
+    });
+    if (!Array.isArray(value))
+      throw new SandboxError("daemon", "invalid task list");
+    return value.map(taskInfo);
+  }
+  static async open(
+    target: string,
+    options: TaskAccessOptions = {}
+  ): Promise<Task> {
+    const home = resolveHome(options.home);
+    const info = taskInfo(
+      await taskOperation(home, { op: "resolve", id: target })
+    );
+    return new Task(
+      info,
+      home,
+      options.requireOffline === true,
+      options.permitFiltered
+    );
+  }
+  async diff(): Promise<TaskPreview> {
+    const value = await taskOperation(this.#home, {
+      op: "diff",
+      id: this.id,
+      requireOffline: this.#requireOffline,
+      permitFiltered: this.#permitFiltered,
+    });
+    if (
+      !value ||
+      typeof value !== "object" ||
+      !["directory", "patchPath", "reviewPath", "changesPath"].every(
+        (key) => typeof Reflect.get(value, key) === "string"
+      )
+    ) {
+      throw new SandboxError("daemon", "invalid task preview");
+    }
+    return value as TaskPreview;
+  }
+  async remove(options: { purge?: boolean } = {}): Promise<void> {
+    await removeManaged(this.id, { home: this.#home, ...options });
   }
   static connect(
     id: string,
@@ -159,4 +209,55 @@ export class Task {
       })
     );
   }
+}
+
+export type TaskAccessOptions = ClientOptions & {
+  requireOffline?: boolean;
+  permitFiltered?: boolean;
+};
+export type TaskPreview = {
+  directory: string;
+  patchPath: string;
+  reviewPath: string;
+  changesPath: string;
+};
+export type ManagedEntry = {
+  id: string;
+  name?: string;
+  kind: "task" | "sandbox";
+  phase: string;
+  runtime: string;
+  network?: "none" | "nat" | "filtered";
+  expiresAtUnix?: number;
+  resultDirectory?: string;
+};
+export async function listManaged(
+  options: ClientOptions = {}
+): Promise<ManagedEntry[]> {
+  const value = await taskOperation(resolveHome(options.home), {
+    op: "entries",
+  });
+  if (
+    !Array.isArray(value) ||
+    !value.every(
+      (entry) =>
+        entry &&
+        typeof entry.id === "string" &&
+        ["task", "sandbox"].includes(entry.kind) &&
+        typeof entry.phase === "string"
+    )
+  ) {
+    throw new SandboxError("daemon", "invalid managed list");
+  }
+  return value as ManagedEntry[];
+}
+export async function removeManaged(
+  target: string,
+  options: ClientOptions & { purge?: boolean } = {}
+): Promise<void> {
+  await taskOperation(resolveHome(options.home), {
+    op: "remove",
+    id: target,
+    purge: options.purge === true,
+  });
 }

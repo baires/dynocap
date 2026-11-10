@@ -1,5 +1,8 @@
+import fs from "node:fs/promises";
 import {
   Task,
+  listManaged,
+  removeManaged,
   type TaskOptions,
   Sandbox,
   SandboxError,
@@ -167,6 +170,7 @@ export async function microvmTaskStart(
     return ok(
       JSON.stringify({
         id: task.id,
+        name: task.name,
         sourceUrl: task.sourceUrl,
         sourceRevision: task.sourceRevision,
       })
@@ -182,10 +186,10 @@ export async function microvmTaskExec(
       (sandbox) => sandbox.name === input.name
     );
     assertExecutable(recorded?.network, options);
-    const task = Task.connect(input.name, {
-      home: options?.home,
-      ...permits(options),
-    });
+    const access = { home: options?.home, ...permits(options) };
+    const task = input.name.startsWith("task-")
+      ? Task.connect(input.name, access)
+      : await Task.open(input.name, access);
     const result = await task.exec(input.command, input);
     return ok(
       cap(
@@ -201,11 +205,52 @@ export async function microvmTaskFinish(
   return guard(async () =>
     ok(
       JSON.stringify(
-        await Task.connect(id, {
-          home: options?.home,
-          ...permits(options),
-        }).finish()
+        await (
+          id.startsWith("task-")
+            ? Task.connect(id, { home: options?.home, ...permits(options) })
+            : await Task.open(id, { home: options?.home, ...permits(options) })
+        ).finish()
       )
     )
   );
+}
+
+export async function microvmLs(options?: ToolOptions): Promise<ToolResult> {
+  return guard(async () =>
+    ok(cap(JSON.stringify(await listManaged(options), null, 2)))
+  );
+}
+export async function microvmRm(
+  target: string,
+  purge: boolean,
+  options?: ToolOptions
+): Promise<ToolResult> {
+  return guard(async () => {
+    await removeManaged(target, { home: options?.home, purge });
+    return ok(`removed ${target}`);
+  });
+}
+export async function microvmDiff(
+  target: string,
+  options?: ToolOptions
+): Promise<ToolResult> {
+  return guard(async () => {
+    const task = await Task.open(target, {
+      home: options?.home,
+      ...permits(options),
+    });
+    const preview = await task.diff();
+    const file = await fs.open(preview.patchPath, "r");
+    try {
+      const buffer = Buffer.alloc(64 * 1024);
+      const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
+      return ok(
+        cap(
+          `${JSON.stringify(preview)}\n${buffer.subarray(0, bytesRead).toString("utf8")}`
+        )
+      );
+    } finally {
+      await file.close();
+    }
+  });
 }

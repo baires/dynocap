@@ -29,7 +29,7 @@ struct Main {
             let paths = try ready(invocation)
             let data = try DaemonClient(socketPath: paths.socket.path).task(TaskCommand(op: "entries"))
             if json {
-                print(String(decoding: data, as: UTF8.self))
+                print(String(data: data, encoding: .utf8) ?? "")
             } else {
                 let entries = try JSONDecoder().decode([ManagedEntry].self, from: data)
                 print("NAME\tID\tKIND\tPHASE\tRUNTIME\tNETWORK\tEXPIRES\tRESULT")
@@ -57,7 +57,7 @@ struct Main {
             } else if command.op == "remove" {
                 print("removed \(command.id ?? "")")
             } else {
-                print(String(decoding: data, as: UTF8.self))
+                print(String(data: data, encoding: .utf8) ?? "")
             }
         case .runtimePrepare(let preparation):
             let paths = try ready(invocation)

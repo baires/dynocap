@@ -33,6 +33,7 @@ export async function presentExec(
 export function cap(text: string): string {
   const bytes = Buffer.from(text);
   if (bytes.length <= OUTPUT_CAP_BYTES) return text;
-  const keep = Math.max(0, OUTPUT_CAP_BYTES - Buffer.byteLength(TRUNCATED));
+  let keep = Math.max(0, OUTPUT_CAP_BYTES - Buffer.byteLength(TRUNCATED));
+  while (keep > 0 && (bytes[keep]! & 0xc0) === 0x80) keep--;
   return bytes.subarray(0, keep).toString("utf8") + TRUNCATED;
 }

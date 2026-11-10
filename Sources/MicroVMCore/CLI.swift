@@ -308,6 +308,7 @@ private func parseTask(_ args: [String]) throws -> TaskCommand {
             let value = args[i + 1]
             switch args[i] {
             case "--name":
+                guard cmd.name == nil else { throw MicroVMError("task name specified more than once") }
                 try validateTaskName(value)
                 cmd.name = value
             case "--cpus":

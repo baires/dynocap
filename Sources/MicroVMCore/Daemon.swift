@@ -201,14 +201,21 @@ public final class Daemon {
 
     private func managedEntries() throws -> [ManagedEntry] {
         let records = try tasks.records()
+        let sandboxes = try store.list()
+        let byID = Dictionary(uniqueKeysWithValues: sandboxes.map { ($0.name, $0) })
         let ids = Set(records.map(\.id))
         let projects = records.map { record in
             ManagedEntry(
                 id: record.id, name: record.name, kind: "task", phase: record.phase,
                 runtime: record.runtimes?.map { $0.name + ":" + $0.version }.joined(separator: "+") ?? record.runtimeDigest,
-                network: record.network, expiresAtUnix: record.expiresAtUnix, resultDirectory: record.resultDirectory)
+                network: record.network,
+                expiresAtUnix: byID[record.id].flatMap { vm in
+                    guard vm.phase == .booting || vm.phase == .running || vm.phase == .stopping else { return nil as Int64? }
+                    return vm.ttlSeconds.map { vm.createdAtUnix + Int64($0) }
+                } ?? record.expiresAtUnix,
+                resultDirectory: record.resultDirectory)
         }
-        let raw = try store.list().filter { !ids.contains($0.name) }.map { record in
+        let raw = sandboxes.filter { !ids.contains($0.name) }.map { record in
             ManagedEntry(
                 id: record.name, name: record.name, kind: "sandbox", phase: record.phase.rawValue,
                 runtime: "minimal", network: record.network,

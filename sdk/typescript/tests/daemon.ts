@@ -61,7 +61,7 @@ export async function fakeDaemon(
         return;
       }
       for (const body of bodies)
-        handle(socket, body, sandboxes, execs, runs, behavior);
+        handle(socket, body, sandboxes, execs, runs, behavior, home);
     });
   });
   await new Promise<void>((resolve, reject) => {
@@ -85,6 +85,8 @@ export async function fakeDaemon(
 type FakeBehavior = {
   policyVersion: number | null;
   taskVersion: number | null;
+  taskManagementVersion: number | null;
+  resolveID: string;
   execNetwork: "none" | "nat";
   recordedNetwork: "none" | "nat" | "unknown";
   onRun: (name: string) => "running" | "error";
@@ -96,7 +98,8 @@ function handle(
   sandboxes: Map<string, Recorded>,
   execs: FakeExec[],
   runs: Record<string, unknown>[],
-  behavior: Partial<FakeBehavior>
+  behavior: Partial<FakeBehavior>,
+  home: string
 ) {
   if (body.length === 0) return;
   const type = body[0]!;
@@ -117,6 +120,10 @@ function handle(
                   ? undefined
                   : (behavior.taskVersion ?? 1),
               transferVersion: 1,
+              taskManagementVersion:
+                behavior.taskManagementVersion === null
+                  ? undefined
+                  : (behavior.taskManagementVersion ?? 1),
               ...(behavior.policyVersion === null
                 ? {}
                 : { isolationPolicyVersion: behavior.policyVersion ?? 1 }),
@@ -127,7 +134,42 @@ function handle(
       case 7: {
         const request = json();
         runs.push(request);
-        const id = "task-fake";
+        const id =
+          request.op === "resolve"
+            ? (behavior.resolveID ?? "task-fake")
+            : "task-fake";
+        const info = {
+          id,
+          name: request.name ?? "interview",
+          phase: "running",
+          runtimeDigest: "digest",
+          createdAtUnix: 1,
+          expiresAtUnix: 100,
+        };
+        if (
+          ["list", "entries", "resolve", "remove", "diff"].includes(
+            String(request.op)
+          )
+        ) {
+          const preview = path.join(home, "preview");
+          const value =
+            request.op === "list"
+              ? [info]
+              : request.op === "entries"
+                ? [{ ...info, kind: "task", runtime: "node:22" }]
+                : request.op === "remove"
+                  ? {}
+                  : request.op === "diff"
+                    ? {
+                        directory: preview,
+                        patchPath: path.join(preview, "changes.patch"),
+                        reviewPath: path.join(preview, "review.txt"),
+                        changesPath: path.join(preview, "changes.json"),
+                      }
+                    : info;
+          writeFrame(socket, 16, Buffer.from(JSON.stringify(value)));
+          return;
+        }
         if (request.op === "start")
           sandboxes.set(id, {
             name: id,
@@ -147,6 +189,7 @@ function handle(
           Buffer.from(
             JSON.stringify({
               id,
+              name: request.name,
               phase: request.op === "start" ? "running" : "completed",
               runtimeDigest: "digest",
               createdAtUnix: 1,

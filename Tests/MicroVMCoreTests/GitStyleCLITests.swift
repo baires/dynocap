@@ -21,10 +21,10 @@ final class GitStyleCLITests: XCTestCase {
     }
     func testListingRemovalFinishAndLegacyCommands() throws {
         XCTAssertEqual(try parseCommand(["microvm", "ls", "--json"]).command, .ls(json: true))
-        guard case .managed(let remove) = try parseCommand(["microvm", "rm", "demo", "--purge"]).command else { return XCTFail() }
+        guard case .managed(let remove) = try parseCommand(["microvm", "rm", "demo", "--purge"]).command else { return XCTFail("unexpected command") }
         XCTAssertEqual(remove.op, "remove")
         XCTAssertEqual(remove.purge, true)
-        guard case .managed(let finish) = try parseCommand(["microvm", "finish", "demo"]).command else { return XCTFail() }
+        guard case .managed(let finish) = try parseCommand(["microvm", "finish", "demo"]).command else { return XCTFail("unexpected command") }
         XCTAssertEqual(finish.id, "demo")
         XCTAssertEqual(finish.op, "finish")
         XCTAssertEqual(try parseCommand(["microvm", "ps"]).command, .ps)
@@ -33,7 +33,7 @@ final class GitStyleCLITests: XCTestCase {
             case .exec(let exec) = try parseCommand([
                 "microvm", "exec", "demo", "--cwd", "/tmp", "--env", "CI=1", "--timeout", "12", "--", "false",
             ]).command
-        else { return XCTFail() }
+        else { return XCTFail("unexpected command") }
         XCTAssertEqual(exec.cwd, "/tmp")
         XCTAssertEqual(exec.env, ["CI=1"])
         XCTAssertEqual(exec.timeoutSeconds, 12)

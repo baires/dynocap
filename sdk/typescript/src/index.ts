@@ -1,8 +1,15 @@
 import { SandboxError } from "./lib/errors.ts";
 import { boot, destroy, exec, list, type SandboxInfo } from "./lib/daemon.ts";
 import { transfer } from "./lib/tasks.ts";
-export { Task } from "./task.ts";
-export type { TaskOptions, TaskInfo, RuntimeSelection } from "./task.ts";
+export { Task, listManaged, removeManaged } from "./task.ts";
+export type {
+  TaskOptions,
+  TaskInfo,
+  RuntimeSelection,
+  TaskAccessOptions,
+  TaskPreview,
+  ManagedEntry,
+} from "./task.ts";
 import { resolveHome } from "./lib/paths.ts";
 
 export { SandboxError } from "./lib/errors.ts";
