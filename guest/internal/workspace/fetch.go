@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -874,7 +875,38 @@ func ImportGit(src, dest string) error {
 		return err
 	}
 	url, token := cleanOrigin(originURL(config))
-	return Sanitize(dest, url, headBranch(filepath.Join(dest, ".git")), token)
+	if err := Sanitize(dest, url, headBranch(filepath.Join(dest, ".git")), token); err != nil {
+		return err
+	}
+	return materializeLocalHistory(gitPath, dest)
+}
+
+// Only the temporary copy is repacked. The source object store is read-only,
+// and its original location makes relative alternate paths resolve correctly.
+func materializeLocalHistory(sourceGit, root string) error {
+	bin, err := hostGit()
+	if err != nil {
+		return err
+	}
+	home, err := os.MkdirTemp("", "microvm-materialize-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(home)
+	env := append(gitEnv(home), "GIT_NO_LAZY_FETCH=1")
+	alternate := filepath.Join(sourceGit, "objects/info/alternates")
+	if _, err := os.Lstat(alternate); err == nil {
+		borrowed := append(append([]string{}, env...), "GIT_ALTERNATE_OBJECT_DIRECTORIES="+strconv.Quote(filepath.Join(sourceGit, "objects")))
+		if _, err := runGit(bin, root, borrowed, gitArgs(root, "-c", "protocol.allow=never", "repack", "-a")); err != nil {
+			return fmt.Errorf("materialize borrowed history: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if _, err := runGit(bin, root, env, gitArgs(root, "-c", "protocol.allow=never", "fsck", "--full")); err != nil {
+		return fmt.Errorf("imported history is incomplete without its source: %w", err)
+	}
+	return nil
 }
 
 func copyGitTree(src, dst string) error {

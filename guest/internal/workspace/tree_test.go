@@ -1083,3 +1083,53 @@ func TestPatchPreservesRawBytesAcrossAttributes(t *testing.T) {
 		})
 	}
 }
+
+func TestSharedImportMaterializesBorrowedHistoryAndIndex(t *testing.T) {
+	readGit := func(root string, args ...string) string {
+		out, err := gitOutput(root, gitEnv(t.TempDir()), args...)
+		must(t, err)
+		return out
+	}
+	for _, relative := range []bool{false, true} {
+		t.Run(fmt.Sprint("relative=", relative), func(t *testing.T) {
+			root := t.TempDir()
+			origin := filepath.Join(root, "origin")
+			must(t, os.Mkdir(origin, 0755))
+			gitCmd(t, origin, "init", "-b", "main")
+			must(t, os.WriteFile(filepath.Join(origin, "README"), []byte("history\n"), 0644))
+			gitCmd(t, origin, "add", "README")
+			gitCmd(t, origin, "commit", "-m", "initial")
+			must(t, os.WriteFile(filepath.Join(origin, "borrowed"), []byte("staged-only\n"), 0644))
+			gitCmd(t, origin, "add", "borrowed")
+			blob := strings.TrimSpace(readGit(origin, "rev-parse", ":borrowed"))
+			shared := filepath.Join(root, "shared: checkout")
+			gitCmd(t, root, "clone", "--shared", origin, shared)
+			gitCmd(t, shared, "update-index", "--add", "--cacheinfo", "100644", blob, "staged-only")
+			if relative {
+				path, err := filepath.Rel(filepath.Join(shared, ".git/objects"), filepath.Join(origin, ".git/objects"))
+				must(t, err)
+				must(t, os.WriteFile(filepath.Join(shared, ".git/objects/info/alternates"), []byte(path+"\n"), 0644))
+			}
+			beforeSource, beforeOrigin := treeDigest(t, shared), treeDigest(t, origin)
+			imported := filepath.Join(root, "imported")
+			must(t, ImportGit(shared, imported))
+			if treeDigest(t, shared) != beforeSource || treeDigest(t, origin) != beforeOrigin {
+				t.Fatal("materialization modified source history")
+			}
+			must(t, os.Rename(origin, origin+"-unavailable"))
+			must(t, os.Rename(shared, shared+"-unavailable"))
+			gitCmd(t, imported, "fsck", "--full")
+			if readGit(imported, "show", "HEAD:README") != "history\n" {
+				t.Fatal("borrowed commit missing")
+			}
+			if readGit(imported, "show", ":staged-only") != "staged-only\n" {
+				t.Fatal("borrowed index blob missing")
+			}
+			for _, name := range []string{"alternates", "http-alternates"} {
+				if _, err := os.Stat(filepath.Join(imported, ".git/objects/info", name)); !os.IsNotExist(err) {
+					t.Fatal("import still depends on alternates")
+				}
+			}
+		})
+	}
+}
