@@ -11,7 +11,11 @@ import { SandboxError } from "./lib/errors.ts";
 
 export type RuntimeSelection = { name: string; version: string };
 export type TaskOptions = ClientOptions & {
-  projectPath: string;
+  projectPath?: string;
+  repositoryUrl?: string;
+  ref?: string;
+  gitToken?: string;
+  sshKeyPath?: string;
   runtimes?: RuntimeSelection[];
   network?: "none" | "nat";
   ttlSeconds?: number;
@@ -26,6 +30,8 @@ export type TaskInfo = {
   createdAtUnix: number;
   expiresAtUnix: number;
   resultDirectory?: string;
+  sourceUrl?: string;
+  sourceRevision?: string;
   timingsMS?: Record<string, number>;
 };
 function taskInfo(value: unknown): TaskInfo {
@@ -43,20 +49,45 @@ function taskInfo(value: unknown): TaskInfo {
 }
 export class Task {
   readonly id: string;
+  readonly sourceUrl?: string;
+  readonly sourceRevision?: string;
   readonly #home: string;
   readonly #requireOffline: boolean;
   private constructor(info: TaskInfo, home: string, requireOffline: boolean) {
     this.id = info.id;
+    this.sourceUrl = info.sourceUrl;
+    this.sourceRevision = info.sourceRevision;
     this.#home = home;
     this.#requireOffline = requireOffline;
   }
   static async start(options: TaskOptions): Promise<Task> {
+    const hasPath = options.projectPath !== undefined;
+    const hasURL = options.repositoryUrl !== undefined;
+    if (hasPath === hasURL) {
+      throw new SandboxError(
+        "daemon",
+        "task start requires a projectPath or a repositoryUrl"
+      );
+    }
     const home = resolveHome(options.home);
     const info = taskInfo(
       await taskOperation(home, {
-        ...options,
-        projectPath: path.resolve(options.projectPath),
         op: "start",
+        runtimes: options.runtimes,
+        network: options.network,
+        ttlSeconds: options.ttlSeconds,
+        cpus: options.cpus,
+        memoryMB: options.memoryMB,
+        requireOffline: options.requireOffline,
+        ...(options.projectPath
+          ? { projectPath: path.resolve(options.projectPath) }
+          : {}),
+        ...(options.repositoryUrl
+          ? { repositoryUrl: options.repositoryUrl }
+          : {}),
+        ...(options.ref ? { ref: options.ref } : {}),
+        ...(options.gitToken ? { gitToken: options.gitToken } : {}),
+        ...(options.sshKeyPath ? { sshKeyPath: options.sshKeyPath } : {}),
       })
     );
     return new Task(info, home, options.requireOffline === true);

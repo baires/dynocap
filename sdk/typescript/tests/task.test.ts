@@ -31,6 +31,37 @@ test("task defaults, bounded capture, finish and opaque runtime selection", asyn
     await daemon.close();
   }
 });
+test("repository start accepts one source and keeps the token out of the task", async () => {
+  const daemon = await fakeDaemon();
+  try {
+    await assert.rejects(
+      Task.start({
+        home: daemon.home,
+        projectPath: ".",
+        repositoryUrl: "https://github.com/org/repo.git",
+      }),
+      /projectPath or a repositoryUrl/
+    );
+    assert.equal(daemon.runs.length, 0);
+    const task = await Task.start({
+      home: daemon.home,
+      repositoryUrl: "https://github.com/org/private.git",
+      gitToken: "secret-token",
+      ref: "main",
+    });
+    assert.equal(
+      daemon.runs[0]?.repositoryUrl,
+      "https://github.com/org/private.git"
+    );
+    assert.equal(daemon.runs[0]?.gitToken, "secret-token");
+    assert.equal(daemon.runs[0]?.ref, "main");
+    assert.equal(Object.hasOwn(daemon.runs[0] ?? {}, "projectPath"), false);
+    assert.equal(task.sourceRevision, undefined);
+    assert.equal(JSON.stringify(task).includes("secret-token"), false);
+  } finally {
+    await daemon.close();
+  }
+});
 test("older daemons reject task creation before sending start", async () => {
   const daemon = await fakeDaemon({ taskVersion: null });
   try {

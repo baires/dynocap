@@ -130,7 +130,13 @@ export async function microvmTaskStart(
       home: options?.home,
       requireOffline: options?.allowNat !== true,
     });
-    return ok(JSON.stringify({ id: task.id }));
+    return ok(
+      JSON.stringify({
+        id: task.id,
+        sourceUrl: task.sourceUrl,
+        sourceRevision: task.sourceRevision,
+      })
+    );
   });
 }
 export async function microvmTaskExec(

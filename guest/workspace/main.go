@@ -10,7 +10,7 @@ import (
 
 func main() {
 	if len(os.Args) < 3 {
-		fmt.Fprintln(os.Stderr, "workspace pack|unpack|names ROOT")
+		fmt.Fprintln(os.Stderr, "workspace pack|unpack|names|fetch|pack-git ROOT")
 		os.Exit(2)
 	}
 	var err error
@@ -31,6 +31,18 @@ func main() {
 		if err == nil {
 			err = json.NewEncoder(os.Stdout).Encode(n)
 		}
+	case "fetch":
+		if len(os.Args) != 5 {
+			err = fmt.Errorf("fetch DEST URL REF")
+		} else {
+			var revision string
+			revision, err = workspace.Fetch(os.Args[2], os.Args[3], os.Args[4], os.Getenv("MICROVM_GIT_TOKEN"), os.Getenv("MICROVM_SSH_KEY"))
+			if err == nil {
+				fmt.Fprint(os.Stdout, revision)
+			}
+		}
+	case "pack-git":
+		err = workspace.PackGit(os.Args[2], os.Stdout, workspace.Limit)
 	default:
 		err = fmt.Errorf("unknown operation")
 	}

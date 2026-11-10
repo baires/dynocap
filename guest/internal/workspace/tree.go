@@ -149,6 +149,12 @@ func names(root string, project, useGit bool) ([]string, error) {
 		if p == root {
 			return nil
 		}
+		if d.Name() == ".git" {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
 		n, _ := filepath.Rel(root, p)
 		n = filepath.ToSlash(n)
 		if !d.IsDir() {

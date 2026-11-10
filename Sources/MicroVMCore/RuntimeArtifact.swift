@@ -104,12 +104,15 @@ private func portableDigest(file: URL?, data: Data?) throws -> String {
 
 /// Small host companion operations. Project trees are always treated as data.
 enum HostTree {
-    static func run(_ name: String, _ args: [String], input: URL? = nil, output: URL? = nil) throws -> Data {
+    static func run(
+        _ name: String, _ args: [String], input: URL? = nil, output: URL? = nil, environment: [String: String]? = nil
+    ) throws -> Data {
         let binary = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL.resolvingSymlinksInPath()
             .deletingLastPathComponent().appendingPathComponent(name)
         let process = Process()
         process.executableURL = binary
         process.arguments = args
+        if let environment { process.environment = environment }
         let errors = Pipe()
         process.standardError = errors
         let result = Pipe()

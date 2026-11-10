@@ -264,6 +264,16 @@ test("task tools preserve MCP NAT permission and return retained result referenc
       (await microvmTaskStart({ projectPath: "." }, options)).isError,
       undefined
     );
+    const privateStart = await microvmTaskStart(
+      {
+        repositoryUrl: "https://github.com/org/private.git",
+        gitToken: "secret-token",
+      },
+      options
+    );
+    assert.equal(privateStart.isError, undefined);
+    assert.equal(privateStart.content[0].text.includes("secret-token"), false);
+    assert.equal(daemon.runs.at(-1)?.gitToken, "secret-token");
     const result = await microvmTaskExec(
       { name: "task-fake", command: "big" },
       options

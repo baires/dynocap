@@ -4,6 +4,10 @@ public struct TaskCommand: Codable, Equatable {
     public var op: String
     public var id: String?
     public var projectPath: String?
+    public var repositoryUrl: String?
+    public var ref: String?
+    public var gitToken: String?
+    public var sshKeyPath: String?
     public var runtimes: [RuntimeSelection]?
     public var network: NetworkMode?
     public var ttlSeconds: Int?
@@ -31,6 +35,8 @@ public struct TaskRecord: Codable {
     public var createdAtUnix: Int64
     public var expiresAtUnix: Int64
     public var resultDirectory: String?
+    public var sourceUrl: String?
+    public var sourceRevision: String?
     var network: NetworkMode
     var commands: [TaskCommandRecord] = []
     var logBytes: Int = 0
@@ -46,6 +52,8 @@ public struct TaskDescriptor: Codable {
     public var createdAtUnix: Int64
     public var expiresAtUnix: Int64
     public var resultDirectory: String?
+    public var sourceUrl: String?
+    public var sourceRevision: String?
     public var timingsMS: [String: Double]
     init(_ record: TaskRecord) {
         id = record.id
@@ -54,6 +62,8 @@ public struct TaskDescriptor: Codable {
         createdAtUnix = record.createdAtUnix
         expiresAtUnix = record.expiresAtUnix
         resultDirectory = record.resultDirectory
+        sourceUrl = record.sourceUrl
+        sourceRevision = record.sourceRevision
         timingsMS = record.timingsMS
     }
 }
@@ -172,7 +182,7 @@ final class TaskManager {
         guard try fileDigest(runtime.appendingPathComponent("runtime.ext4")) == artifact.artifactDigest else {
             throw MicroVMError("prepared runtime hash mismatch")
         }
-        guard let source = command.projectPath else { throw MicroVMError("projectPath is required") }
+        let resolved = try TaskSourceResolver.resolve(command)
         try admit()
         let id = "task-" + UUID().uuidString.lowercased()
         let directory = dir(id)
@@ -186,9 +196,26 @@ final class TaskManager {
         }
         try fm.createDirectory(at: directory, withIntermediateDirectories: true)
         let input = directory.appendingPathComponent("import.tar")
-        _ = try HostTree.run("microvm-workspace", ["pack", source, "project"], output: input)
         let baseline = directory.appendingPathComponent("baseline")
-        _ = try HostTree.run("microvm-workspace", ["unpack", baseline.path], input: input)
+        var gitTar: URL?
+        var sourceURL: String?
+        var sourceRevision: String?
+        switch resolved {
+        case .directory(let source):
+            _ = try HostTree.run("microvm-workspace", ["pack", source, "project"], output: input)
+            _ = try HostTree.run("microvm-workspace", ["unpack", baseline.path], input: input)
+        case .hostFetch(let repo):
+            let fetchDir = directory.appendingPathComponent("fetch")
+            sourceRevision = try RepositoryFetch.checkout(repo, dest: fetchDir)
+            sourceURL = repo.url
+            _ = try HostTree.run("microvm-workspace", ["pack", fetchDir.path, "project"], output: input)
+            gitTar = directory.appendingPathComponent("git.tar")
+            _ = try HostTree.run("microvm-workspace", ["pack-git", fetchDir.path], output: gitTar)
+            try fm.removeItem(at: fetchDir)
+            _ = try HostTree.run("microvm-workspace", ["unpack", baseline.path], input: input)
+        case .guestClone(let repo):
+            sourceURL = repo.url
+        }
         measured("snapshot")
         let disk = directory.appendingPathComponent("workspace.ext4")
         _ = try HostTree.run("microvm-mkruntime", ["workspace", disk.path])
@@ -216,10 +243,33 @@ final class TaskManager {
                 ], nil, nil, 1 << 20)
         }
         measured("networkReady")
-        _ = try execute(id, ["/usr/local/bin/microvm-agent", "unpack", "/workspace"], input, nil, 256 << 20)
+        switch resolved {
+        case .directory:
+            _ = try execute(id, ["/usr/local/bin/microvm-agent", "unpack", "/workspace"], input, nil, 256 << 20)
+        case .hostFetch:
+            _ = try execute(id, ["/usr/local/bin/microvm-agent", "unpack", "/workspace"], input, nil, 256 << 20)
+            if let gitTar {
+                _ = try execute(id, ["/usr/local/bin/microvm-agent", "unpack", "/workspace"], gitTar, nil, 256 << 20)
+                try fm.removeItem(at: gitTar)
+            }
+        case .guestClone(let repo):
+            _ = try execute(id, GuestGit.clone(url: repo.url, ref: repo.ref), nil, nil, 4 << 20)
+            let data = try execute(id, GuestGit.revision(), nil, nil, 1 << 20)
+            let revision = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard CommitID.isValid(revision) else { throw MicroVMError("git did not return a commit") }
+            _ = try execute(id, GuestGit.detach(revision), nil, nil, 1 << 20)
+            for argv in GuestGit.configure(url: repo.url) {
+                _ = try execute(id, argv, nil, nil, 1 << 20)
+            }
+            sourceRevision = revision
+            _ = try execute(id, ["/usr/local/bin/microvm-agent", "pack", "/workspace"], nil, input, 256 << 20)
+            _ = try HostTree.run("microvm-workspace", ["unpack", baseline.path], input: input)
+        }
         _ = try execute(id, ["/usr/local/bin/microvm-agent", "freeze", "/workspace"], nil, nil, 1 << 20)
-        try fm.removeItem(at: input)
+        if fm.fileExists(atPath: input.path) { try fm.removeItem(at: input) }
         measured("upload")
+        record.sourceUrl = sourceURL
+        record.sourceRevision = sourceRevision
         record.phase = "running"
         record.dependencyCacheKey = try DependencyCache.key(baseline: baseline, runtime: artifact)
         if let key = record.dependencyCacheKey { try DependencyCache.restore(key: key, home: paths.home, id: id, execute: execute) }

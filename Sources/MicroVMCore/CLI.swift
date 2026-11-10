@@ -67,7 +67,8 @@ public let helpText = """
       microvm run --name <name> [--cpus N] [--memory MB] [--ttl SEC] [--network none|nat] [--boot-timeout SEC]
       microvm exec <name> [--timeout SEC] [--cwd DIR] [--env KEY=VAL] -- <command> [args...]
       microvm runtime prepare [REPO] [--runtime node:22]
-      microvm task start PATH [--runtime node:22] [--network none|nat] [--ttl SEC]
+      microvm task start PATH|URL [--runtime node:22] [--network none|nat] [--ttl SEC] [--ref NAME]
+                    [--git-token-env VAR] [--ssh-key PATH]
       microvm task exec ID -- COMMAND [ARGS...]
       microvm task finish ID
       microvm ps
@@ -85,6 +86,8 @@ public let helpText = """
     Images are built with scripts/fetch-image.sh and stored under $MICROVM_HOME
     (default ~/.microvm). The CLI starts a per-user daemon if one is not running.
     Network defaults to none (no virtual NIC). nat explicitly enables unrestricted outbound access.
+    A repository URL without a credential is cloned inside the guest and requires nat.
+    --git-token-env or --ssh-key fetches on the host. The credential is not imported.
     TTL defaults to 1800 seconds, including boot; allowed range is 1–86400, with no unlimited mode.
     VMs do not outlive that daemon; the next command reaps leftover records.
 
@@ -258,11 +261,15 @@ private func takeInt(_ args: [String], _ index: inout Int, _ flag: String, min: 
 
 private func parseTask(_ args: [String]) throws -> TaskCommand {
     guard let op = args.first else {
-        throw MicroVMError("usage: microvm task start PATH [--network none|nat] | finish ID | exec ID -- COMMAND")
+        throw MicroVMError("usage: microvm task start PATH|URL [--network none|nat] | finish ID | exec ID -- COMMAND")
     }
     if op == "start", args.count >= 2 {
         var cmd = TaskCommand(op: "start")
-        cmd.projectPath = URL(fileURLWithPath: args[1]).path
+        if isRepositoryArgument(args[1]) {
+            cmd.repositoryUrl = args[1]
+        } else {
+            cmd.projectPath = URL(fileURLWithPath: args[1]).path
+        }
         var i = 2
         while i < args.count {
             guard i + 1 < args.count else { throw MicroVMError("missing task option value") }
@@ -278,6 +285,15 @@ private func parseTask(_ args: [String]) throws -> TaskCommand {
                 let parts = value.split(separator: ":")
                 guard parts.count == 2 else { throw MicroVMError("runtime must be NAME:VERSION") }
                 cmd.runtimes = [RuntimeSelection(name: String(parts[0]), version: String(parts[1]))]
+            case "--ref":
+                cmd.ref = value
+            case "--ssh-key":
+                cmd.sshKeyPath = value
+            case "--git-token-env":
+                guard let token = ProcessInfo.processInfo.environment[value], !token.isEmpty else {
+                    throw MicroVMError("\(value) is empty")
+                }
+                cmd.gitToken = token
             default: throw MicroVMError("unknown task option")
             }
             i += 2
