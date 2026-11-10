@@ -2,6 +2,8 @@ import Foundation
 
 public struct TaskCommand: Codable, Equatable {
     public var op: String
+    public var name: String?
+    public var purge: Bool?
     public var id: String?
     public var projectPath: String?
     public var repositoryUrl: String?
@@ -31,6 +33,8 @@ public struct TaskCommandRecord: Codable {
 
 public struct TaskRecord: Codable {
     public var id: String
+    public var name: String?
+    public var runtimes: [RuntimeSelection]?
     public var phase: String
     public var runtimeDigest: String
     public var createdAtUnix: Int64
@@ -38,7 +42,7 @@ public struct TaskRecord: Codable {
     public var resultDirectory: String?
     public var sourceUrl: String?
     public var sourceRevision: String?
-    var network: NetworkMode
+    public var network: NetworkMode
     var commands: [TaskCommandRecord] = []
     var logBytes: Int = 0
     var message: String?
@@ -48,6 +52,8 @@ public struct TaskRecord: Codable {
 
 public struct TaskDescriptor: Codable {
     public var id: String
+    public var name: String?
+    public var runtimes: [RuntimeSelection]?
     public var phase: String
     public var runtimeDigest: String
     public var createdAtUnix: Int64
@@ -56,8 +62,12 @@ public struct TaskDescriptor: Codable {
     public var sourceUrl: String?
     public var sourceRevision: String?
     public var timingsMS: [String: Double]
+    public var network: NetworkMode
     init(_ record: TaskRecord) {
         id = record.id
+        name = record.name
+        runtimes = record.runtimes
+        network = record.network
         phase = record.phase
         runtimeDigest = record.runtimeDigest
         createdAtUnix = record.createdAtUnix
@@ -72,22 +82,24 @@ public struct TaskDescriptor: Codable {
 /// Owns task admission, records, host logs and finalization. Runtime contents are opaque.
 final class TaskManager {
     typealias Execute = (String, [String], [String], URL?, URL?, Int64) throws -> Data
-    private let paths: MicroVMPaths
-    private let arch: String
-    private let boot: (RunRequest) throws -> VMRecord
-    private let execute: Execute
-    private let destroy: (String) throws -> Void
-    private let condition = NSCondition()
-    private var current: TaskRecord?
-    private var busy = false
-    private var active = 0
-    private let fm = FileManager.default
-    private var root: URL { paths.home.appendingPathComponent("tasks") }
-    private func dir(_ id: String) -> URL { root.appendingPathComponent(id) }
-    private func save(_ record: TaskRecord) throws {
+    let paths: MicroVMPaths
+    let arch: String
+    let boot: (RunRequest) throws -> VMRecord
+    let execute: Execute
+    let destroy: (String) throws -> Void
+    let namespace = NSRecursiveLock()
+    var reservedNames: Set<String> = []
+    let condition = NSCondition()
+    var current: TaskRecord?
+    var busy = false
+    var active = 0
+    let fm = FileManager.default
+    var root: URL { paths.home.appendingPathComponent("tasks") }
+    func dir(_ id: String) -> URL { root.appendingPathComponent(id) }
+    func save(_ record: TaskRecord) throws {
         try JSONEncoder().encode(record).write(to: dir(record.id).appendingPathComponent("task.json"), options: .atomic)
     }
-    private func load(_ id: String) throws -> TaskRecord {
+    func load(_ id: String) throws -> TaskRecord {
         try validateVMName(id)
         return try JSONDecoder().decode(TaskRecord.self, from: Data(contentsOf: dir(id).appendingPathComponent("task.json")))
     }
@@ -184,6 +196,8 @@ final class TaskManager {
             throw MicroVMError("prepared runtime hash mismatch")
         }
         let resolved = try TaskSourceResolver.resolve(command)
+        try reserveName(command.name)
+        defer { releaseNameReservation(command.name) }
         try admit()
         let id = "task-" + UUID().uuidString.lowercased()
         let directory = dir(id)
@@ -226,7 +240,8 @@ final class TaskManager {
         _ = try HostTree.run("microvm-mkruntime", ["workspace", disk.path])
         measured("workspaceDisk")
         var record = TaskRecord(
-            id: id, phase: "starting", runtimeDigest: artifact.artifactDigest, createdAtUnix: unixNow(),
+            id: id, name: command.name, runtimes: artifact.runtimes, phase: "starting", runtimeDigest: artifact.artifactDigest,
+            createdAtUnix: unixNow(),
             expiresAtUnix: unixNow() + 7 * 86400, network: command.network ?? NetworkMode.none)
         try save(record)
         condition.lock()

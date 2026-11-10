@@ -120,7 +120,7 @@ public final class Daemon {
             switch message {
             case .task(let command):
                 if command.op != "start", let requested = command.network, let id = command.id,
-                   let recorded = tasks.recordedNetwork(id) {
+                    let recorded = tasks.recordedNetwork(id) {
                     try NetworkModeLock.rejectChange(from: recorded, to: requested)
                 }
                 let data: Data
@@ -129,16 +129,29 @@ public final class Daemon {
                     if let message = NetworkAdmission.rejection(
                         network: command.network ?? NetworkMode.none, requireOffline: command.requireOffline == true,
                         permitFiltered: command.permitFiltered, offlineMessage: "task requires offline networking"
-                    ) { throw MicroVMError(message) }
+                    ) {
+                        throw MicroVMError(message)
+                    }
                     data = try JSONEncoder().encode(TaskDescriptor(tasks.start(command)))
                 case "finish":
                     guard let id = command.id else { throw MicroVMError("task id required") }
                     if let requested = command.network, let recorded = tasks.recordedNetwork(id) {
                         try NetworkModeLock.rejectChange(from: recorded, to: requested)
                     }
-                    data = try JSONEncoder().encode(TaskDescriptor(tasks.finish(
-                        id, requireOffline: command.requireOffline == true, permitFiltered: command.permitFiltered
-                    )))
+                    data = try JSONEncoder().encode(
+                        TaskDescriptor(
+                            tasks.finish(
+                                tasks.resolve(id).id, requireOffline: command.requireOffline == true, permitFiltered: command.permitFiltered
+                            )))
+                case "list": data = try JSONEncoder().encode(tasks.records().map(TaskDescriptor.init))
+                case "resolve":
+                    guard let target = command.id else { throw MicroVMError("task name or id required") }
+                    data = try JSONEncoder().encode(TaskDescriptor(tasks.resolve(target)))
+                case "entries": data = try JSONEncoder().encode(managedEntries())
+                case "remove":
+                    guard let target = command.id else { throw MicroVMError("name or id required") }
+                    try removeManaged(target, purge: command.purge == true)
+                    data = Data("{}".utf8)
                 case "runtimeVerify": data = try JSONEncoder().encode(tasks.verifyRuntime(command.runtimes))
                 default: throw MicroVMError("unknown task operation")
                 }
@@ -182,11 +195,50 @@ public final class Daemon {
         return lifecycle
     }
 
+    private func managedEntries() throws -> [ManagedEntry] {
+        let records = try tasks.records()
+        let ids = Set(records.map(\.id))
+        let projects = records.map { record in
+            ManagedEntry(
+                id: record.id, name: record.name, kind: "task", phase: record.phase,
+                runtime: record.runtimes?.map { $0.name + ":" + $0.version }.joined(separator: "+") ?? record.runtimeDigest,
+                network: record.network, expiresAtUnix: record.expiresAtUnix, resultDirectory: record.resultDirectory)
+        }
+        let raw = try store.list().filter { !ids.contains($0.name) }.map { record in
+            ManagedEntry(
+                id: record.name, name: record.name, kind: "sandbox", phase: record.phase.rawValue,
+                runtime: "minimal", network: record.network,
+                expiresAtUnix: record.ttlSeconds.map { record.createdAtUnix + Int64($0) })
+        }
+        return (projects + raw).sorted { ($0.name ?? $0.id) < ($1.name ?? $1.id) }
+    }
+
+    private func removeManaged(_ target: String, purge: Bool) throws {
+        if let record = try tasks.records().first(where: { $0.id == target || $0.name == target }) {
+            try tasks.remove(record.id, purge: purge)
+            try store.remove(record.id)
+        } else {
+            try validateVMName(target)
+            guard try store.load(target) != nil else { throw MicroVMError("sandbox or task not found: \(target)") }
+            tasks.namespace.lock()
+            defer { tasks.namespace.unlock() }
+            let lifecycle = lifecycle(target)
+            lifecycle.lock.lock()
+            defer { lifecycle.lock.unlock() }
+            try destroyLocked(target, lifecycle: lifecycle, reason: "sandbox removed")
+            try store.remove(target)
+        }
+    }
+
     private func boot(_ request: RunRequest) throws -> VMRecord {
         let ttl = try IsolationPolicy.ttl(request.ttlSeconds)
         guard (1...86400).contains(request.bootTimeoutSeconds) else {
             throw MicroVMError("bootTimeoutSeconds must be between 1 and 86400")
         }
+        tasks.namespace.lock()
+        var namespaceLocked = true
+        defer { if namespaceLocked { tasks.namespace.unlock() } }
+        if request.runtimeDirectory == nil { try tasks.checkRawName(request.name) }
         let lifecycle = lifecycle(request.name)
         lifecycle.lock.lock()
         // Release while waiting for the guest, allowing expiry and explicit destroy during boot.
@@ -198,7 +250,7 @@ public final class Daemon {
         if let existing = try store.load(request.name) {
             let requested = request.network ?? NetworkMode.none
             if let recorded = existing.network, recorded != requested,
-               existing.phase == .booting || existing.phase == .running || existing.phase == .stopping {
+                existing.phase == .booting || existing.phase == .running || existing.phase == .stopping {
                 throw MicroVMError("network mode is fixed at start")
             }
             switch existing.phase {
@@ -236,6 +288,8 @@ public final class Daemon {
             network: request.network ?? NetworkMode.none
         )
         try store.save(record)
+        tasks.namespace.unlock()
+        namespaceLocked = false
         let live = LiveSandbox()
         lifecycle.live = live
         let boot = BootRequest(
@@ -578,7 +632,9 @@ public final class Daemon {
                     }
                 }
             case .stderr(let chunk):
-                if (problem?.utf8.count ?? 0) < 8192 { problem = (problem ?? "") + (String(data: chunk, encoding: .utf8) ?? "<non-UTF8 error>") }
+                if (problem?.utf8.count ?? 0) < 8192 {
+                    problem = (problem ?? "") + (String(data: chunk, encoding: .utf8) ?? "<non-UTF8 error>")
+                }
             case .finished(let code, let signal):
                 if code == 0 && signal == 0 {
                     problem = nil
@@ -685,7 +741,8 @@ public struct DaemonClient {
     public func requireTasks() throws {
         let reply = try roundTrip(.ping)
         guard case .result(let data) = reply,
-              let capability = try? JSONDecoder().decode(PolicyCapabilities.self, from: data), capability.taskVersion == 1 else {
+            let capability = try? JSONDecoder().decode(PolicyCapabilities.self, from: data), capability.taskVersion == 1
+        else {
             throw MicroVMError("daemon lacks task v1; rebuild and manually restart the daemon before creating tasks")
         }
     }
