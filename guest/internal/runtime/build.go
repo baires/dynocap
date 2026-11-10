@@ -172,6 +172,49 @@ func buildKey(repo, arch string, recipe Recipe) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
+func selectionKey(arch string, requests []Request) string {
+	names := make([]string, len(requests))
+	for i, request := range requests {
+		names[i] = request.Name + "@" + request.Version
+	}
+	sort.Strings(names)
+	return arch + "/" + strings.Join(names, "+")
+}
+
+// reusablePublished accepts a cataloged disk only when the build key, tool pins, and artifact digest all match.
+// A published v22.21.1 runtime fails this check and is not reused.
+func reusablePublished(home, selection, key string, tools map[string]string) (Manifest, bool) {
+	catalogRaw, e := os.ReadFile(filepath.Join(home, "runtime-catalog.json"))
+	if e != nil {
+		return Manifest{}, false
+	}
+	catalog := map[string]string{}
+	if json.Unmarshal(catalogRaw, &catalog) != nil {
+		return Manifest{}, false
+	}
+	digest := catalog[selection]
+	if len(digest) != 64 {
+		return Manifest{}, false
+	}
+	dir := filepath.Join(home, "runtimes", digest)
+	raw, e := os.ReadFile(filepath.Join(dir, "runtime.json"))
+	if e != nil {
+		return Manifest{}, false
+	}
+	var cached Manifest
+	if json.Unmarshal(raw, &cached) != nil || cached.BuildKey != key {
+		return Manifest{}, false
+	}
+	if cached.Tools["node"] != tools["node"] || cached.Tools["npm"] != tools["npm"] {
+		return Manifest{}, false
+	}
+	sum, e := hashFile(filepath.Join(dir, "runtime.ext4"))
+	if e != nil || sum != cached.ArtifactDigest {
+		return Manifest{}, false
+	}
+	return cached, true
+}
+
 func Build(repo, home, arch string, requests []Request) (Manifest, error) {
 	recipe, e := Resolve(requests, arch)
 	if e != nil {
@@ -181,24 +224,8 @@ func Build(repo, home, arch string, requests []Request) (Manifest, error) {
 	if e != nil {
 		return Manifest{}, e
 	}
-	catalogRaw, _ := os.ReadFile(filepath.Join(home, "runtime-catalog.json"))
-	catalog := map[string]string{}
-	_ = json.Unmarshal(catalogRaw, &catalog)
-	selection := arch + "/"
-	var names []string
-	for _, request := range requests {
-		names = append(names, request.Name+"@"+request.Version)
-	}
-	sort.Strings(names)
-	selection += strings.Join(names, "+")
-	existing := filepath.Join(home, "runtimes", catalog[selection])
-	if raw, e := os.ReadFile(filepath.Join(existing, "runtime.json")); e == nil {
-		var cached Manifest
-		if json.Unmarshal(raw, &cached) == nil && cached.BuildKey == key {
-			if sum, e := hashFile(filepath.Join(existing, "runtime.ext4")); e == nil && sum == cached.ArtifactDigest {
-				return cached, nil
-			}
-		}
+	if cached, ok := reusablePublished(home, selectionKey(arch, requests), key, recipe.Tools); ok {
+		return cached, nil
 	}
 	cache := filepath.Join(home, "cache")
 	if e = os.MkdirAll(cache, 0700); e != nil {

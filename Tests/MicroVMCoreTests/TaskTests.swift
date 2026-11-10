@@ -21,7 +21,7 @@ final class TaskTests: XCTestCase {
         try FileManager.default.createDirectory(at: runtime, withIntermediateDirectories: true)
         let manifest = RuntimeArtifact(
             runtimes: RuntimeArtifact.defaultRuntimes, arch: "aarch64", baseImageDigest: "base", artifactDigest: "artifact",
-            tools: ["node": "22.21.1"], environment: [:], formatVersion: 1, verificationCommand: ["true"])
+            tools: ["node": "22.23.4"], environment: [:], formatVersion: 1, verificationCommand: ["true"])
         try JSONEncoder().encode(manifest).write(to: runtime.appendingPathComponent("runtime.json"))
         try JSONEncoder().encode(["aarch64/node@22": String(repeating: "a", count: 64)]).write(
             to: root.appendingPathComponent("runtime-catalog.json"))
