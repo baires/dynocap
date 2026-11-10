@@ -110,6 +110,15 @@ if (result?.resultDirectory) {
     changes.map((change) => [change.path, change.kind]),
     [["helpers/time.ts", "modified"]]
   );
+  const patch = fs.readFileSync(path.join(retained, "changes.patch"), "utf8");
+  assert.match(
+    patch,
+    /^diff --git a\/helpers\/time\.ts b\/helpers\/time\.ts$/m
+  );
+  assert.match(
+    patch,
+    /^-    this\.customDate = new Date\(customDate \+ 'T00:00:00Z'\)/m
+  );
   const exported = fs.readFileSync(
     path.join(retained, "files/helpers/time.ts"),
     "utf8"

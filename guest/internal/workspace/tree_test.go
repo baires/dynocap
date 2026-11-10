@@ -3,8 +3,14 @@ package workspace
 import (
 	"archive/tar"
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -269,4 +275,374 @@ func TestRejectMissingArchiveTrailer(t *testing.T) {
 	if err := Unpack(t.TempDir(), bytes.NewReader(raw[:1024]), Limit); err == nil {
 		t.Fatal("accepted incomplete transfer")
 	}
+}
+
+func TestLocalHistoryReviewAppliesOnAFreshClone(t *testing.T) {
+	source := t.TempDir()
+	gitCmd(t, source, "init", "-b", "main")
+	must(t, os.WriteFile(filepath.Join(source, "old.txt"), []byte("kept\n"), 0644))
+	must(t, os.WriteFile(filepath.Join(source, "mode.sh"), []byte("#!/bin/sh\ntrue\n"), 0644))
+	must(t, os.WriteFile(filepath.Join(source, "data.bin"), []byte{0, 1, 2, 3, 255}, 0644))
+	gitCmd(t, source, "add", "old.txt", "mode.sh", "data.bin")
+	gitCmd(t, source, "commit", "-m", "initial")
+	before := treeDigest(t, source)
+
+	workspace := workspaceFromLocal(t, source)
+	config, err := os.ReadFile(filepath.Join(workspace, ".git", "config"))
+	if err != nil || !bytes.Contains(config, []byte("hooksPath = /dev/null")) || bytes.Contains(config, []byte("credential")) {
+		t.Fatalf("config:\n%s", config)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, ".git", "hooks")); !os.IsNotExist(err) {
+		t.Fatal("hooks imported")
+	}
+	if _, err := os.Stat(filepath.Join(workspace, ".git", "objects", "info", "alternates")); !os.IsNotExist(err) {
+		t.Fatal("alternates imported")
+	}
+	if _, err := os.Stat(filepath.Join(source, ".git", "hooks")); err != nil {
+		t.Fatal(err)
+	}
+
+	must(t, os.Rename(filepath.Join(workspace, "old.txt"), filepath.Join(workspace, "new.txt")))
+	must(t, os.Chmod(filepath.Join(workspace, "mode.sh"), 0755))
+	edited := []byte{0, 1, 2, 9, 255}
+	must(t, os.WriteFile(filepath.Join(workspace, "data.bin"), edited, 0644))
+	if treeDigest(t, source) != before {
+		t.Fatal("source checkout changed")
+	}
+	baseline := exportTree(t, source)
+	exported := exportTree(t, workspace)
+	out := t.TempDir()
+	if err := Result(baseline, exported, out); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(out, ".git")); !os.IsNotExist(err) {
+		t.Fatal(".git in result")
+	}
+	raw, err := os.ReadFile(filepath.Join(out, "changes.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var changes []Change
+	if err := json.Unmarshal(raw, &changes); err != nil {
+		t.Fatal(err)
+	}
+	saw := map[string]bool{}
+	for _, change := range changes {
+		switch {
+		case change.Kind == "renamed" && change.From == "old.txt" && change.Path == "new.txt":
+			saw["rename"] = true
+		case change.Kind == "modified" && change.Path == "mode.sh" && change.Mode == 0755:
+			saw["mode"] = true
+		case change.Kind == "modified" && change.Path == "data.bin":
+			saw["binary"] = true
+		default:
+			t.Fatalf("unexpected change %+v", change)
+		}
+	}
+	if len(saw) != 3 {
+		t.Fatalf("changes: %s", raw)
+	}
+	got, err := os.ReadFile(filepath.Join(out, "files", "data.bin"))
+	if err != nil || !bytes.Equal(got, edited) {
+		t.Fatalf("binary file %q %v", got, err)
+	}
+	review, _ := os.ReadFile(filepath.Join(out, "review.txt"))
+	if !bytes.Contains(review, []byte("renamed old.txt -> new.txt")) {
+		t.Fatalf("review:\n%s", review)
+	}
+	patch := filepath.Join(out, "changes.patch")
+	patchText, _ := os.ReadFile(patch)
+	for _, want := range []string{"rename from old.txt", "rename to new.txt", "old mode 100644", "new mode 100755", "diff --git a/data.bin b/data.bin"} {
+		if !bytes.Contains(patchText, []byte(want)) {
+			t.Fatalf("missing %s\n%s", want, patchText)
+		}
+	}
+	clone := filepath.Join(t.TempDir(), "clone")
+	gitCmd(t, t.TempDir(), "clone", source, clone)
+	apply := exec.Command("git", "apply", "--binary", patch)
+	apply.Dir = clone
+	apply.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null"}
+	if out, err := apply.CombinedOutput(); err != nil {
+		t.Fatalf("git apply: %s\n%s", out, patchText)
+	}
+	if _, err := os.Stat(filepath.Join(clone, "old.txt")); !os.IsNotExist(err) {
+		t.Fatal("rename left the old path")
+	}
+	renamed, err := os.ReadFile(filepath.Join(clone, "new.txt"))
+	if err != nil || string(renamed) != "kept\n" {
+		t.Fatal(err, renamed)
+	}
+	st, err := os.Stat(filepath.Join(clone, "mode.sh"))
+	if err != nil || st.Mode().Perm() != 0755 {
+		t.Fatalf("mode %v %v", st, err)
+	}
+	bin, err := os.ReadFile(filepath.Join(clone, "data.bin"))
+	if err != nil || !bytes.Equal(bin, edited) {
+		t.Fatalf("applied binary %q %v", bin, err)
+	}
+	if treeDigest(t, source) != before {
+		t.Fatal("source checkout changed")
+	}
+}
+
+func TestPatchIgnoresProjectGitOnPath(t *testing.T) {
+	before, after, out := t.TempDir(), t.TempDir(), t.TempDir()
+	must(t, os.WriteFile(filepath.Join(before, "note.txt"), []byte("one\n"), 0644))
+	must(t, os.WriteFile(filepath.Join(after, "note.txt"), []byte("two\n"), 0644))
+	marker := filepath.Join(t.TempDir(), "fake-ran")
+	script := "#!/bin/sh\necho ran >> " + shellQuote(marker) + "\nprintf 'fake-patch\\n'\n"
+	must(t, os.WriteFile(filepath.Join(after, "git"), []byte(script), 0755))
+	t.Setenv("PATH", after+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if err := Result(before, after, out); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatal("project git executed")
+	}
+	patch, err := os.ReadFile(filepath.Join(out, "changes.patch"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(patch, []byte("diff --git a/note.txt b/note.txt")) || !bytes.Contains(patch, []byte("\n+two\n")) {
+		t.Fatalf("patch:\n%s", patch)
+	}
+	if bytes.Equal(bytes.TrimSpace(patch), []byte("fake-patch")) {
+		t.Fatalf("patch:\n%s", patch)
+	}
+}
+
+func TestURLAndLocalImportsProduceTheSamePatch(t *testing.T) {
+	source := t.TempDir()
+	gitCmd(t, source, "init", "-b", "main")
+	must(t, os.WriteFile(filepath.Join(source, "README"), []byte("hello\n"), 0644))
+	gitCmd(t, source, "add", "README")
+	gitCmd(t, source, "commit", "-m", "initial")
+	before := treeDigest(t, source)
+	urlDest := filepath.Join(t.TempDir(), "url")
+	revision, err := fetch(urlDest, "file://"+source, "", "", "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	local := workspaceFromLocal(t, source)
+	localHead, err := os.ReadFile(filepath.Join(local, ".git", "refs", "heads", "main"))
+	if err != nil || strings.TrimSpace(string(localHead)) != revision {
+		t.Fatalf("local HEAD %s revision %s", localHead, revision)
+	}
+	edited := []byte("hello\nchanged\n")
+	must(t, os.WriteFile(filepath.Join(urlDest, "README"), edited, 0644))
+	must(t, os.WriteFile(filepath.Join(local, "README"), edited, 0644))
+	if treeDigest(t, source) != before {
+		t.Fatal("source checkout changed")
+	}
+	baseline := exportTree(t, source)
+	urlOut, localOut := t.TempDir(), t.TempDir()
+	if err := Result(baseline, exportTree(t, urlDest), urlOut); err != nil {
+		t.Fatal(err)
+	}
+	if err := Result(baseline, exportTree(t, local), localOut); err != nil {
+		t.Fatal(err)
+	}
+	urlPatch, _ := os.ReadFile(filepath.Join(urlOut, "changes.patch"))
+	localPatch, _ := os.ReadFile(filepath.Join(localOut, "changes.patch"))
+	if normalizePatch(urlPatch) != normalizePatch(localPatch) {
+		t.Fatalf("url:\n%s\nlocal:\n%s", urlPatch, localPatch)
+	}
+	if !bytes.Contains(urlPatch, []byte("diff --git a/README b/README")) {
+		t.Fatalf("patch:\n%s", urlPatch)
+	}
+}
+
+func TestPlainDirectoryImportsNoHistory(t *testing.T) {
+	root := t.TempDir()
+	must(t, os.WriteFile(filepath.Join(root, "a.txt"), []byte("a\n"), 0644))
+	dest := filepath.Join(t.TempDir(), "history")
+	if err := ImportGit(root, dest); !errors.Is(err, ErrNoGit) {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, ".git")); !os.IsNotExist(err) {
+		t.Fatal("invented history")
+	}
+}
+
+func TestImportGitSanitizesWithoutTouchingSource(t *testing.T) {
+	source := t.TempDir()
+	gitCmd(t, source, "init", "-b", "main")
+	must(t, os.WriteFile(filepath.Join(source, "README"), []byte("hello\n"), 0644))
+	gitCmd(t, source, "add", "README")
+	gitCmd(t, source, "commit", "-m", "initial")
+	token := "super-secret-token"
+	gitCmd(t, source, "remote", "add", "origin", "https://"+token+"@github.com/org/repo.git")
+	gitCmd(t, source, "config", "credential.helper", "store")
+	gitDir := filepath.Join(source, ".git")
+	must(t, os.MkdirAll(filepath.Join(gitDir, "objects", "info"), 0755))
+	must(t, os.WriteFile(filepath.Join(gitDir, "objects", "info", "alternates"), []byte("/host/objects\n"), 0644))
+	must(t, os.WriteFile(filepath.Join(gitDir, "hooks", "post-checkout"), []byte("#!/bin/sh\n"), 0755))
+	must(t, os.WriteFile(filepath.Join(gitDir, "FETCH_HEAD"), []byte("https://"+token+"@github.com/org/repo.git\n"), 0644))
+	before := treeDigest(t, source)
+	dest := filepath.Join(t.TempDir(), "history")
+	if err := ImportGit(source, dest); err != nil {
+		t.Fatal(err)
+	}
+	if treeDigest(t, source) != before {
+		t.Fatal("source checkout changed")
+	}
+	config, err := os.ReadFile(filepath.Join(dest, ".git", "config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(config, []byte(token)) || bytes.Contains(config, []byte("credential")) || !bytes.Contains(config, []byte("https://github.com/org/repo.git")) || !bytes.Contains(config, []byte("hooksPath = /dev/null")) {
+		t.Fatalf("config:\n%s", config)
+	}
+	for _, name := range []string{"hooks", "objects/info/alternates", "FETCH_HEAD"} {
+		if _, err := os.Stat(filepath.Join(dest, ".git", name)); !os.IsNotExist(err) {
+			t.Fatal(name)
+		}
+	}
+	var packed bytes.Buffer
+	if err := PackGit(dest, &packed, Limit); err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(packed.Bytes(), []byte(token)) {
+		t.Fatal("token in git archive")
+	}
+}
+
+func TestGitFileImportsNoHistory(t *testing.T) {
+	root := t.TempDir()
+	must(t, os.WriteFile(filepath.Join(root, "a.txt"), []byte("a\n"), 0644))
+	must(t, os.WriteFile(filepath.Join(root, ".git"), []byte("gitdir: /elsewhere\n"), 0644))
+	before := treeDigest(t, root)
+	dest := filepath.Join(t.TempDir(), "history")
+	if err := ImportGit(root, dest); !errors.Is(err, ErrNoGit) {
+		t.Fatal(err)
+	}
+	if treeDigest(t, root) != before {
+		t.Fatal("source checkout changed")
+	}
+	if _, err := os.Stat(dest); !os.IsNotExist(err) {
+		t.Fatal("imported a linked gitdir")
+	}
+}
+
+func TestLocalSubmoduleIsRejected(t *testing.T) {
+	root := t.TempDir()
+	gitCmd(t, root, "init", "-b", "main")
+	must(t, os.WriteFile(filepath.Join(root, "README"), []byte("hello\n"), 0644))
+	gitCmd(t, root, "add", "README")
+	gitCmd(t, root, "commit", "-m", "initial")
+	rev := gitOutputIn(t, root, "rev-parse", "HEAD")
+	must(t, os.Mkdir(filepath.Join(root, "vendor"), 0755))
+	must(t, os.WriteFile(filepath.Join(root, "vendor", "inside"), []byte("sub\n"), 0644))
+	gitCmd(t, root, "update-index", "--add", "--cacheinfo", "160000,"+rev+",vendor")
+	_, err := Names(root, true)
+	if err == nil || !strings.Contains(err.Error(), "submodule/directory entry unsupported: vendor") {
+		t.Fatal(err)
+	}
+}
+
+func workspaceFromLocal(t *testing.T, source string) string {
+	t.Helper()
+	ws := t.TempDir()
+	var files bytes.Buffer
+	if err := Pack(source, &files, true, Limit); err != nil {
+		t.Fatal(err)
+	}
+	if err := Unpack(ws, bytes.NewReader(files.Bytes()), Limit); err != nil {
+		t.Fatal(err)
+	}
+	history := t.TempDir()
+	if err := ImportGit(source, history); err != nil {
+		t.Fatal(err)
+	}
+	var gitTar bytes.Buffer
+	if err := PackGit(history, &gitTar, Limit); err != nil {
+		t.Fatal(err)
+	}
+	if err := Unpack(ws, bytes.NewReader(gitTar.Bytes()), Limit); err != nil {
+		t.Fatal(err)
+	}
+	return ws
+}
+
+func exportTree(t *testing.T, root string) string {
+	t.Helper()
+	var packed bytes.Buffer
+	if err := Pack(root, &packed, true, Limit); err != nil {
+		t.Fatal(err)
+	}
+	dest := t.TempDir()
+	if err := Unpack(dest, &packed, Limit); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, ".git")); !os.IsNotExist(err) {
+		t.Fatal(".git exported")
+	}
+	return dest
+}
+
+func treeDigest(t *testing.T, root string) string {
+	t.Helper()
+	sum := sha256.New()
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		info, err := os.Lstat(p)
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(root, p)
+		fmt.Fprintf(sum, "%s %o\n", filepath.ToSlash(rel), info.Mode())
+		if info.Mode().IsRegular() {
+			data, err := os.ReadFile(p)
+			if err != nil {
+				return err
+			}
+			sum.Write(data)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			link, err := os.Readlink(p)
+			if err != nil {
+				return err
+			}
+			sum.Write([]byte(link))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return hex.EncodeToString(sum.Sum(nil))
+}
+
+func gitOutputIn(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + t.TempDir(),
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_AUTHOR_NAME=Test",
+		"GIT_AUTHOR_EMAIL=test@example.com",
+		"GIT_COMMITTER_NAME=Test",
+		"GIT_COMMITTER_EMAIL=test@example.com",
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git %s: %v", strings.Join(args, " "), err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func normalizePatch(patch []byte) string {
+	var b strings.Builder
+	for _, line := range strings.Split(string(patch), "\n") {
+		if strings.HasPrefix(line, "Date:") || strings.HasPrefix(line, "author ") || strings.HasPrefix(line, "committer ") {
+			continue
+		}
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	return b.String()
 }

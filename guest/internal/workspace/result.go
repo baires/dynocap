@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 type Change struct {
 	Path    string `json:"path"`
 	Kind    string `json:"kind"`
+	From    string `json:"from,omitempty"`
 	Before  string `json:"beforeSha256,omitempty"`
 	After   string `json:"afterSha256,omitempty"`
 	Mode    uint32 `json:"mode"`
@@ -60,6 +62,14 @@ func Result(before, after, out string) error {
 	if e != nil {
 		return e
 	}
+	patch, renamedTo, e := reviewPatch(before, after)
+	if e != nil {
+		return e
+	}
+	replaced := map[string]bool{}
+	for _, old := range renamedTo {
+		replaced[old] = true
+	}
 	set := map[string]bool{}
 	for _, n := range append(a, b...) {
 		set[n] = true
@@ -75,10 +85,16 @@ func Result(before, after, out string) error {
 	changes := []Change{}
 	var review bytes.Buffer
 	for _, n := range names {
-		if ignored[n] {
+		if ignored[n] || replaced[n] {
 			continue
 		}
-		x, xm, _, e := identity(before, n)
+		source := n
+		from := ""
+		if old, ok := renamedTo[n]; ok {
+			source = old
+			from = old
+		}
+		x, xm, _, e := identity(before, source)
 		if e != nil {
 			return e
 		}
@@ -86,18 +102,25 @@ func Result(before, after, out string) error {
 		if e != nil {
 			return e
 		}
-		if x == y && xm == ym {
+		if from == "" && x == y && xm == ym {
 			continue
 		}
 		kind := "modified"
-		if x == "" {
+		if from != "" {
+			kind = "renamed"
+		} else if x == "" {
 			kind = "added"
-		}
-		if y == "" {
+		} else if y == "" {
 			kind = "deleted"
 		}
-		changes = append(changes, Change{n, kind, x, y, uint32(ym.Perm()), link})
-		fmt.Fprintf(&review, "%s %s (mode %04o -> %04o)\n", kind, n, xm.Perm(), ym.Perm())
+		changes = append(changes, Change{
+			Path: n, Kind: kind, From: from, Before: x, After: y, Mode: uint32(ym.Perm()), Symlink: link,
+		})
+		if from != "" {
+			fmt.Fprintf(&review, "renamed %s -> %s (mode %04o -> %04o)\n", from, n, xm.Perm(), ym.Perm())
+		} else {
+			fmt.Fprintf(&review, "%s %s (mode %04o -> %04o)\n", kind, n, xm.Perm(), ym.Perm())
+		}
 		if y != "" {
 			dest := filepath.Join(out, "files", n)
 			if e = os.MkdirAll(filepath.Dir(dest), 0700); e != nil {
@@ -123,10 +146,14 @@ func Result(before, after, out string) error {
 			fmt.Fprintf(&review, "symlink: %s -> %s\n\n", x, y)
 			continue
 		}
-		old, _ := os.ReadFile(filepath.Join(before, n))
+		old, _ := os.ReadFile(filepath.Join(before, source))
 		next, _ := os.ReadFile(filepath.Join(after, n))
 		if bytes.ContainsRune(old, 0) || bytes.ContainsRune(next, 0) || !utf8.Valid(old) || !utf8.Valid(next) {
-			review.WriteString("Binary contents changed; see files/.\n\n")
+			if from == "" || !bytes.Equal(old, next) {
+				review.WriteString("Binary contents changed; see files/.\n\n")
+			} else {
+				review.WriteByte('\n')
+			}
 			continue
 		}
 		review.WriteString(unifiedDiff(n, old, next))
@@ -142,7 +169,10 @@ func Result(before, after, out string) error {
 	if e = os.WriteFile(filepath.Join(out, "changes.json"), raw, 0600); e != nil {
 		return e
 	}
-	return os.WriteFile(filepath.Join(out, "review.txt"), review.Bytes(), 0600)
+	if e = os.WriteFile(filepath.Join(out, "review.txt"), review.Bytes(), 0600); e != nil {
+		return e
+	}
+	return os.WriteFile(filepath.Join(out, "changes.patch"), patch, 0600)
 }
 
 // New files obey the imported .gitignore files. The temporary Git directory has
@@ -163,11 +193,17 @@ type ignoreSession struct {
 	root    string
 	scratch string
 	env     []string
+	git     string
 }
 
 func openIgnoreSession(root string) (*ignoreSession, error) {
 	scratch, err := os.MkdirTemp("", "microvm-ignore-")
 	if err != nil {
+		return nil, err
+	}
+	bin, err := hostGit()
+	if err != nil {
+		os.RemoveAll(scratch)
 		return nil, err
 	}
 	env := []string{
@@ -176,13 +212,13 @@ func openIgnoreSession(root string) (*ignoreSession, error) {
 		"GIT_CONFIG_NOSYSTEM=1",
 		"GIT_CONFIG_GLOBAL=/dev/null",
 	}
-	init := exec.Command("git", "-c", "core.hooksPath=/dev/null", "-c", "safe.directory=*", "init", "--quiet", scratch)
+	init := exec.Command(bin, "-c", "core.hooksPath=/dev/null", "-c", "safe.directory=*", "init", "--quiet", scratch)
 	init.Env = env
 	if out, err := init.CombinedOutput(); err != nil {
 		os.RemoveAll(scratch)
 		return nil, fmt.Errorf("init ignore evaluator: %s: %w", out, err)
 	}
-	return &ignoreSession{root: root, scratch: scratch, env: env}, nil
+	return &ignoreSession{root: root, scratch: scratch, env: env, git: bin}, nil
 }
 
 func (s *ignoreSession) close() { os.RemoveAll(s.scratch) }
@@ -194,7 +230,7 @@ func (s *ignoreSession) ignored(names []string) (map[string]bool, error) {
 	}
 	gitDir := filepath.Join(s.scratch, ".git")
 	cmd := exec.Command(
-		"git", "--git-dir="+gitDir, "--work-tree="+s.root,
+		s.git, "--git-dir="+gitDir, "--work-tree="+s.root,
 		"-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "safe.directory=*",
 		"check-ignore", "--no-index", "-z", "--stdin",
 	)
@@ -402,4 +438,197 @@ func formatHunks(rows []diffRow, context int, oldNL, newNL bool) string {
 		}
 	}
 	return b.String()
+}
+
+// hostGit is the trusted host binary. A git executable on the writable
+// workspace PATH is never selected.
+func hostGit() (string, error) {
+	for _, candidate := range []string{"/opt/homebrew/bin/git", "/usr/local/bin/git", "/usr/bin/git"} {
+		info, err := os.Stat(candidate)
+		if err != nil || info.IsDir() || info.Mode()&0111 == 0 {
+			continue
+		}
+		return candidate, nil
+	}
+	return "", fmt.Errorf("host git not found")
+}
+
+func gitEnv(home string) []string {
+	return []string{
+		"PATH=/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
+		"HOME=" + home,
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_AUTHOR_NAME=MicroVM",
+		"GIT_AUTHOR_EMAIL=microvm@localhost",
+		"GIT_AUTHOR_DATE=1970-01-01T00:00:00Z",
+		"GIT_COMMITTER_NAME=MicroVM",
+		"GIT_COMMITTER_EMAIL=microvm@localhost",
+		"GIT_COMMITTER_DATE=1970-01-01T00:00:00Z",
+	}
+}
+
+func runGit(bin, dir string, env, args []string) ([]byte, error) {
+	cmd := exec.Command(bin, args...)
+	cmd.Dir = dir
+	cmd.Env = env
+	out, err := cmd.Output()
+	if err != nil {
+		detail := ""
+		if exit, ok := err.(*exec.ExitError); ok {
+			detail = string(exit.Stderr)
+		}
+		return nil, fmt.Errorf("git %s: %s: %w", strings.Join(args, " "), detail, err)
+	}
+	return out, nil
+}
+
+func gitArgs(repo string, args ...string) []string {
+	prefix := []string{"-C", repo, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=", "-c", "core.filemode=true", "-c", "commit.gpgsign=false"}
+	return append(prefix, args...)
+}
+
+// reviewPatch diffs the saved baseline and the exported tree with host Git.
+// Rename detection uses the exported paths. The writable workspace is not on PATH.
+func reviewPatch(before, after string) ([]byte, map[string]string, error) {
+	bin, err := hostGit()
+	if err != nil {
+		return nil, nil, err
+	}
+	root, err := os.MkdirTemp("", "microvm-review-")
+	if err != nil {
+		return nil, nil, err
+	}
+	defer os.RemoveAll(root)
+	home := filepath.Join(root, "home")
+	repo := filepath.Join(root, "repo")
+	if err := os.MkdirAll(home, 0700); err != nil {
+		return nil, nil, err
+	}
+	env := gitEnv(home)
+	if _, err := runGit(bin, root, env, []string{"init", "-q", "-b", "main", repo}); err != nil {
+		return nil, nil, err
+	}
+	if err := copyWorktree(before, repo); err != nil {
+		return nil, nil, err
+	}
+	if _, err := runGit(bin, repo, env, gitArgs(repo, "add", "-A")); err != nil {
+		return nil, nil, err
+	}
+	if _, err := runGit(bin, repo, env, gitArgs(repo, "commit", "--quiet", "--allow-empty", "-m", "baseline")); err != nil {
+		return nil, nil, err
+	}
+	if err := clearWorktree(repo); err != nil {
+		return nil, nil, err
+	}
+	if err := copyWorktree(after, repo); err != nil {
+		return nil, nil, err
+	}
+	if _, err := runGit(bin, repo, env, gitArgs(repo, "add", "--all")); err != nil {
+		return nil, nil, err
+	}
+	patch, err := runGit(bin, repo, env, gitArgs(repo, "diff", "--cached", "--binary", "--find-renames", "--no-color", "HEAD"))
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(patch) > int(Limit) {
+		return nil, nil, fmt.Errorf("review exceeds limit")
+	}
+	status, err := runGit(bin, repo, env, gitArgs(repo, "diff", "--cached", "--name-status", "--find-renames", "-z", "HEAD"))
+	if err != nil {
+		return nil, nil, err
+	}
+	return patch, parseRenames(status), nil
+}
+
+func parseRenames(status []byte) map[string]string {
+	renames := map[string]string{}
+	parts := strings.Split(string(status), "\x00")
+	for i := 0; i < len(parts); {
+		if parts[i] == "" {
+			i++
+			continue
+		}
+		kind := parts[i]
+		i++
+		if i >= len(parts) {
+			break
+		}
+		if strings.HasPrefix(kind, "R") || strings.HasPrefix(kind, "C") {
+			old := parts[i]
+			i++
+			if i >= len(parts) {
+				break
+			}
+			next := parts[i]
+			i++
+			if strings.HasPrefix(kind, "R") && safeName(old) && safeName(next) {
+				renames[next] = old
+			}
+			continue
+		}
+		i++
+	}
+	return renames
+}
+
+func copyWorktree(src, dst string) error {
+	return filepath.WalkDir(src, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if p == src {
+			return nil
+		}
+		rel, err := filepath.Rel(src, p)
+		if err != nil {
+			return err
+		}
+		if rel == ".git" || strings.HasPrefix(rel, ".git"+string(os.PathSeparator)) {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if info.Mode()&os.ModeSymlink != 0 {
+			link, err := os.Readlink(p)
+			if err != nil {
+				return err
+			}
+			return os.Symlink(link, target)
+		}
+		if d.IsDir() {
+			return os.MkdirAll(target, 0755)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("unsupported file %s", filepath.ToSlash(rel))
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, info.Mode().Perm())
+	})
+}
+
+func clearWorktree(root string) error {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.Name() == ".git" {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(root, entry.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
 }

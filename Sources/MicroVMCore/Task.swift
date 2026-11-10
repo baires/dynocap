@@ -203,6 +203,15 @@ final class TaskManager {
         switch resolved {
         case .directory(let source):
             _ = try HostTree.run("microvm-workspace", ["pack", source, "project"], output: input)
+            let history = directory.appendingPathComponent("history")
+            let imported = String(
+                data: try HostTree.run("microvm-workspace", ["import-git", source, history.path]), encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if imported == "git" {
+                gitTar = directory.appendingPathComponent("git.tar")
+                _ = try HostTree.run("microvm-workspace", ["pack-git", history.path], output: gitTar)
+                try fm.removeItem(at: history)
+            }
             _ = try HostTree.run("microvm-workspace", ["unpack", baseline.path], input: input)
         case .hostFetch(let repo):
             let fetchDir = directory.appendingPathComponent("fetch")
@@ -244,9 +253,7 @@ final class TaskManager {
         }
         measured("networkReady")
         switch resolved {
-        case .directory:
-            _ = try execute(id, ["/usr/local/bin/microvm-agent", "unpack", "/workspace"], input, nil, 256 << 20)
-        case .hostFetch:
+        case .directory, .hostFetch:
             _ = try execute(id, ["/usr/local/bin/microvm-agent", "unpack", "/workspace"], input, nil, 256 << 20)
             if let gitTar {
                 _ = try execute(id, ["/usr/local/bin/microvm-agent", "unpack", "/workspace"], gitTar, nil, 256 << 20)

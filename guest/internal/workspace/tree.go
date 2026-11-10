@@ -123,20 +123,29 @@ func names(root string, project, useGit bool) ([]string, error) {
 	root = resolved
 	var names []string
 	if useGit {
-		cmd := exec.Command("git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-C", root, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
-		if out, err := cmd.Output(); err == nil {
-			for _, n := range strings.Split(string(out), "\x00") {
-				if safeName(n) {
-					if st, e := os.Lstat(filepath.Join(root, n)); e == nil {
-						if st.IsDir() {
-							return nil, fmt.Errorf("submodule/directory entry unsupported: %s", n)
+		if bin, err := hostGit(); err == nil {
+			cmd := exec.Command(bin, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-C", root, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
+			cmd.Env = []string{
+				"PATH=/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
+				"HOME=" + os.TempDir(),
+				"GIT_CONFIG_NOSYSTEM=1",
+				"GIT_CONFIG_GLOBAL=/dev/null",
+				"GIT_TERMINAL_PROMPT=0",
+			}
+			if out, err := cmd.Output(); err == nil {
+				for _, n := range strings.Split(string(out), "\x00") {
+					if safeName(n) {
+						if st, e := os.Lstat(filepath.Join(root, n)); e == nil {
+							if st.IsDir() {
+								return nil, fmt.Errorf("submodule/directory entry unsupported: %s", n)
+							}
+							names = append(names, n)
 						}
-						names = append(names, n)
 					}
 				}
+				sort.Strings(names)
+				return names, nil
 			}
-			sort.Strings(names)
-			return names, nil
 		}
 	}
 	if project {

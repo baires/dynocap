@@ -3,6 +3,7 @@ package workspace
 import (
 	"archive/tar"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -81,7 +82,11 @@ func fetch(dest, rawURL, ref, token, sshKey string, allowFile bool) (string, err
 	if err := os.MkdirAll(filepath.Dir(dest), 0700); err != nil {
 		return "", err
 	}
-	clone := exec.Command("git", cloneArgs(parsed.URL, dest, ref, allowFile)...)
+	bin, err := hostGit()
+	if err != nil {
+		return "", err
+	}
+	clone := exec.Command(bin, cloneArgs(parsed.URL, dest, ref, allowFile)...)
 	clone.Env = env
 	if out, err := clone.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("git clone failed: %s", redact(string(out), token, sshKey))
@@ -101,7 +106,7 @@ func fetch(dest, rawURL, ref, token, sshKey string, allowFile bool) (string, err
 			branch = name
 		}
 	}
-	detach := exec.Command("git", append([]string{"-C", dest}, lockedConfig()...)...)
+	detach := exec.Command(bin, append([]string{"-C", dest}, lockedConfig()...)...)
 	detach.Args = append(detach.Args, "checkout", "--detach", revision)
 	detach.Env = env
 	if out, err := detach.CombinedOutput(); err != nil {
@@ -212,10 +217,7 @@ func lockedConfig() []string {
 }
 
 func cleanEnv(home string, extra map[string]string) []string {
-	path := os.Getenv("PATH")
-	if path == "" {
-		path = "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"
-	}
+	path := "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"
 	values := map[string]string{
 		"PATH":                path,
 		"HOME":                home,
@@ -244,7 +246,11 @@ func writeSSHWrapper(path string) error {
 }
 
 func gitOutput(dir string, env []string, args ...string) (string, error) {
-	cmd := exec.Command("git", append([]string{"-C", dir}, lockedConfig()...)...)
+	bin, err := hostGit()
+	if err != nil {
+		return "", err
+	}
+	cmd := exec.Command(bin, append([]string{"-C", dir}, lockedConfig()...)...)
 	cmd.Args = append(cmd.Args, args...)
 	cmd.Env = env
 	out, err := cmd.Output()
@@ -425,4 +431,135 @@ func PackGit(root string, w io.Writer, limit int64) error {
 		}
 	}
 	return tw.Close()
+}
+
+// ErrNoGit means the directory is a tree with no repository history.
+var ErrNoGit = errors.New("directory has no git history")
+
+// ImportGit copies sanitized history from a local checkout into dest.
+// The source tree is only read. A directory without .git returns ErrNoGit.
+func ImportGit(src, dest string) error {
+	resolved, err := filepath.EvalSymlinks(src)
+	if err != nil {
+		return err
+	}
+	gitPath := filepath.Join(resolved, ".git")
+	info, err := os.Lstat(gitPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return ErrNoGit
+		}
+		return err
+	}
+	// A gitfile or symlink points outside this checkout. Leave the tree without history.
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return ErrNoGit
+	}
+	if err := os.MkdirAll(dest, 0700); err != nil {
+		return err
+	}
+	if err := copyGitTree(gitPath, filepath.Join(dest, ".git")); err != nil {
+		return err
+	}
+	config, err := os.ReadFile(filepath.Join(dest, ".git", "config"))
+	if err != nil {
+		return err
+	}
+	url, token := cleanOrigin(originURL(config))
+	return Sanitize(dest, url, headBranch(filepath.Join(dest, ".git")), token)
+}
+
+func copyGitTree(src, dst string) error {
+	if err := os.MkdirAll(dst, 0755); err != nil {
+		return err
+	}
+	return filepath.WalkDir(src, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if p == src {
+			return nil
+		}
+		rel, err := filepath.Rel(src, p)
+		if err != nil {
+			return err
+		}
+		info, err := os.Lstat(p)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if info.Mode()&os.ModeSymlink != 0 || (!info.IsDir() && !info.Mode().IsRegular()) {
+			return fmt.Errorf("unsupported git file %s", filepath.ToSlash(rel))
+		}
+		if info.IsDir() {
+			return os.MkdirAll(target, 0755)
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, info.Mode().Perm())
+	})
+}
+
+func originURL(config []byte) string {
+	inOrigin := false
+	for _, line := range strings.Split(string(config), "\n") {
+		trim := strings.TrimSpace(line)
+		if strings.HasPrefix(trim, "[") {
+			inOrigin = trim == `[remote "origin"]`
+			continue
+		}
+		if !inOrigin {
+			continue
+		}
+		key, val, ok := strings.Cut(trim, "=")
+		if ok && strings.TrimSpace(key) == "url" {
+			return strings.Trim(strings.TrimSpace(val), `"`)
+		}
+	}
+	return ""
+}
+
+func cleanOrigin(raw string) (string, string) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", ""
+	}
+	if parsed, err := ParseRepositoryURL(raw); err == nil && parsed.Kind != "file" {
+		return parsed.URL, ""
+	}
+	if strings.HasPrefix(raw, "https://") {
+		rest := strings.TrimPrefix(raw, "https://")
+		userinfo, hostpath, ok := strings.Cut(rest, "@")
+		if ok && hostpath != "" && !strings.Contains(hostpath, "@") {
+			cleaned := "https://" + hostpath
+			if _, err := ParseRepositoryURL(cleaned); err == nil {
+				token := userinfo
+				if _, pass, ok := strings.Cut(userinfo, ":"); ok {
+					token = pass
+				}
+				return cleaned, token
+			}
+		}
+	}
+	return "", ""
+}
+
+func headBranch(gitDir string) string {
+	data, err := os.ReadFile(filepath.Join(gitDir, "HEAD"))
+	if err != nil {
+		return ""
+	}
+	line := strings.TrimSpace(string(data))
+	const prefix = "ref: refs/heads/"
+	if !strings.HasPrefix(line, prefix) {
+		return ""
+	}
+	branch := strings.TrimPrefix(line, prefix)
+	if ValidateRef(branch) != nil {
+		return ""
+	}
+	return branch
 }

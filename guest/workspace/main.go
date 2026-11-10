@@ -3,6 +3,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"microvm.dev/guest/internal/workspace"
 	"os"
@@ -10,7 +11,7 @@ import (
 
 func main() {
 	if len(os.Args) < 3 {
-		fmt.Fprintln(os.Stderr, "workspace pack|unpack|names|fetch|pack-git ROOT")
+		fmt.Fprintln(os.Stderr, "workspace pack|unpack|names|fetch|pack-git|import-git ROOT")
 		os.Exit(2)
 	}
 	var err error
@@ -43,6 +44,18 @@ func main() {
 		}
 	case "pack-git":
 		err = workspace.PackGit(os.Args[2], os.Stdout, workspace.Limit)
+	case "import-git":
+		if len(os.Args) != 4 {
+			err = fmt.Errorf("import-git SOURCE DEST")
+		} else {
+			err = workspace.ImportGit(os.Args[2], os.Args[3])
+			if errors.Is(err, workspace.ErrNoGit) {
+				fmt.Fprint(os.Stdout, "none")
+				err = nil
+			} else if err == nil {
+				fmt.Fprint(os.Stdout, "git")
+			}
+		}
 	default:
 		err = fmt.Errorf("unknown operation")
 	}
