@@ -185,7 +185,7 @@ func TestFetchDoesNotRunTemplateHook(t *testing.T) {
 	gitCmd(t, source, "commit", "-m", "initial")
 	naive := filepath.Join(t.TempDir(), "naive")
 	cmd := exec.Command("git", "clone", source, naive)
-	cmd.Env = append(os.Environ(), "GIT_TEMPLATE_DIR="+template)
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir(), "GIT_TEMPLATE_DIR=" + template}
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("control clone: %s", out)
 	}

@@ -507,20 +507,82 @@ func TestImportGitSanitizesWithoutTouchingSource(t *testing.T) {
 	}
 }
 
-func TestGitFileImportsNoHistory(t *testing.T) {
+func TestLinkedWorktreeImportsHistory(t *testing.T) {
+	main := t.TempDir()
+	gitCmd(t, main, "init", "-b", "main")
+	must(t, os.WriteFile(filepath.Join(main, "README"), []byte("hello\n"), 0644))
+	gitCmd(t, main, "add", "README")
+	gitCmd(t, main, "commit", "-m", "initial")
+	linked := filepath.Join(t.TempDir(), "linked")
+	gitCmd(t, main, "worktree", "add", "--detach", linked, "HEAD")
+	info, err := os.Lstat(filepath.Join(linked, ".git"))
+	if err != nil || info.IsDir() {
+		t.Fatal("fixture is not a linked worktree")
+	}
+	before := treeDigest(t, linked)
+	head := gitOutputIn(t, linked, "rev-parse", "HEAD")
+	dest := filepath.Join(t.TempDir(), "history")
+	if err := ImportGit(linked, dest); err != nil {
+		t.Fatal(err)
+	}
+	if treeDigest(t, linked) != before {
+		t.Fatal("source worktree changed")
+	}
+	gitInfo, err := os.Lstat(filepath.Join(dest, ".git"))
+	if err != nil || !gitInfo.IsDir() || gitInfo.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("imported history is not a git directory")
+	}
+	if got := gitOutputIn(t, dest, "rev-parse", "HEAD"); got != head {
+		t.Fatalf("HEAD %s want %s", got, head)
+	}
+	config, err := os.ReadFile(filepath.Join(dest, ".git", "config"))
+	if err != nil || !bytes.Contains(config, []byte("hooksPath = /dev/null")) || bytes.Contains(config, []byte("credential")) {
+		t.Fatalf("config:\n%s", config)
+	}
+	for _, name := range []string{"hooks", "objects/info/alternates"} {
+		if _, err := os.Stat(filepath.Join(dest, ".git", name)); !os.IsNotExist(err) {
+			t.Fatal(name)
+		}
+	}
+	baseline := exportTree(t, linked)
+	edited := exportTree(t, linked)
+	must(t, os.WriteFile(filepath.Join(edited, "README"), []byte("hello\nchanged\n"), 0644))
+	out := t.TempDir()
+	if err := Result(baseline, edited, out); err != nil {
+		t.Fatal(err)
+	}
+	clone := filepath.Join(t.TempDir(), "clone")
+	gitCmd(t, t.TempDir(), "clone", dest, clone)
+	apply := exec.Command("git", "apply", "--binary", filepath.Join(out, "changes.patch"))
+	apply.Dir = clone
+	apply.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null"}
+	if output, err := apply.CombinedOutput(); err != nil {
+		t.Fatalf("git apply: %s", output)
+	}
+	applied, err := os.ReadFile(filepath.Join(clone, "README"))
+	if err != nil || string(applied) != "hello\nchanged\n" {
+		t.Fatalf("applied %q %v", applied, err)
+	}
+	if treeDigest(t, linked) != before {
+		t.Fatal("source worktree changed")
+	}
+}
+
+func TestBogusGitFileIsNotCopied(t *testing.T) {
 	root := t.TempDir()
 	must(t, os.WriteFile(filepath.Join(root, "a.txt"), []byte("a\n"), 0644))
 	must(t, os.WriteFile(filepath.Join(root, ".git"), []byte("gitdir: /elsewhere\n"), 0644))
 	before := treeDigest(t, root)
 	dest := filepath.Join(t.TempDir(), "history")
-	if err := ImportGit(root, dest); !errors.Is(err, ErrNoGit) {
-		t.Fatal(err)
+	err := ImportGit(root, dest)
+	if err == nil || errors.Is(err, ErrNoGit) {
+		t.Fatalf("expected git failure, got %v", err)
 	}
 	if treeDigest(t, root) != before {
 		t.Fatal("source checkout changed")
 	}
-	if _, err := os.Stat(dest); !os.IsNotExist(err) {
-		t.Fatal("imported a linked gitdir")
+	if data, readErr := os.ReadFile(filepath.Join(dest, ".git")); readErr == nil && bytes.Contains(data, []byte("gitdir:")) {
+		t.Fatal("copied gitfile")
 	}
 }
 

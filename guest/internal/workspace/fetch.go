@@ -438,6 +438,7 @@ var ErrNoGit = errors.New("directory has no git history")
 
 // ImportGit copies sanitized history from a local checkout into dest.
 // The source tree is only read. A directory without .git returns ErrNoGit.
+// A gitfile is materialized with host Git into a normal repository, then sanitized.
 func ImportGit(src, dest string) error {
 	resolved, err := filepath.EvalSymlinks(src)
 	if err != nil {
@@ -451,9 +452,10 @@ func ImportGit(src, dest string) error {
 		}
 		return err
 	}
-	// A gitfile or symlink points outside this checkout. Leave the tree without history.
+	// A gitfile or symlink names a directory outside this checkout. Do not copy
+	// that pointer or the directory it names; clone through host Git instead.
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return ErrNoGit
+		return importLinkedCheckout(resolved, dest)
 	}
 	if err := os.MkdirAll(dest, 0700); err != nil {
 		return err
@@ -562,4 +564,59 @@ func headBranch(gitDir string) string {
 		return ""
 	}
 	return branch
+}
+
+// importLinkedCheckout builds a normal repository for a linked worktree.
+// Host Git resolves the worktree. The gitfile is never copied or parsed.
+func importLinkedCheckout(src, dest string) error {
+	bin, err := hostGit()
+	if err != nil {
+		return err
+	}
+	home, err := os.MkdirTemp("", "microvm-import-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(home)
+	env := gitEnv(home)
+	head, err := runGit(bin, home, env, linkedGitArgs("-C", src, "rev-parse", "HEAD"))
+	if err != nil {
+		return err
+	}
+	revision := strings.TrimSpace(string(head))
+	if !commitPattern.MatchString(revision) {
+		return fmt.Errorf("git did not return a commit")
+	}
+	branch := ""
+	if out, err := runGit(bin, home, env, linkedGitArgs("-C", src, "symbolic-ref", "--quiet", "HEAD")); err == nil {
+		name := strings.TrimPrefix(strings.TrimSpace(string(out)), "refs/heads/")
+		if ValidateRef(name) == nil {
+			branch = name
+		}
+	}
+	remote := ""
+	if out, err := runGit(bin, home, env, linkedGitArgs("-C", src, "config", "--get", "remote.origin.url")); err == nil {
+		remote = strings.TrimSpace(string(out))
+	}
+	if _, err := runGit(bin, home, env, linkedGitArgs(
+		"clone", "--no-local", "--no-checkout", "--no-recurse-submodules", "--", src, dest,
+	)); err != nil {
+		return err
+	}
+	if _, err := runGit(bin, dest, env, linkedGitArgs("-C", dest, "checkout", "--detach", revision)); err != nil {
+		return err
+	}
+	url, token := cleanOrigin(remote)
+	return Sanitize(dest, url, branch, token)
+}
+
+func linkedGitArgs(args ...string) []string {
+	prefix := []string{
+		"-c", "core.hooksPath=/dev/null",
+		"-c", "core.fsmonitor=",
+		"-c", "credential.helper=",
+		"-c", "protocol.ext.allow=never",
+		"-c", "init.templateDir=",
+	}
+	return append(prefix, args...)
 }
