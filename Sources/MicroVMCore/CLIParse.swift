@@ -26,6 +26,9 @@ public func parseCommand(_ args: [String]) throws -> CLIInvocation {
     }
     let commandArgs = Array(rest.dropFirst())
     switch sub {
+    case "doctor":
+        let runtimes = try parseDoctor(commandArgs, &prefix)
+        return try finishParse(prefix, ["doctor"], .doctor(runtimes))
     case "ls":
         try parseLs(commandArgs, &prefix)
         return try finishParse(prefix, ["ls"], .ls)
@@ -371,4 +374,21 @@ func parseDestroy(_ args: [String], _ prefix: inout InvocationPrefix) throws -> 
     guard let name else { throw usageError("usage: microvm destroy NAME") }
     try rethrowUsage { try validateVMName(name) }
     return name
+}
+
+func parseDoctor(_ args: [String], _ prefix: inout InvocationPrefix) throws -> [RuntimeSelection] {
+    var runtime: String?
+    var reader = OptionReader(args: args)
+    while let token = try reader.next() {
+        if prefix.help || prefix.version { return RuntimeArtifact.defaultRuntimes }
+        switch token {
+        case .positional(let value): throw usageError("unexpected argument \(value)")
+        case .separator: throw usageError("unexpected argument --")
+        case .flag(let name, let inline):
+            if try consumeGlobal(name, inline, reader: &reader, prefix: &prefix) { continue }
+            guard name == "--runtime" else { throw usageError("unknown flag \(name)") }
+            runtime = try reader.value(name, inline)
+        }
+    }
+    return try runtimeSelections(runtime)
 }

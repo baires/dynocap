@@ -116,7 +116,7 @@ final class CLIHelpTests: XCTestCase {
             ["microvm", "exec", "demo", "--json", "--", "true"],
             ["microvm", "ls", "bad"],
             ["microvm", "--json"],
-            ["microvm", "help", "doctor"],
+            ["microvm", "help", "unknown-command"],
         ]
         for args in cases {
             do {
@@ -169,7 +169,7 @@ final class CLIHelpTests: XCTestCase {
     }
 
     private func assertNoUnimplementedCommands(_ text: String) {
-        for hidden in ["microvm doctor", "microvm shell", "microvm logs", "microvm fork"] {
+        for hidden in ["microvm shell", "microvm logs", "microvm fork"] {
             XCTAssertFalse(text.contains(hidden), hidden)
         }
     }

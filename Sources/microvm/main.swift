@@ -31,6 +31,14 @@ struct Main {
 
     static func dispatch(_ invocation: CLIInvocation, _ args: [String]) throws {
         switch invocation.command {
+        case .doctor(let runtimes):
+            let executable = URL(fileURLWithPath: args[0]).standardizedFileURL.resolvingSymlinksInPath()
+            let host = DoctorHost(
+                arch: HostArch.guest, platformSupported: MicroVMInfo.virtualizationAvailable,
+                backend: DoctorVirtualizationSupport.backendCheck(), signing: DoctorVirtualizationSupport.signingCheck(executable: executable))
+            let report = diagnoseHost(paths: resolve(invocation), executable: executable, runtimes: runtimes, host: host)
+            print(try formatDoctorReport(report, output: invocation.output, arguments: args), terminator: "")
+            exit(report.ok ? 0 : 1)
         case .ls:
             let paths = try ready(invocation)
             let data = try DaemonClient(socketPath: paths.socket.path).task(TaskCommand(op: "entries"))

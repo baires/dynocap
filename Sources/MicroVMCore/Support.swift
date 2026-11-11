@@ -206,6 +206,38 @@ enum POSIX {
         return fd
     }
 
+    static func connectUnix(_ path: String, timeoutSeconds: Int) throws -> Int32 {
+        let fd = socket(AF_UNIX, socketStream, 0)
+        guard fd >= 0 else { throw MicroVMError("cannot create daemon probe socket") }
+        var connected = false
+        defer { if !connected { close(fd) } }
+        #if os(macOS)
+        var noSigPipe: Int32 = 1
+        guard setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size)) == 0 else {
+            throw MicroVMError("cannot configure daemon probe writes")
+        }
+        #endif
+        var address = try unixAddress(path)
+        let flags = fcntl(fd, F_GETFL)
+        guard flags >= 0, fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0 else { throw MicroVMError("cannot configure daemon probe") }
+        let result = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+        }
+        if result != 0 {
+            guard errno == EINPROGRESS || errno == EAGAIN else { throw MicroVMError("daemon socket is unreachable") }
+            var descriptor = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+            guard poll(&descriptor, 1, Int32(timeoutSeconds * 1000)) > 0 else { throw MicroVMError("daemon connect deadline elapsed") }
+            var socketError: Int32 = 0
+            var length = socklen_t(MemoryLayout<Int32>.size)
+            guard getsockopt(fd, SOL_SOCKET, SO_ERROR, &socketError, &length) == 0, socketError == 0 else {
+                throw MicroVMError("daemon socket connection failed")
+            }
+        }
+        guard fcntl(fd, F_SETFL, flags) == 0 else { throw MicroVMError("cannot restore daemon probe flags") }
+        connected = true
+        return fd
+    }
+
     static func accept(_ fd: Int32) -> Int32 {
         DarwinOrGlibc.accept(fd, nil, nil)
     }

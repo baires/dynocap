@@ -55,6 +55,7 @@ public enum CLICommand: Equatable {
     case daemon
     case ps
     case ls
+    case doctor([RuntimeSelection])
     case managed(TaskCommand)
     case run(RunRequest)
     case exec(ExecCommand)

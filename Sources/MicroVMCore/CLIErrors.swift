@@ -117,6 +117,7 @@ public func formatCLIFailure(
 private func cliOperation(_ command: CLICommand) -> String {
     switch command {
     case .ls: return "ls"
+    case .doctor: return "doctor"
     case .ps: return "ps"
     case .run: return "run"
     case .exec: return "exec"

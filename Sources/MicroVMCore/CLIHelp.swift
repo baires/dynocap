@@ -184,6 +184,24 @@ let cliCommandSpecs: [CLICommandSpec] = [
         allowsJSON: true
     ),
     CLICommandSpec(
+        path: ["doctor"],
+        group: .primary,
+        summary: "Diagnose host prerequisites without starting or repairing anything.",
+        usage: "microvm doctor [--runtime NAME:VERSION] [--json]",
+        flags: [
+            CLIFlag(name: "--runtime", value: "NAME:VERSION", summary: "Check this runtime selection; defaults to node:22."),
+            CLIFlag(name: "--json", value: nil, summary: "Print the diagnostic report as JSON on stdout."),
+        ],
+        examples: ["microvm doctor", "microvm doctor --runtime node:22 --json"],
+        discussion: """
+        Check platform/backend support, signed CLI entitlement, companions, image hashes, selected runtime, home access, and daemon connectivity.
+        A stopped daemon is normal; a broken listener or held daemon lock without a socket is an error.
+        Findings use stdout in both modes. Required check failures exit 1; valid setup with a stopped daemon exits 0.
+        Does not create the home, start a daemon or guest, download, prepare, or repair artifacts. See docs/cli-doctor.md.
+        """,
+        allowsJSON: true
+    ),
+    CLICommandSpec(
         path: ["inspect"],
         group: .primary,
         summary: "Inspect a sandbox or its retained result.",

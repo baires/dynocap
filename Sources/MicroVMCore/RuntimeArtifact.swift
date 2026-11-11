@@ -115,6 +115,7 @@ func dataDigest(_ data: Data) throws -> String {
 private func portableDigest(file: URL?, data: Data?) throws -> String {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/sha256sum")
+    process.standardError = FileHandle.nullDevice
     let output = Pipe()
     let input = Pipe()
     process.standardOutput = output
