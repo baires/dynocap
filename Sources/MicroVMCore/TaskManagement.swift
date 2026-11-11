@@ -58,25 +58,45 @@ extension TaskManager {
         }
     }
 
-    func cleanupFailedStart(_ id: String) {
+    @discardableResult
+    func cleanupFailedStart(_ id: String) -> Bool {
+        let command = cleanupCommand(id)
         do {
             try destroy(id)
-            try? fm.removeItem(at: dir(id))
+            if fm.fileExists(atPath: dir(id).path) {
+                try fm.removeItem(at: dir(id))
+            }
             release()
+            return true
         } catch {
             condition.lock()
             defer { condition.unlock() }
+            let message = "startup failed; teardown must be retried: \(error). Run `\(command)` to discard it."
             if var record = current, record.id == id {
                 record.phase = "interrupted"
-                record.message = "startup failed; teardown must be retried: \(error)"
+                record.message = message
                 current = record
                 try? save(record)
                 // Keep admission occupied until explicit removal or TTL teardown succeeds.
-            } else {
+                return false
+            }
+            if fm.fileExists(atPath: dir(id).path), var record = try? load(id) {
+                record.phase = "interrupted"
+                record.message = message
+                try? save(record)
                 busy = false
                 condition.broadcast()
+                return false
             }
+            busy = false
+            condition.broadcast()
+            return !fm.fileExists(atPath: dir(id).path)
         }
+    }
+
+    func cleanupCommand(_ id: String) -> String {
+        let name = (current?.id == id ? current?.name : nil) ?? (try? load(id))?.name ?? id
+        return "microvm rm \(name) --force"
     }
 
     func ensureStarting(_ id: String) throws {

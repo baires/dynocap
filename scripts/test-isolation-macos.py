@@ -6,6 +6,7 @@ import pathlib
 import platform
 import socket
 import struct
+import signal
 import subprocess
 import tempfile
 import time
@@ -116,6 +117,75 @@ def main():
                         time.sleep(0.05)
                     assert not (home / "vms/noisy").exists(), "unread output prevented TTL teardown: " + (home / "vms/noisy/state.json").read_text()
                 print("PASS: unread noisy output cannot prevent TTL teardown", flush=True)
+
+                cli("runtime", "prepare", str(repo), "--runtime", "node:22", timeout=180)
+                print("PASS: runtime prepared for interruption check", flush=True)
+                kept = home / "tasks" / "task-kept" / "result"
+                kept.mkdir(parents=True)
+                (kept / "changes.patch").write_text("kept")
+                now = int(time.time())
+                (home / "tasks" / "task-kept" / "task.json").write_text(json.dumps({
+                    "id": "task-kept", "name": "kept", "phase": "completed", "runtimeDigest": "digest",
+                    "createdAtUnix": now, "expiresAtUnix": now + 86400, "resultDirectory": str(kept),
+                    "network": "none", "commands": [], "logBytes": 0, "timingsMS": {},
+                }))
+                project = home / "project"
+                project.mkdir()
+                (project / "hello.txt").write_text("alpha\n")
+                clone = subprocess.Popen(
+                    prefix + ["clone", str(project), "cancelled", "--memory", "256", "--cpus", "1", "--ttl", "120"],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                saw_task = False
+                deadline = time.monotonic() + 30
+                while time.monotonic() < deadline and clone.poll() is None:
+                    if (home / "tasks").exists() and any(path.name != "task-kept" for path in (home / "tasks").iterdir()):
+                        saw_task = True
+                        break
+                    time.sleep(0.05)
+                if not saw_task:
+                    out, err = clone.communicate(timeout=20)
+                    raise AssertionError(f"clone ended before a sandbox existed: {clone.returncode}\n{err}\n{out}")
+                try:
+                    clone.send_signal(signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                out, err = clone.communicate(timeout=90)
+                deadline = time.monotonic() + 30
+                settled = None
+                while time.monotonic() < deadline:
+                    leftovers = [path for path in (home / "tasks").iterdir() if path.name != "task-kept"]
+                    if not leftovers:
+                        settled = []
+                        break
+                    readable = []
+                    for path in leftovers:
+                        task_file = path / "task.json"
+                        if not task_file.is_file():
+                            continue
+                        try:
+                            record = json.loads(task_file.read_text())
+                        except (OSError, json.JSONDecodeError):
+                            continue
+                        if record.get("phase") == "interrupted":
+                            readable.append(record)
+                    if len(readable) == len(leftovers):
+                        settled = readable
+                        break
+                    time.sleep(0.05)
+                if settled is None:
+                    raise AssertionError(f"interrupted creation did not settle\n{err}\n{out}")
+                assert (kept / "changes.patch").read_text() == "kept"
+                assert (home / "vms" / "offline").exists() and (home / "vms" / "online").exists()
+                if settled:
+                    reported = (settled[0].get("message") or "") + err + out
+                    assert "microvm rm cancelled --force" in reported, reported
+                    assert settled[0]["name"] == "cancelled"
+                    cli("rm", "cancelled", "--force")
+                    assert not any(path.name != "task-kept" for path in (home / "tasks").iterdir())
+                vm_names = {path.name for path in (home / "vms").iterdir()} if (home / "vms").exists() else set()
+                assert vm_names <= {"offline", "online"}, vm_names
+                assert (kept / "changes.patch").read_text() == "kept"
+                print("PASS: interrupted creation cleans up or reports microvm rm cancelled --force", flush=True)
 
                 cli("destroy", "offline")
                 cli("destroy", "online")

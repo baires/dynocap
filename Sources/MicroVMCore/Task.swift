@@ -195,7 +195,10 @@ final class TaskManager {
         condition.broadcast()
         condition.unlock()
     }
-    func start(_ command: TaskCommand, progress: (CreationStage) -> Void = { _ in }) throws -> TaskRecord {
+    func start(
+        _ command: TaskCommand, cancellation: CreationCancellation = CreationCancellation(),
+        progress: (CreationStage) -> Void = { _ in }
+    ) throws -> TaskRecord {
         let started = ProcessInfo.processInfo.systemUptime
         var timings: [String: Double] = [:]
         var mark = started
@@ -210,17 +213,15 @@ final class TaskManager {
         let runtime = try RuntimeArtifact.directory(command.runtimes, home: paths.home, arch: arch)
         let artifact = try RuntimeArtifact.resolve(command.runtimes, directory: runtime, arch: arch)
         try RuntimeArtifact.verifyFiles(artifact, directory: runtime)
+        try rejectCreationCancellation(cancellation, stage: "admission", name: command.name, id: nil)
         try reserveName(command.name)
         defer { releaseNameReservation(command.name) }
         try admit()
         let id = "task-" + UUID().uuidString.lowercased()
         let directory = dir(id)
         var completed = false
-        defer {
-            if !completed {
-                cleanupFailedStart(id)
-            }
-        }
+        do {
+        try rejectCreationCancellation(cancellation, stage: "admission", name: command.name, id: id)
         try fm.createDirectory(at: directory, withIntermediateDirectories: true)
         let input = directory.appendingPathComponent("import.tar")
         let baseline = directory.appendingPathComponent("baseline")
@@ -249,6 +250,7 @@ final class TaskManager {
             }
         }
         measured("snapshot")
+        try rejectCreationCancellation(cancellation, stage: "import", name: command.name, id: id)
         progress(.creatingWorkspace)
         let disk = directory.appendingPathComponent("workspace.ext4")
         _ = try hostTree("microvm-mkruntime", ["workspace", disk.path], nil, nil)
@@ -276,7 +278,9 @@ final class TaskManager {
             request.filteredRepositoryHost = FilteredEgress.repositoryHost(repo.url)
         }
         progress(.booting)
+        try rejectCreationCancellation(cancellation, stage: "boot", name: command.name, id: id)
         _ = try boot(request)
+        try rejectCreationCancellation(cancellation, stage: "boot", name: command.name, id: id)
         measured("boot")
         if record.network == .nat || record.network == .filtered {
             progress(.waitingForNetwork)
@@ -328,8 +332,20 @@ final class TaskManager {
             throw error
         }
         condition.unlock()
+        try rejectCreationCancellation(cancellation, stage: "successful creation", name: command.name, id: id)
         completed = true
         return record
+        } catch {
+            if !completed, !cleanupFailedStart(id) {
+                let target = command.name ?? id
+                let detail = (error as? MicroVMError)?.message ?? String(describing: error)
+                throw MicroVMError(
+                    "\(detail) Sandbox \(target) (\(id)) remains after failed cleanup.",
+                    recovery: "Run `microvm rm \(target) --force` to discard it. "
+                        + "Other sandboxes and retained results were not removed.")
+            }
+            throw error
+        }
     }
     func begin(_ name: String, argv: [String], env: [String] = []) throws -> Int? {
         condition.lock()

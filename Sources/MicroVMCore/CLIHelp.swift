@@ -158,6 +158,8 @@ let cliCommandSpecs: [CLICommandSpec] = [
         discussion: networkChoice
             + " Names match [A-Za-z0-9][A-Za-z0-9._-]* and cannot start with task- or runtime-."
             + " Creation reports runtime, network, and remaining TTL; expiration discards unexported edits."
+            + " Interrupting creation removes that attempt or reports `microvm rm NAME --force` if cleanup fails."
+            + " Other sandboxes and retained results stay."
             + " Human progress uses stderr; JSON suppresses it. See docs/cli-creation.md for result schemas.",
         allowsJSON: true
     ),

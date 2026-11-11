@@ -115,6 +115,8 @@ public final class Daemon {
 
     private func handle(_ fd: Int32) {
         defer { _ = closeFD(fd) }
+        let creationWatch = CreationClientWatch()
+        defer { creationWatch.stop() }
         do {
             let message = try ControlCodec.read(fd)
             switch message {
@@ -132,11 +134,16 @@ public final class Daemon {
                     ) {
                         throw MicroVMError(message)
                     }
-                    let record = try tasks.start(command) { stage in
+                    creationWatch.start(fd)
+                    let record = try tasks.start(command, cancellation: creationWatch.cancellation) { stage in
                         if command.reportProgress == true {
                             try? ControlCodec.write(fd, .stderr(Data((stage.rawValue + "\n").utf8)))
                         }
                     }
+                    if creationWatch.cancellation.isCancelled {
+                        try discardCancelledCreation(tasks, record)
+                    }
+                    creationWatch.created = record
                     data = try JSONEncoder().encode(TaskDescriptor(record, sandbox: store.load(record.id)))
                 case "finish":
                     guard let id = command.id else { throw MicroVMError("task id required") }
@@ -170,7 +177,29 @@ public final class Daemon {
                 case "runtimeVerify": data = try JSONEncoder().encode(tasks.verifyRuntime(command.runtimes))
                 default: throw MicroVMError("unknown task operation")
                 }
-                try ControlCodec.write(fd, .result(data))
+                if let record = creationWatch.created, creationWatch.cancellation.isCancelled {
+                    creationWatch.created = nil
+                    try discardCancelledCreation(tasks, record)
+                }
+                do {
+                    try ControlCodec.write(fd, .result(data))
+                } catch {
+                    if let record = creationWatch.created {
+                        creationWatch.created = nil
+                        let target = record.name ?? record.id
+                        if !tasks.cleanupFailedStart(record.id) {
+                            throw MicroVMError(
+                                "creation result was not delivered and sandbox \(target) (\(record.id)) remains",
+                                recovery: "Run `microvm rm \(target) --force` to discard it. "
+                                    + "Other sandboxes and retained results were not removed.")
+                        }
+                        throw MicroVMError(
+                            "creation result was not delivered",
+                            recovery: "The partial sandbox was removed. Other sandboxes and retained results were left in place.")
+                    }
+                    throw error
+                }
+                creationWatch.created = nil
             case .transfer(let command):
                 try transfer(command)
                 try ControlCodec.write(fd, .result(try JSONEncoder().encode(OKResult(ok: true))))
