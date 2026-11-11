@@ -183,10 +183,10 @@ public final class Daemon {
                 try ControlCodec.write(fd, .result(try JSONEncoder().encode(OKResult(ok: true))))
                 DispatchQueue.global().async { [weak self] in self?.stop() }
             case .result, .stdout, .stderr, .exit, .error:
-                try ControlCodec.write(fd, .error("clients cannot send response frames"))
+                try ControlCodec.write(fd, .error(daemonErrorText(MicroVMError("clients cannot send response frames"))))
             }
         } catch {
-            try? ControlCodec.write(fd, .error(String(describing: error)))
+            try? ControlCodec.write(fd, .error(daemonErrorText(error)))
         }
     }
 
@@ -237,7 +237,7 @@ public final class Daemon {
             try store.remove(record.id)
         } else {
             try validateVMName(target)
-            guard try store.load(target) != nil else { throw MicroVMError("sandbox or task not found: \(target)") }
+            guard try store.load(target) != nil else { throw MicroVMError("sandbox or task not found: \(target)", code: .notFound) }
             tasks.namespace.lock()
             defer { tasks.namespace.unlock() }
             let lifecycle = lifecycle(target)
@@ -371,14 +371,14 @@ public final class Daemon {
         var locked = true
         defer { if locked { lifecycle.lock.unlock() } }
         guard let record = try store.load(command.name) else {
-            throw MicroVMError("no VM named \(command.name)")
+            throw MicroVMError("sandbox not found: \(command.name)", code: .notFound)
         }
         guard record.phase == .running else {
-            throw MicroVMError("VM \(command.name) is \(record.phase.rawValue)")
+            throw MicroVMError("sandbox \(command.name) is \(record.phase.rawValue)", code: .invalidPhase)
         }
         if vmIsExpired(record, now: unixNow()) {
             try destroyLocked(command.name, lifecycle: lifecycle, reason: "sandbox lifetime expired")
-            throw MicroVMError("sandbox lifetime expired")
+            throw MicroVMError("sandbox \(command.name) lifetime expired", code: .invalidPhase)
         }
         if let message = NetworkAdmission.rejection(
             network: record.network, requireOffline: command.requireOffline == true,
@@ -387,7 +387,7 @@ public final class Daemon {
         ) {
             throw MicroVMError(message)
         }
-        guard let live = lifecycle.live else { throw MicroVMError("sandbox is not owned by this daemon") }
+        guard let live = lifecycle.live else { throw MicroVMError("sandbox \(command.name) is not owned by this daemon", code: .invalidPhase) }
         lock.lock()
         nextExecID &+= 1
         if nextExecID == 0 { nextExecID = 1 }
@@ -430,7 +430,7 @@ public final class Daemon {
             if state.markFinished() {
                 // A caller that stops reading output must not prevent host teardown.
                 DispatchQueue.global().async {
-                    send(.error(reason), terminal: true)
+                    send(.error(daemonErrorText(MicroVMError(reason))), terminal: true)
                     sem.signal()
                 }
             }
@@ -446,7 +446,7 @@ public final class Daemon {
                         taskError = String(describing: error)
                         self.backend.cancelExec(name: command.name, id: id)
                         if state.markFinished() {
-                            send(.error(taskError!), terminal: true)
+                            send(.error(daemonErrorText(MicroVMError(taskError!))), terminal: true)
                             sem.signal()
                         }
                         DispatchQueue.global().async { try? self.destroyVM(command.name) }
@@ -461,7 +461,7 @@ public final class Daemon {
                         taskError = String(describing: error)
                         self.backend.cancelExec(name: command.name, id: id)
                         if state.markFinished() {
-                            send(.error(taskError!), terminal: true)
+                            send(.error(daemonErrorText(MicroVMError(taskError!))), terminal: true)
                             sem.signal()
                         }
                         DispatchQueue.global().async { try? self.destroyVM(command.name) }
@@ -476,7 +476,7 @@ public final class Daemon {
             case .failed(let message):
                 if state.markFinished() {
                     taskError = message
-                    send(.error(message), terminal: true)
+                    send(.error(daemonErrorText(MicroVMError(message))), terminal: true)
                     sem.signal()
                 }
             }
@@ -491,7 +491,8 @@ public final class Daemon {
                 lifecycle.lock.lock()
                 if lifecycle.live === live { self.backend.cancelExec(name: command.name, id: id) }
                 lifecycle.lock.unlock()
-                send(.error("timed out after \(command.timeoutSeconds)s"), terminal: true)
+                send(.error(daemonErrorText(MicroVMError(
+                    "exec in \(command.name) timed out after \(command.timeoutSeconds)s", exitCode: 124, code: .commandTimeout))), terminal: true)
                 sem.signal()
             }
         }
@@ -767,7 +768,7 @@ public struct DaemonClient {
         guard case .result(let data) = reply,
             let capability = try? JSONDecoder().decode(PolicyCapabilities.self, from: data), capability.taskVersion == 1
         else {
-            throw MicroVMError("daemon lacks task v1; rebuild and manually restart the daemon before creating tasks")
+            throw MicroVMError("daemon lacks task v1; rebuild and manually restart the daemon before creating tasks", code: .incompatibleDaemon)
         }
     }
     public func requireTaskManagement() throws {
@@ -775,7 +776,7 @@ public struct DaemonClient {
         guard case .result(let data) = reply,
               let capabilities = try? JSONDecoder().decode(PolicyCapabilities.self, from: data),
               capabilities.taskManagementVersion == 1 else {
-            throw MicroVMError("daemon lacks task management v1; rebuild and restart it")
+            throw MicroVMError("daemon lacks task management v1; rebuild and restart it", code: .incompatibleDaemon)
         }
     }
     public func task(_ command: TaskCommand) throws -> Data {
@@ -789,7 +790,7 @@ public struct DaemonClient {
     }
 
     public func ping() throws {
-        let fd = try POSIX.connectUnix(socketPath)
+        let fd = try connect()
         defer { _ = closeFD(fd) }
         try ControlCodec.write(fd, .ping)
         let reply = try ControlCodec.read(fd)
@@ -803,7 +804,7 @@ public struct DaemonClient {
             capability.ok, capability.isolationPolicyVersion == IsolationPolicy.version
         else {
             throw MicroVMError(
-                "daemon lacks isolation policy v1; rebuild microvm and manually restart the daemon before creating sandboxes")
+                "daemon lacks isolation policy v1; rebuild microvm and manually restart the daemon before creating sandboxes", code: .incompatibleDaemon)
         }
     }
 
@@ -832,7 +833,7 @@ public struct DaemonClient {
         onStderr: (Data) -> Void = { _ in }
     ) throws -> ExecOutcome {
         if command.requireOffline == true { try requirePolicy() }
-        let fd = try POSIX.connectUnix(socketPath)
+        let fd = try connect()
         defer { _ = closeFD(fd) }
         try ControlCodec.write(fd, .exec(command))
         var stdout = Data()
@@ -849,16 +850,21 @@ public struct DaemonClient {
             case .exit(let code, let signal):
                 return ExecOutcome(code: code, signal: signal, stdout: stdout, stderr: stderr)
             case .error(let text):
-                let code: Int32 = text.contains("timed out") ? 124 : 1
-                throw MicroVMError(text, exitCode: code)
+                throw daemonError(text)
             default:
                 throw MicroVMError("unexpected exec reply")
             }
         }
     }
 
+    private func connect() throws -> Int32 {
+        do { return try POSIX.connectUnix(socketPath) } catch {
+            throw MicroVMError("cannot connect to daemon at \(socketPath)", code: .daemonUnavailable)
+        }
+    }
+
     private func roundTrip(_ message: ControlMessage) throws -> ControlMessage {
-        let fd = try POSIX.connectUnix(socketPath)
+        let fd = try connect()
         defer { _ = closeFD(fd) }
         try ControlCodec.write(fd, message)
         return try ControlCodec.read(fd)
@@ -866,7 +872,7 @@ public struct DaemonClient {
 
     private func messageError(_ message: ControlMessage) -> Error {
         if case .error(let text) = message {
-            return MicroVMError(text)
+            return daemonError(text)
         }
         return MicroVMError("unexpected daemon reply")
     }

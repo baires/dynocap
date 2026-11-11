@@ -26,7 +26,7 @@ extension TaskManager {
     func resolve(_ target: String) throws -> TaskRecord {
         try validateVMName(target)
         if let record = try records().first(where: { $0.id == target || $0.name == target }) { return record }
-        throw MicroVMError("project task not found: \(target); diff and finish require a project task")
+        throw MicroVMError("project task not found: \(target); diff and finish require a project task", code: .notFound)
     }
 
     func reserveName(_ name: String?) throws {
@@ -37,7 +37,9 @@ extension TaskManager {
         guard !reservedNames.contains(name), !(try records()).contains(where: { $0.name == name }),
             !(try StateStore(paths: paths).list()).contains(where: { $0.name == name })
         else {
-            throw MicroVMError("name already exists: \(name); remove it before reuse")
+            throw MicroVMError(
+                "name already exists: \(name)",
+                recovery: "Choose another name; run microvm ls to inspect the existing sandbox or retained result.")
         }
         reservedNames.insert(name)
     }

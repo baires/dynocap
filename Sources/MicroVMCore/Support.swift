@@ -6,16 +6,63 @@ import Darwin
 import Glibc
 #endif
 
-public struct MicroVMError: Error, Equatable, CustomStringConvertible {
+public enum MicroVMErrorCode: String, Codable {
+    case usage = "invalid_usage"
+    case operationFailed = "operation_failed"
+    case notFound = "not_found"
+    case invalidPhase = "invalid_phase"
+    case daemonUnavailable = "daemon_unavailable"
+    case commandTimeout = "command_timeout"
+    case incompatibleDaemon = "incompatible_daemon"
+
+    public var recovery: String {
+        switch self {
+        case .usage: return "Run microvm help to find the command, then microvm COMMAND --help to check its arguments."
+        case .notFound: return "Run microvm ls to find an available sandbox name or ID."
+        case .invalidPhase: return "Run microvm ls to check the phase; create a new sandbox if it has stopped."
+        case .daemonUnavailable: return "Check the selected --home and daemon.log; run microvm daemon --home PATH to diagnose startup."
+        case .commandTimeout: return "Retry with a larger --timeout while the sandbox TTL still permits it."
+        case .incompatibleDaemon: return "Rebuild microvm and manually restart the daemon with the matching binary."
+        case .operationFailed: return "Check the operation's inputs and prerequisites; use --verbose for diagnostic context."
+        }
+    }
+}
+
+public struct MicroVMError: Error, Equatable, CustomStringConvertible, Codable {
     public var message: String
     public var exitCode: Int32
+    public var code: MicroVMErrorCode
+    public var recovery: String
 
-    public init(_ message: String, exitCode: Int32 = 1) {
+    public init(_ message: String, exitCode: Int32 = 1, code: MicroVMErrorCode? = nil, recovery: String? = nil) {
         self.message = message
         self.exitCode = exitCode
+        self.code = code ?? (exitCode == 2 ? .usage : .operationFailed)
+        self.recovery = recovery ?? self.code.recovery
     }
 
     public var description: String { message }
+}
+
+/// Error frames remain UTF-8. New daemons carry versioned typed metadata in that payload.
+func daemonErrorText(_ error: Error) -> String {
+    let failure = error as? MicroVMError ?? MicroVMError("The daemon operation failed.")
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+    guard let data = try? encoder.encode(failure), let text = String(data: data, encoding: .utf8) else {
+        return failure.message
+    }
+    return "microvm-error-v1:" + text
+}
+
+func daemonError(_ text: String) -> MicroVMError {
+    let prefix = "microvm-error-v1:"
+    if text.hasPrefix(prefix),
+       let error = try? JSONDecoder().decode(MicroVMError.self, from: Data(text.dropFirst(prefix.count).utf8)) {
+        return error
+    }
+    // Older daemons provide no reliable classification. Never infer status from prose.
+    return MicroVMError(text)
 }
 
 public enum MicroVMInfo {

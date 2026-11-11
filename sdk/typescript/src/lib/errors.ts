@@ -17,6 +17,35 @@ export function classifyDaemonMessage(
   message: string,
   exec: boolean
 ): SandboxError {
+  const prefix = "microvm-error-v1:";
+  if (message.startsWith(prefix)) {
+    try {
+      const failure: unknown = JSON.parse(message.slice(prefix.length));
+      if (
+        typeof failure === "object" &&
+        failure !== null &&
+        "code" in failure &&
+        "message" in failure &&
+        typeof failure.message === "string"
+      ) {
+        const kind =
+          failure.code === "not_found"
+            ? "not_found"
+            : failure.code === "command_timeout"
+              ? "timeout"
+              : "daemon";
+        return new SandboxError(
+          kind,
+          failure.message,
+          kind === "timeout" && exec ? 124 : 1
+        );
+      }
+    } catch {
+      // Malformed envelopes are ordinary daemon failures, never timeout guesses.
+    }
+    return new SandboxError("daemon", "invalid daemon error response");
+  }
+  // Legacy daemon compatibility stays confined to the SDK. The CLI does not guess.
   if (message.includes("no VM named")) {
     return new SandboxError("not_found", message, 1);
   }

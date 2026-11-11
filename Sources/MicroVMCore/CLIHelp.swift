@@ -45,18 +45,7 @@ func knownFlag(_ path: [String], _ name: String) -> Bool {
 /// True when `--verbose` is a CLI flag on an invocation that failed before a command was accepted.
 /// Successful parses use `CLIInvocation.verbose`, which understands the guest-argument boundary.
 public func invocationRequestsVerbose(_ args: [String]) -> Bool {
-    var index = 1
-    while index < args.count {
-        let token = args[index]
-        if token == "--" { break }
-        if token == "--verbose" { return true }
-        if token == "--home" {
-            index += 2
-            continue
-        }
-        index += 1
-    }
-    return false
+    cliFailureOptions(args).verbose
 }
 
 public var helpText: String { commandHelp([]) }
@@ -181,7 +170,8 @@ let cliCommandSpecs: [CLICommandSpec] = [
         Human-readable columns are the default, including when redirected. Narrow terminals use wrapped labeled entries.
         TTL is the sandbox deadline; RETENTION is the independent retained-record/result deadline, measured from creation.
         A dash means unavailable or not applicable. JSON is an array with explicit nulls and Unix-second deadlines;
-        see docs/cli-json.md. Output is plain text without color or paging.
+        see docs/cli-json.md. JSON failures use stderr; see docs/cli-errors.md.
+        Human output is plain text without color or paging.
         """,
         allowsJSON: true
     ),
@@ -456,7 +446,7 @@ GLOBAL OPTIONS
   --home PATH
         Use this directory instead of MICROVM_HOME. It may appear before or after the subcommand.
   --verbose
-        On failure, repeat the process exit status on stderr.
+        On failure, include safe error code, operation, source, and exit status diagnostics on stderr.
   -h, --help
         Show help for the current command and exit.
   --version

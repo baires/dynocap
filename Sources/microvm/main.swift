@@ -16,22 +16,17 @@ struct Main {
             do {
                 try dispatch(invocation, CommandLine.arguments)
             } catch {
-                fail(error, verbose: invocation.verbose)
+                fail(error, invocation: invocation)
             }
         } catch {
-            fail(error, verbose: invocationRequestsVerbose(CommandLine.arguments))
+            fail(error)
         }
     }
 
-    static func fail(_ error: Error, verbose: Bool) -> Never {
-        let micro = error as? MicroVMError
-        let message = micro?.message ?? String(describing: error)
-        let code = micro?.exitCode ?? 1
-        fputs("microvm: \(message)\n", stderr)
-        if verbose {
-            fputs("microvm: exit \(code)\n", stderr)
-        }
-        exit(code)
+    static func fail(_ error: Error, invocation: CLIInvocation? = nil) -> Never {
+        let result = formatCLIFailure(error, invocation: invocation, arguments: CommandLine.arguments)
+        fputs(result.text, stderr)
+        exit(result.exitCode)
     }
 
     static func dispatch(_ invocation: CLIInvocation, _ args: [String]) throws {
@@ -143,7 +138,11 @@ struct Main {
 
     static func ready(_ invocation: CLIInvocation) throws -> MicroVMPaths {
         let paths = resolve(invocation)
-        try paths.ensure()
+        do { try paths.ensure() } catch {
+            throw MicroVMError(
+                "cannot access home \(paths.home.path)", code: .operationFailed,
+                recovery: "Choose a writable directory with --home PATH and retry.")
+        }
         try ensureDaemon(paths: paths, home: invocation.home)
         return paths
     }
@@ -172,13 +171,15 @@ struct Main {
             proc.standardError = log
         }
         proc.standardInput = FileHandle(forReadingAtPath: "/dev/null")
-        try proc.run()
+        do { try proc.run() } catch {
+            throw MicroVMError("could not start daemon for home \(paths.home.path)", code: .daemonUnavailable)
+        }
         let deadline = Date().addingTimeInterval(5)
         while Date() < deadline {
             if (try? client.ping()) != nil { return }
             usleep(50_000)
         }
-        throw MicroVMError("daemon did not become ready; see \(paths.log.path)")
+        throw MicroVMError("daemon did not become ready; see \(paths.log.path)", code: .daemonUnavailable)
     }
 
     static func makeBackend() -> VMBackend {

@@ -83,6 +83,7 @@ export async function fakeDaemon(
 }
 
 type FakeBehavior = {
+  execError: string;
   policyVersion: number | null;
   taskVersion: number | null;
   taskManagementVersion: number | null;
@@ -244,6 +245,10 @@ function handle(
         const recorded = sandboxes.get(name);
         if (!recorded) {
           writeFrame(socket, 20, Buffer.from(`no VM named ${name}`));
+          return;
+        }
+        if (behavior.execError !== undefined) {
+          writeFrame(socket, 20, Buffer.from(behavior.execError));
           return;
         }
         const network = behavior.execNetwork ?? recorded.network;
