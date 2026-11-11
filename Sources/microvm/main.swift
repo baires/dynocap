@@ -39,19 +39,11 @@ struct Main {
         case .ls:
             let paths = try ready(invocation)
             let data = try DaemonClient(socketPath: paths.socket.path).task(TaskCommand(op: "entries"))
+            let entries = try JSONDecoder().decode([ManagedEntry].self, from: data)
             if invocation.output == .json {
-                print(String(data: data, encoding: .utf8) ?? "")
+                print(try formatSandboxListJSON(entries), terminator: "")
             } else {
-                let entries = try JSONDecoder().decode([ManagedEntry].self, from: data)
-                print("NAME\tID\tKIND\tPHASE\tRUNTIME\tNETWORK\tEXPIRES\tRESULT")
-                for entry in entries {
-                    print(
-                        [
-                            entry.name ?? "-", entry.id, entry.kind, entry.phase, entry.runtime,
-                            entry.network?.rawValue ?? "unknown", entry.expiresAtUnix.map(String.init) ?? "-",
-                            entry.resultDirectory ?? "-",
-                        ].joined(separator: "\t"))
-                }
+                print(formatSandboxList(entries, now: unixNow(), width: listingWidth()), terminator: "")
             }
         case .managed(let command):
             let paths = try ready(invocation)
@@ -132,6 +124,14 @@ struct Main {
             try DaemonClient(socketPath: paths.socket.path).destroy(name)
             print("destroyed \(name)")
         }
+    }
+
+    static func listingWidth() -> Int {
+        var size = winsize()
+        guard isatty(STDOUT_FILENO) == 1, ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == 0, size.ws_col > 0 else {
+            return 120
+        }
+        return Int(size.ws_col)
     }
 
     static func resolve(_ invocation: CLIInvocation) -> MicroVMPaths {

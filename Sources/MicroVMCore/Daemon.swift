@@ -213,13 +213,20 @@ public final class Daemon {
                     guard vm.phase == .booting || vm.phase == .running || vm.phase == .stopping else { return nil as Int64? }
                     return vm.ttlSeconds.map { vm.createdAtUnix + Int64($0) }
                 } ?? record.expiresAtUnix,
-                resultDirectory: record.resultDirectory)
+                resultDirectory: record.resultDirectory,
+                sandboxExpiresAtUnix: byID[record.id].flatMap { vm in
+                    guard vm.phase == .booting || vm.phase == .running || vm.phase == .stopping else { return nil as Int64? }
+                    return vm.ttlSeconds.map { vm.createdAtUnix + Int64($0) }
+                },
+                resultExpiresAtUnix: record.expiresAtUnix)
         }
         let raw = sandboxes.filter { !ids.contains($0.name) }.map { record in
             ManagedEntry(
                 id: record.name, name: record.name, kind: "sandbox", phase: record.phase.rawValue,
                 runtime: "minimal", network: record.network,
-                expiresAtUnix: record.ttlSeconds.map { record.createdAtUnix + Int64($0) })
+                expiresAtUnix: record.ttlSeconds.map { record.createdAtUnix + Int64($0) },
+                sandboxExpiresAtUnix: [.booting, .running, .stopping].contains(record.phase)
+                    ? record.ttlSeconds.map { record.createdAtUnix + Int64($0) } : nil)
         }
         return (projects + raw).sorted { ($0.name ?? $0.id) < ($1.name ?? $1.id) }
     }

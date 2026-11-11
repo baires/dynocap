@@ -9,6 +9,8 @@ public struct ManagedEntry: Codable {
     public var network: NetworkMode?
     public var expiresAtUnix: Int64?
     public var resultDirectory: String?
+    public var sandboxExpiresAtUnix: Int64?
+    public var resultExpiresAtUnix: Int64?
 }
 
 extension TaskManager {

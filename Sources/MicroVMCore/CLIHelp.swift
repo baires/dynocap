@@ -177,7 +177,12 @@ let cliCommandSpecs: [CLICommandSpec] = [
             "microvm ls --json",
             "microvm --json ls",
         ],
-        discussion: "Human-readable columns are the default, including when stdout is not a terminal.",
+        discussion: """
+        Human-readable columns are the default, including when redirected. Narrow terminals use wrapped labeled entries.
+        TTL is the sandbox deadline; RETENTION is the independent retained-record/result deadline, measured from creation.
+        A dash means unavailable or not applicable. JSON is an array with explicit nulls and Unix-second deadlines;
+        see docs/cli-json.md. Output is plain text without color or paging.
+        """,
         allowsJSON: true
     ),
     CLICommandSpec(

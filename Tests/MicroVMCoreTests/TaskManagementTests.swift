@@ -160,6 +160,21 @@ final class TaskManagementTests: XCTestCase {
         let entries = try JSONDecoder().decode([ManagedEntry].self, from: client.task(TaskCommand(op: "entries")))
         XCTAssertEqual(entries.count, 2)
         XCTAssertEqual(entries.filter { $0.kind == "task" }.map(\.name), ["interview"])
+        let project = try XCTUnwrap(entries.first { $0.kind == "task" })
+        let sandbox = try XCTUnwrap(entries.first { $0.kind == "sandbox" })
+        let record = try JSONDecoder().decode(
+            TaskRecord.self, from: Data(contentsOf: root.appendingPathComponent("tasks/task-old/task.json")))
+        XCTAssertEqual(project.resultExpiresAtUnix, record.expiresAtUnix)
+        XCTAssertNil(project.sandboxExpiresAtUnix)
+        XCTAssertNil(sandbox.sandboxExpiresAtUnix)
+        XCTAssertNil(sandbox.resultExpiresAtUnix)
+        var live = try XCTUnwrap(store.load("task-old"))
+        live.phase = .running
+        try store.save(live)
+        let liveEntries = try JSONDecoder().decode([ManagedEntry].self, from: client.task(TaskCommand(op: "entries")))
+        let liveProject = try XCTUnwrap(liveEntries.first { $0.kind == "task" })
+        XCTAssertEqual(liveProject.sandboxExpiresAtUnix, live.createdAtUnix + 60)
+        XCTAssertEqual(liveProject.resultExpiresAtUnix, record.expiresAtUnix)
         var remove = TaskCommand(op: "remove")
         remove.id = "raw"
         _ = try client.task(remove)
