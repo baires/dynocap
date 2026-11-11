@@ -32,7 +32,7 @@ public func parseCommand(_ args: [String]) throws -> CLIInvocation {
     case "clone":
         let command = try parseClone(commandArgs, &prefix)
         return try finishParse(prefix, ["clone"], .managed(command))
-    case "finish", "rm", "diff":
+    case "finish", "rm", "diff", "inspect":
         let command = try parseNamed(sub, commandArgs, &prefix)
         return try finishParse(prefix, [sub], .managed(command))
     case "runtime":

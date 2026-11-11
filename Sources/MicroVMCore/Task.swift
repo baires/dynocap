@@ -41,6 +41,7 @@ public struct TaskRecord: Codable {
     public var createdAtUnix: Int64
     public var expiresAtUnix: Int64
     public var resultDirectory: String?
+    public var sourcePath: String?
     public var sourceUrl: String?
     public var sourceRevision: String?
     public var network: NetworkMode
@@ -251,6 +252,8 @@ final class TaskManager {
             id: id, name: command.name, runtimes: artifact.runtimes, phase: "starting", runtimeDigest: artifact.artifactDigest,
             createdAtUnix: unixNow(),
             expiresAtUnix: unixNow() + 7 * 86400, network: command.network ?? NetworkMode.none)
+        if case .directory(let path) = resolved { record.sourcePath = path }
+        record.sourceUrl = sourceURL
         do {
             namespace.lock()
             defer { namespace.unlock() }

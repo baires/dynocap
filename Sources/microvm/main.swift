@@ -50,6 +50,9 @@ struct Main {
                 let descriptor = try JSONDecoder().decode(TaskDescriptor.self, from: data)
                 print(try formatCreationResult(
                     descriptor, command: command, home: paths.home, output: invocation.output, now: unixNow()), terminator: "")
+            } else if command.op == "inspect" {
+                let inspection = try JSONDecoder().decode(SandboxInspection.self, from: data)
+                print(try formatInspection(inspection, output: invocation.output, now: unixNow(), arguments: args), terminator: "")
             } else if command.op == "diff" {
                 let preview = try JSONDecoder().decode(TaskPreview.self, from: data)
                 let file = try FileHandle(forReadingFrom: URL(fileURLWithPath: preview.patchPath))

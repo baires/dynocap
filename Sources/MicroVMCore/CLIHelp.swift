@@ -184,6 +184,21 @@ let cliCommandSpecs: [CLICommandSpec] = [
         allowsJSON: true
     ),
     CLICommandSpec(
+        path: ["inspect"],
+        group: .primary,
+        summary: "Inspect a sandbox or its retained result.",
+        usage: "microvm inspect NAME_OR_ID [--json]",
+        flags: [CLIFlag(name: "--json", value: nil, summary: "Print a documented inspection object on stdout.")],
+        examples: ["microvm inspect demo", "microvm inspect task-example --json"],
+        discussion: """
+        Show identity, source, phase, runtime, network, independent sandbox/retention deadlines, and available result artifacts.
+        Retention expires seven days after task creation, not seven days after finish. Missing information is reported as unavailable.
+        Interrupted work cannot be resumed; unexported edits are discarded when the sandbox is lost.
+        Inspection does not run guest commands, export, renew TTL, or extend retention. See docs/cli-inspect.md for JSON fields.
+        """,
+        allowsJSON: true
+    ),
+    CLICommandSpec(
         path: ["exec"],
         group: .primary,
         summary: "Run a command in a sandbox.",
@@ -369,6 +384,7 @@ private func topLevelHelp() -> String {
       microvm runtime prepare ./project --runtime node:22
       microvm clone ./project demo
       microvm ls
+      microvm inspect demo
       microvm exec demo -- npm test
       microvm exec demo -- uname -a
       microvm diff demo

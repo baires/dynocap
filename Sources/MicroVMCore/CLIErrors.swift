@@ -64,7 +64,7 @@ func cliFailureOptions(_ args: [String]) -> CLIFailureOptions {
     return CLIFailureOptions(json: json, verbose: verbose, secrets: secrets)
 }
 
-private func safeDiagnostic(_ text: String, secrets: [String]) -> String {
+func safeDiagnostic(_ text: String, secrets: [String]) -> String {
     var result = text
     for secret in secrets.filter({ !$0.isEmpty }).sorted(by: { $0.count > $1.count }) {
         result = result.replacingOccurrences(of: secret, with: "<redacted>")

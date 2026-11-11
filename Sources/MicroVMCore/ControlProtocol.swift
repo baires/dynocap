@@ -206,6 +206,7 @@ public struct ExecOutcome: Equatable {
 public struct PolicyCapabilities: Codable {
     public var ok: Bool = true
     public var isolationPolicyVersion: Int = IsolationPolicy.version
+    public var inspectionVersion: Int? = 1
     public var taskManagementVersion: Int? = 1
     public var taskVersion: Int? = 1
     public var transferVersion: Int? = 1

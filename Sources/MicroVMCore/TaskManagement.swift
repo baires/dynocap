@@ -14,11 +14,11 @@ public struct ManagedEntry: Codable {
 }
 
 extension TaskManager {
-    func records() throws -> [TaskRecord] {
+    func records(now: Int64 = unixNow()) throws -> [TaskRecord] {
         condition.lock()
         defer { condition.unlock() }
         return try fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).compactMap { entry in
-            guard let record = try? load(entry.lastPathComponent), record.expiresAtUnix > unixNow() else { return nil }
+            guard let record = try? load(entry.lastPathComponent), record.expiresAtUnix > now else { return nil }
             return current?.id == record.id ? current : record
         }.sorted { $0.id < $1.id }
     }

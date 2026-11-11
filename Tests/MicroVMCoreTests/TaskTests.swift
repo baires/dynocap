@@ -135,6 +135,7 @@ final class TaskTests: XCTestCase {
         XCTAssertTrue(capability.ok)
         XCTAssertEqual(capability.isolationPolicyVersion, 1)
         XCTAssertNil(capability.taskVersion)
+        XCTAssertNil(capability.inspectionVersion)
     }
 
     func testPublishCreatesMissingCommandLogs() throws {

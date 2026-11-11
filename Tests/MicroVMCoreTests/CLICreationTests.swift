@@ -101,6 +101,7 @@ final class CLICreationTests: XCTestCase {
         command.name = "demo"
         let record = try manager.start(command, progress: { stages.append($0) })
         XCTAssertEqual(record.phase, "running")
+        XCTAssertEqual(record.sourcePath, command.projectPath)
         XCTAssertEqual(record.runtimes, RuntimeArtifact.defaultRuntimes)
         XCTAssertEqual(record.network, .none)
         XCTAssertEqual(stages.first, .checkingRuntime)

@@ -157,6 +157,9 @@ public final class Daemon {
                     guard let target = command.id else { throw MicroVMError("task name or id required") }
                     data = try JSONEncoder().encode(TaskDescriptor(tasks.resolve(target)))
                 case "entries": data = try JSONEncoder().encode(managedEntries())
+                case "inspect":
+                    guard let target = command.id else { throw MicroVMError("sandbox name or id required") }
+                    data = try JSONEncoder().encode(tasks.inspect(target, sandboxes: store.list()))
                 case "remove":
                     guard let target = command.id else { throw MicroVMError("name or id required") }
                     try removeManaged(target, purge: command.purge == true)
@@ -786,8 +789,15 @@ public struct DaemonClient {
     }
     public func task(_ command: TaskCommand, onProgress: ((String) -> Void)? = nil) throws -> Data {
         try requireTasks()
-        if command.name != nil || ["list", "resolve", "entries", "remove", "diff"].contains(command.op) {
+        if command.name != nil || ["list", "resolve", "entries", "remove", "diff", "inspect"].contains(command.op) {
             try requireTaskManagement()
+        }
+        if command.op == "inspect" {
+            let reply = try roundTrip(.ping)
+            guard case .result(let data) = reply,
+                  let capabilities = try? JSONDecoder().decode(PolicyCapabilities.self, from: data), capabilities.inspectionVersion == 1 else {
+                throw MicroVMError("daemon lacks inspection v1", code: .incompatibleDaemon)
+            }
         }
         var request = command
         request.reportProgress = onProgress != nil
