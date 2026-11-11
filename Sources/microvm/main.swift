@@ -72,6 +72,9 @@ struct Main {
             } else if command.op == "inspect" {
                 let inspection = try JSONDecoder().decode(SandboxInspection.self, from: data)
                 print(try formatInspection(inspection, output: invocation.output, now: unixNow(), arguments: args), terminator: "")
+            } else if command.op == "finish" {
+                let descriptor = try JSONDecoder().decode(TaskDescriptor.self, from: data)
+                print(try formatFinishResult(descriptor, output: invocation.output, now: unixNow()), terminator: "")
             } else if command.op == "diff" {
                 let preview = try JSONDecoder().decode(TaskPreview.self, from: data)
                 let file = try FileHandle(forReadingFrom: URL(fileURLWithPath: preview.patchPath))
@@ -116,7 +119,13 @@ struct Main {
                     onStderr: { try? FileHandle.standardError.write(contentsOf: $0) })
                 exit(result.signal > 0 ? 128 + result.signal : result.code)
             }
-            print(String(data: try client.task(command), encoding: .utf8) ?? "")
+            let data = try client.task(command)
+            if command.op == "finish" {
+                let descriptor = try JSONDecoder().decode(TaskDescriptor.self, from: data)
+                print(try formatFinishResult(descriptor, output: invocation.output, now: unixNow()), terminator: "")
+            } else {
+                print(String(data: data, encoding: .utf8) ?? "")
+            }
         case .help(let topic):
             print(commandHelp(topic))
         case .version:

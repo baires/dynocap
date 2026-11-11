@@ -267,13 +267,18 @@ let cliCommandSpecs: [CLICommandSpec] = [
         path: ["finish"],
         group: .primary,
         summary: "Export the result and destroy the sandbox.",
-        usage: "microvm finish NAME_OR_ID",
-        flags: [],
-        examples: ["microvm finish demo"],
+        usage: "microvm finish NAME_OR_ID [--json]",
+        flags: [CLIFlag(name: "--json", value: nil, summary: "Print the documented finish result on stdout.")],
+        examples: ["microvm finish demo", "microvm finish demo --json"],
         discussion: """
-        Finish closes command admission, exports the result, and destroys the sandbox. Repeating it returns \
-        the existing result. It does not modify the host checkout.
-        """
+        Finish closes command admission, exports the result, and destroys the sandbox. Human output reports \
+        the stopped sandbox, patch path, result directory, actual result retention deadline, and a shell-quoted \
+        git apply command. The patch matches the imported baseline, including imported uncommitted changes. \
+        Finish does not modify the host checkout. A guest command failure stays visible as phase failed after \
+        a successful export. Export and teardown failures are separate errors; retry finish while the sandbox \
+        TTL permits. Repeating finish returns the existing result. See docs/cli-finish.md.
+        """,
+        allowsJSON: true
     ),
     CLICommandSpec(
         path: ["rm"],
@@ -380,10 +385,11 @@ let cliCommandSpecs: [CLICommandSpec] = [
         path: ["task", "finish"],
         group: .advanced,
         summary: "Export a project task and destroy its sandbox.",
-        usage: "microvm task finish ID",
-        flags: [],
-        examples: ["microvm task finish demo"],
-        discussion: "Same export and destruction as finish. The argument is the task id."
+        usage: "microvm task finish ID [--json]",
+        flags: [CLIFlag(name: "--json", value: nil, summary: "Print the documented finish result on stdout.")],
+        examples: ["microvm task finish demo", "microvm task finish demo --json"],
+        discussion: "Same export, destruction, and result handoff as finish. The argument is the task id. See docs/cli-finish.md.",
+        allowsJSON: true
     ),
     CLICommandSpec(
         path: ["version"],

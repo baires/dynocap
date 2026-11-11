@@ -431,7 +431,7 @@ final class TaskManager {
         var mark = ProcessInfo.processInfo.systemUptime
         let saved = try load(id)
         if saved.resultDirectory != nil {
-            try destroy(id)
+            try destroyPublished(saved)
             return saved
         }
         condition.lock()
@@ -464,12 +464,12 @@ final class TaskManager {
             let archive = directory.appendingPathComponent("export.tar")
             _ = try execute(id, ["/usr/local/bin/microvm-agent", "task-pack", "/workspace"], [], nil, archive, 256 << 20)
             let final = directory.appendingPathComponent("final")
-            _ = try HostTree.run("microvm-workspace", ["unpack", final.path], input: archive)
+            _ = try hostTree("microvm-workspace", ["unpack", final.path], archive, nil)
             try fm.removeItem(at: archive)
             record.timingsMS["export"] = (ProcessInfo.processInfo.systemUptime - mark) * 1000
             mark = ProcessInfo.processInfo.systemUptime
-            _ = try HostTree.run(
-                "microvm-workspace", ["result", directory.appendingPathComponent("baseline").path, final.path, stage.path])
+            _ = try hostTree(
+                "microvm-workspace", ["result", directory.appendingPathComponent("baseline").path, final.path, stage.path], nil, nil)
             for cmd in record.commands {
                 for name in [cmd.stdout, cmd.stderr] {
                     try publishCommandLog(from: directory.appendingPathComponent(name), to: stage.appendingPathComponent(name))
@@ -503,26 +503,56 @@ final class TaskManager {
                 throw error
             }
             condition.unlock()
-            mark = ProcessInfo.processInfo.systemUptime
-            try destroy(id)
-            record.timingsMS["destroy"] = (ProcessInfo.processInfo.systemUptime - mark) * 1000
-            try save(record)
-            try JSONEncoder().encode(record).write(
-                to: URL(fileURLWithPath: record.resultDirectory!).appendingPathComponent("manifest.json"), options: .atomic)
-            return record
         } catch {
             try? fm.removeItem(at: stage)
             try? fm.removeItem(at: directory.appendingPathComponent("final"))
             try? fm.removeItem(at: directory.appendingPathComponent("export.tar"))
             condition.lock()
+            let published = current?.id == id && current?.resultDirectory != nil
             if var live = current, live.id == id, live.resultDirectory == nil {
                 live.phase = "running"
                 current = live
                 try? save(live)
             }
             condition.unlock()
-            throw error
+            if published { throw error }
+            throw exportFailure(error, target: saved.name ?? id)
         }
+        mark = ProcessInfo.processInfo.systemUptime
+        do {
+            try destroy(id)
+        } catch {
+            throw teardownFailure(error, record: record)
+        }
+        record.timingsMS["destroy"] = (ProcessInfo.processInfo.systemUptime - mark) * 1000
+        try save(record)
+        try JSONEncoder().encode(record).write(
+            to: URL(fileURLWithPath: record.resultDirectory!).appendingPathComponent("manifest.json"), options: .atomic)
+        return record
+    }
+
+    private func destroyPublished(_ record: TaskRecord) throws {
+        do {
+            try destroy(record.id)
+        } catch {
+            throw teardownFailure(error, record: record)
+        }
+    }
+
+    private func exportFailure(_ error: Error, target: String) -> MicroVMError {
+        MicroVMError(
+            "export failed: \(error)",
+            recovery: "The sandbox is still running and unexported work remains. Retry `microvm finish \(target)` while the sandbox TTL permits. "
+                + "A guest command failure is recorded on the task and does not by itself fail export.")
+    }
+
+    private func teardownFailure(_ error: Error, record: TaskRecord) -> MicroVMError {
+        let target = record.name ?? record.id
+        let result = record.resultDirectory ?? dir(record.id).path
+        return MicroVMError(
+            "sandbox teardown failed after export: \(error)",
+            recovery: "The result remains at \(result). Retry `microvm finish \(target)` to destroy the sandbox. "
+                + "This is a teardown failure, not an export failure or a guest command failure.")
     }
     func verifyRuntime(_ requested: [RuntimeSelection]?) throws -> RuntimeArtifact {
         try admit()
