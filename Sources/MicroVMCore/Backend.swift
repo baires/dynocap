@@ -76,6 +76,7 @@ public protocol VMBackend: AnyObject {
     func exec(_ request: ExecRequest, emit: @escaping (ExecEvent) -> Void)
     func writeStdin(name: String, id: UInt32, data: Data) throws
     func closeStdin(name: String, id: UInt32) throws
+    func signalExec(name: String, id: UInt32, signal: Int32) throws
     func cancelExec(name: String, id: UInt32)
     func destroy(name: String, completion: @escaping (Result<Void, Error>) -> Void)
 }
@@ -83,6 +84,10 @@ public protocol VMBackend: AnyObject {
 extension VMBackend {
     public func writeStdin(name: String, id: UInt32, data: Data) throws {}
     public func closeStdin(name: String, id: UInt32) throws {}
+
+    public func signalExec(name: String, id: UInt32, signal: Int32) throws {
+        throw MicroVMError("guest agent cannot deliver signals; rebuild the guest image")
+    }
 }
 
 /// Used on non-macOS builds and in tests that only exercise the control plane.

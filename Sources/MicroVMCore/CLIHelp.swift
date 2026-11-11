@@ -260,7 +260,9 @@ let cliCommandSpecs: [CLICommandSpec] = [
         the sandbox name. The sandbox TTL is not renewed. Project sandboxes start in /workspace when --cwd \
         is omitted. Raw sandboxes start in /. A pipe or file is streamed until EOF and then guest stdin \
         is closed. A terminal is not read unless -i or --interactive is set. --no-input closes guest stdin \
-        immediately and cannot be combined with -i. Stdout and stderr stay separate. See docs/cli-exec.md.
+        immediately and cannot be combined with -i. Ctrl-C forwards SIGINT to the guest process group and does not \
+        destroy the sandbox. The CLI exits 130 when that signal ends the command. A second Ctrl-C stops waiting. \
+        Stdout and stderr stay separate. See docs/cli-exec.md.
         """
     ),
     CLICommandSpec(

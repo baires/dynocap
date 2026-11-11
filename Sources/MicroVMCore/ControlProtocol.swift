@@ -1,7 +1,7 @@
 import Foundation
 
 /// CLI ↔ daemon frames. One request per connection, except an exec that streams
-/// stdin may send stdin frames until EOF while the daemon writes output.
+/// stdin may send stdin frames until EOF, and may send a signal frame, while the daemon writes output.
 ///
 ///	u32 length
 ///	u8  type
@@ -22,6 +22,7 @@ public enum ControlMessage: Equatable {
     case error(String)
     case stdin(Data)
     case stdinEOF
+    case signal(Int32)
 }
 
 public enum ControlType {
@@ -40,6 +41,7 @@ public enum ControlType {
     public static let error: UInt8 = 20
     public static let stdin: UInt8 = 21
     public static let stdinEOF: UInt8 = 22
+    public static let signal: UInt8 = 23
 }
 
 public enum ControlCodec {
@@ -95,6 +97,12 @@ public enum ControlCodec {
         case .stdinEOF:
             type = ControlType.stdinEOF
             payload = Data()
+        case .signal(let signal):
+            guard signal > 0, signal < 64 else { throw MicroVMError("unsupported signal \(signal)") }
+            type = ControlType.signal
+            var body = Data()
+            body.appendI32(signal)
+            payload = body
         }
         var out = Data()
         out.appendU32(UInt32(1 + payload.count))
@@ -150,6 +158,12 @@ public enum ControlCodec {
         case ControlType.stdinEOF:
             guard payload.isEmpty else { throw MicroVMError("stdin EOF frame is not empty") }
             return .stdinEOF
+        case ControlType.signal:
+            var c = Cursor(Data(payload))
+            let signal = try c.i32()
+            try c.expectEnd()
+            guard signal > 0, signal < 64 else { throw MicroVMError("unsupported signal \(signal)") }
+            return .signal(signal)
         default:
             throw MicroVMError("unknown control type \(type)")
         }
@@ -228,6 +242,17 @@ public struct PolicyCapabilities: Codable {
     public var taskVersion: Int? = 1
     public var transferVersion: Int? = 1
     public var execStreamVersion: Int? = 1
+    public var execSignalVersion: Int? = 1
+}
+
+public func validateExecSignalCapability(_ data: Data) throws {
+    guard let capability = try? JSONDecoder().decode(PolicyCapabilities.self, from: data),
+        capability.execSignalVersion == 1
+    else {
+        throw MicroVMError(
+            "daemon cannot forward guest signals; rebuild and restart it",
+            code: .incompatibleDaemon)
+    }
 }
 
 public func validateExecStreamCapability(_ data: Data) throws {

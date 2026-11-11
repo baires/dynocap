@@ -64,6 +64,14 @@ public final class VirtualizationBackend: VMBackend {
         try vm.closeStdin(id)
     }
 
+    public func signalExec(name: String, id: UInt32, signal: Int32) throws {
+        lock.lock()
+        let vm = machines[name]
+        lock.unlock()
+        guard let vm else { throw MicroVMError("VM \(name) is not running") }
+        try vm.signalExec(id, signal)
+    }
+
     public func destroy(name: String, completion: @escaping (Result<Void, Error>) -> Void) {
         lock.lock()
         let vm = machines[name]
@@ -82,6 +90,7 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
     var virtualMachine: VZVirtualMachine?
     var socketConnection: VZVirtioSocketConnection?
     private var link: GuestLink?
+    private var guestAgent = ""
     private let linkLock = NSLock()
 
     private var connectedLink: GuestLink? {
@@ -185,6 +194,15 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
     func closeStdin(_ id: UInt32) throws {
         guard let link = connectedLink else { throw MicroVMError("guest agent is not connected") }
         try link.write(.stdinEOF(id: id))
+    }
+
+    func signalExec(_ id: UInt32, _ signal: Int32) throws {
+        guard guestAgentDeliversSignals(guestAgent) else {
+            throw MicroVMError("guest agent cannot deliver signals; rebuild the guest image")
+        }
+        guard signal > 0, signal < 64 else { throw MicroVMError("unsupported signal \(signal)") }
+        guard let link = connectedLink else { throw MicroVMError("guest agent is not connected") }
+        try link.write(.signal(id: id, signal: signal))
     }
 
     func cancelExec(_ id: UInt32) {
@@ -419,7 +437,8 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
 
     private func onGuest(_ message: GuestMessage) {
         switch message {
-        case .hello(let version, _):
+        case .hello(let version, let agent):
+            guestAgent = agent
             if version != GuestProtocol.version {
                 finishBoot(.failure(MicroVMError("guest protocol version \(version), host wants \(GuestProtocol.version)")))
                 return

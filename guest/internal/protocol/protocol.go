@@ -14,6 +14,7 @@
 //	0x04 STDIN_EOF  host -> guest   u32 id
 //	0x05 KILL       host -> guest   u32 id
 //	0x06 SHUTDOWN   host -> guest   empty
+//	0x15 SIGNAL     host -> guest   u32 id, i32 signal
 //	0x10 STARTED    guest -> host   u32 id
 //	0x11 STDOUT     guest -> host   u32 id, u32+bytes
 //	0x12 STDERR     guest -> host   u32 id, u32+bytes
@@ -30,6 +31,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -53,11 +55,17 @@ const (
 	TypeStdinEOF uint8 = 0x04
 	TypeKill     uint8 = 0x05
 	TypeShutdown uint8 = 0x06
-	TypeStarted  uint8 = 0x10
-	TypeStdout   uint8 = 0x11
-	TypeStderr   uint8 = 0x12
-	TypeExit     uint8 = 0x13
-	TypeError    uint8 = 0x14
+	TypeSignal   uint8 = 0x15
+
+	// AgentHello is the guest greeting. signal=1 means the agent can deliver a
+	// signal to the selected process group. The protocol version stays 1 so
+	// older hosts still accept the hello.
+	AgentHello        = "microvm-agent signal=1"
+	TypeStarted uint8 = 0x10
+	TypeStdout  uint8 = 0x11
+	TypeStderr  uint8 = 0x12
+	TypeExit    uint8 = 0x13
+	TypeError   uint8 = 0x14
 )
 
 var (
@@ -84,7 +92,14 @@ type Message struct {
 	Data       []byte
 	ExitCode   int32
 	ExitSignal int32
+	Signal     int32
 	Error      string
+}
+
+// AdvertisesSignal reports whether a guest hello can deliver SIGINT and other
+// signals. The token must be exact so signal=10 does not match.
+func AdvertisesSignal(agent string) bool {
+	return strings.Contains(" "+agent+" ", " signal=1 ")
 }
 
 // ReadFrame reads one length-prefixed frame.
@@ -178,6 +193,15 @@ func Encode(m Message) ([]byte, error) {
 		return idOnly(TypeStdinEOF, m.ID), nil
 	case TypeKill:
 		return idOnly(TypeKill, m.ID), nil
+	case TypeSignal:
+		if m.Signal <= 0 || m.Signal >= 64 {
+			return nil, errors.New("unsupported signal")
+		}
+		out := make([]byte, 9)
+		out[0] = TypeSignal
+		binary.BigEndian.PutUint32(out[1:], m.ID)
+		binary.BigEndian.PutUint32(out[5:], uint32(m.Signal))
+		return out, nil
 	case TypeShutdown:
 		return []byte{TypeShutdown}, nil
 	case TypeStarted:
@@ -275,6 +299,16 @@ func Decode(buf []byte) (Message, error) {
 		}
 		m.ID = binary.BigEndian.Uint32(rest[:4])
 		rest = rest[4:]
+	case TypeSignal:
+		if len(rest) < 8 {
+			return Message{}, ErrShort
+		}
+		m.ID = binary.BigEndian.Uint32(rest[:4])
+		m.Signal = int32(binary.BigEndian.Uint32(rest[4:8]))
+		if m.Signal <= 0 || m.Signal >= 64 {
+			return Message{}, errors.New("unsupported signal")
+		}
+		rest = rest[8:]
 	case TypeShutdown:
 	case TypeExit:
 		if len(rest) < 12 {

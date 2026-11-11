@@ -1,5 +1,11 @@
 import Foundation
 
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
+
 public struct RunRequest: Codable, Equatable {
     public var runtimeDirectory: String?
     public var workspaceDisk: String?
@@ -64,6 +70,59 @@ public final class ExecStdinControl {
         defer { lock.unlock() }
         return stopped
     }
+}
+
+/// Host Ctrl-C state for one foreground guest command.
+public final class ExecInterrupt {
+    public init() {}
+
+    private let lock = NSLock()
+    private var forwardSignal: ((Int32) -> Void)?
+    private var abortWait: (() -> Void)?
+    private var aborted = false
+
+    public func bind(forward: @escaping (Int32) -> Void, abort: @escaping () -> Void) {
+        lock.lock()
+        forwardSignal = forward
+        abortWait = abort
+        lock.unlock()
+    }
+
+    public func deliver(count: Int) {
+        switch hostInterruptAction(count: count) {
+        case .forward(let signal):
+            lock.lock()
+            let forward = forwardSignal
+            lock.unlock()
+            forward?(signal)
+        case .abort:
+            lock.lock()
+            aborted = true
+            let abort = abortWait
+            lock.unlock()
+            abort?()
+        }
+    }
+
+    public var didAbort: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return aborted
+    }
+}
+
+public enum HostInterrupt: Equatable {
+    case forward(Int32)
+    case abort
+}
+
+/// The first host interrupt is delivered to the guest. The next one stops waiting.
+public func hostInterruptAction(count: Int) -> HostInterrupt {
+    count <= 1 ? .forward(SIGINT) : .abort
+}
+
+public func cliExitStatus(code: Int32, signal: Int32) -> Int32 {
+    signal > 0 ? 128 + signal : code
 }
 
 /// A terminal without `-i` sends no input. A pipe streams until EOF. Explicit modes win.

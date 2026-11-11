@@ -7,6 +7,7 @@ public enum GuestMessage: Equatable {
     case stdin(id: UInt32, data: Data)
     case stdinEOF(id: UInt32)
     case kill(id: UInt32)
+    case signal(id: UInt32, signal: Int32)
     case shutdown
     case started(id: UInt32)
     case stdout(id: UInt32, data: Data)
@@ -17,7 +18,7 @@ public enum GuestMessage: Equatable {
     public var id: UInt32? {
         switch self {
         case .exec(let start): return start.id
-        case .stdin(let id, _), .stdinEOF(let id), .kill(let id), .started(let id),
+        case .stdin(let id, _), .stdinEOF(let id), .kill(let id), .signal(let id, _), .started(let id),
              .stdout(let id, _), .stderr(let id, _), .exit(let id, _, _), .error(let id, _):
             return id
         case .hello, .shutdown:
@@ -56,6 +57,7 @@ public enum GuestProtocol {
     public static let stdinEOF: UInt8 = 0x04
     public static let kill: UInt8 = 0x05
     public static let shutdown: UInt8 = 0x06
+    public static let signal: UInt8 = 0x15
     public static let started: UInt8 = 0x10
     public static let stdout: UInt8 = 0x11
     public static let stderr: UInt8 = 0x12
@@ -115,6 +117,11 @@ public enum GuestProtocol {
         case .kill(let id):
             out.append(kill)
             out.appendU32(id)
+        case .signal(let id, let value):
+            guard value > 0, value < 64 else { throw MicroVMError("unsupported signal \(value)") }
+            out.append(signal)
+            out.appendU32(id)
+            out.appendI32(value)
         case .shutdown:
             out.append(shutdown)
         case .started(let id):
@@ -177,6 +184,12 @@ public enum GuestProtocol {
             let id = try c.u32()
             try c.expectEnd()
             return .kill(id: id)
+        case signal:
+            let id = try c.u32()
+            let value = try c.i32()
+            try c.expectEnd()
+            guard value > 0, value < 64 else { throw MicroVMError("unsupported signal \(value)") }
+            return .signal(id: id, signal: value)
         case shutdown:
             try c.expectEnd()
             return .shutdown
@@ -204,6 +217,11 @@ public enum GuestProtocol {
         guard let idx = entry.firstIndex(of: "="), idx != entry.startIndex else { return false }
         return true
     }
+}
+
+/// The guest hello token `signal=1` means this agent can signal the selected process group.
+public func guestAgentDeliversSignals(_ agent: String) -> Bool {
+    agent.split(separator: " ").contains("signal=1")
 }
 
 private extension GuestMessage {

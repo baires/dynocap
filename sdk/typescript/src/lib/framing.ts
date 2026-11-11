@@ -15,6 +15,7 @@ export const ControlType = {
   error: 20,
   stdin: 21,
   stdinEOF: 22,
+  signal: 23,
 } as const;
 
 export type Inbound =

@@ -211,47 +211,118 @@ func splitEnv(e string) (string, string, bool) {
 
 // session tracks stdin and the process group for one exec id.
 type session struct {
-	mu     sync.Mutex
-	stdin  io.WriteCloser
-	buf    bytes.Buffer
-	closed bool
-	pid    int
-	over   bool
+	mu      sync.Mutex
+	stdin   io.WriteCloser
+	buf     bytes.Buffer
+	closed  bool
+	pid     int
+	over    bool
+	stdinCh chan stdinChunk
+}
+
+type stdinChunk struct {
+	data  []byte
+	close bool
 }
 
 func (s *session) attach(w io.WriteCloser) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.stdin = w
-	if s.buf.Len() > 0 {
-		_, _ = w.Write(s.buf.Bytes())
-		s.buf.Reset()
+	s.ensureWriterLocked()
+	pending := append([]byte(nil), s.buf.Bytes()...)
+	s.buf.Reset()
+	closed := s.closed
+	s.mu.Unlock()
+	if len(pending) > 0 {
+		s.writeStdin(pending)
 	}
-	if s.closed {
-		_ = w.Close()
+	if closed {
+		s.mu.Lock()
+		s.ensureWriterLocked()
+		ch := s.stdinCh
+		s.mu.Unlock()
+		ch <- stdinChunk{close: true}
 	}
 }
 
 func (s *session) writeStdin(p []byte) {
+	if len(p) == 0 || s.tryWriteStdin(p) {
+		return
+	}
+	s.mu.Lock()
+	ch := s.stdinCh
+	drop := s.over || s.closed || s.stdin == nil
+	s.mu.Unlock()
+	if drop || ch == nil {
+		return
+	}
+	ch <- stdinChunk{data: append([]byte(nil), p...)}
+}
+
+// tryWriteStdin queues input without waiting for a full guest pipe.
+func (s *session) tryWriteStdin(p []byte) bool {
+	if len(p) == 0 {
+		return true
+	}
+	chunk := append([]byte(nil), p...)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.over || s.closed {
-		return
+		return true
 	}
 	if s.stdin == nil {
-		_, _ = s.buf.Write(p)
+		_, _ = s.buf.Write(chunk)
+		return true
+	}
+	s.ensureWriterLocked()
+	select {
+	case s.stdinCh <- stdinChunk{data: chunk}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *session) ensureWriterLocked() {
+	if s.stdinCh != nil {
 		return
 	}
-	_, _ = s.stdin.Write(p)
+	s.stdinCh = make(chan stdinChunk, 1)
+	go s.writer()
+}
+
+func (s *session) writer() {
+	for chunk := range s.stdinCh {
+		s.mu.Lock()
+		w := s.stdin
+		over := s.over
+		s.mu.Unlock()
+		if over || w == nil {
+			continue
+		}
+		if chunk.close {
+			_ = w.Close()
+			continue
+		}
+		_, _ = w.Write(chunk.data)
+	}
 }
 
 func (s *session) closeStdin() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.closed = true
-	if s.stdin != nil {
-		_ = s.stdin.Close()
+	if s.closed {
+		s.mu.Unlock()
+		return
 	}
+	s.closed = true
+	if s.stdin == nil {
+		s.mu.Unlock()
+		return
+	}
+	s.ensureWriterLocked()
+	ch := s.stdinCh
+	s.mu.Unlock()
+	ch <- stdinChunk{close: true}
 }
 
 func (s *session) setPID(pid int) {
@@ -261,19 +332,27 @@ func (s *session) setPID(pid int) {
 }
 
 func (s *session) kill() {
+	s.signal(syscall.SIGKILL)
+}
+
+func (s *session) signal(sig syscall.Signal) {
 	s.mu.Lock()
 	pid := s.pid
 	s.mu.Unlock()
-	killGroup(pid)
+	if pid <= 0 || sig <= 0 {
+		return
+	}
+	_ = syscall.Kill(-pid, sig)
 }
 
 func (s *session) done() {
 	s.mu.Lock()
 	s.over = true
-	if s.stdin != nil {
-		_ = s.stdin.Close()
-	}
+	w := s.stdin
 	s.mu.Unlock()
+	if w != nil {
+		_ = w.Close()
+	}
 }
 
 type sessionTable struct {

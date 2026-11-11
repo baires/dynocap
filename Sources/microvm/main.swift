@@ -115,12 +115,8 @@ struct Main {
             if command.op == "exec", let id = command.id, let argv = command.argv {
                 var request = ExecCommand(name: id, argv: argv, env: [], cwd: "/workspace", timeoutSeconds: 300)
                 request.input = resolveExecInput(requested: nil, stdinIsTerminal: isatty(STDIN_FILENO) == 1)
-                let result = try client.exec(
-                    request,
-                    readStdin: request.input == "none" ? nil : { readExecStdin($0) },
-                    onStdout: { try? FileHandle.standardOutput.write(contentsOf: $0) },
-                    onStderr: { try? FileHandle.standardError.write(contentsOf: $0) })
-                exit(result.signal > 0 ? 128 + result.signal : result.code)
+                let status = try foregroundExec(client: client, command: request)
+                exit(status)
             }
             let data = try client.task(command)
             if command.op == "finish" {
@@ -153,18 +149,46 @@ struct Main {
             let paths = try ready(invocation)
             var command = command
             command.input = resolveExecInput(requested: command.input, stdinIsTerminal: isatty(STDIN_FILENO) == 1)
-            let outcome = try DaemonClient(socketPath: paths.socket.path).exec(
-                command,
-                readStdin: command.input == "none" ? nil : { readExecStdin($0) },
-                onStdout: { try? FileHandle.standardOutput.write(contentsOf: $0) },
-                onStderr: { try? FileHandle.standardError.write(contentsOf: $0) }
-            )
-            let status: Int32 = outcome.signal > 0 ? 128 + outcome.signal : outcome.code
+            let status = try foregroundExec(client: DaemonClient(socketPath: paths.socket.path), command: command)
             exit(status)
         case .destroy(let name):
             let paths = try ready(invocation)
             try DaemonClient(socketPath: paths.socket.path).destroy(name)
             print("destroyed \(name)")
+        }
+    }
+
+    /// Ctrl-C forwards SIGINT to the guest. A second Ctrl-C stops waiting and exits 130.
+    static func foregroundExec(client: DaemonClient, command: ExecCommand) throws -> Int32 {
+        let interrupt = ExecInterrupt()
+        let lock = NSLock()
+        var count = 0
+        let source = DispatchSource.makeSignalSource(signal: SIGINT, queue: .global())
+        signal(SIGINT, SIG_IGN)
+        source.setEventHandler {
+            lock.lock()
+            count += 1
+            let seen = count
+            lock.unlock()
+            interrupt.deliver(count: seen)
+        }
+        source.resume()
+        defer {
+            source.cancel()
+            signal(SIGINT, SIG_DFL)
+        }
+        do {
+            let outcome = try client.exec(
+                command,
+                readStdin: command.input == "none" ? nil : { readExecStdin($0) },
+                onStdout: { try? FileHandle.standardOutput.write(contentsOf: $0) },
+                onStderr: { try? FileHandle.standardError.write(contentsOf: $0) },
+                interrupt: interrupt
+            )
+            return cliExitStatus(code: outcome.code, signal: outcome.signal)
+        } catch {
+            if interrupt.didAbort { return 130 }
+            throw error
         }
     }
 

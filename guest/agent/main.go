@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"syscall"
 
 	"microvm.dev/guest/internal/protocol"
 )
@@ -67,12 +68,14 @@ func (l *lockedConn) write(m protocol.Message) error {
 func handleConn(c net.Conn) {
 	defer c.Close()
 	w := &lockedConn{c: c}
-	hello := protocol.Message{Type: protocol.TypeHello, Version: protocol.Version, Agent: "microvm-agent"}
+	hello := protocol.Message{Type: protocol.TypeHello, Version: protocol.Version, Agent: protocol.AgentHello}
 	if err := w.write(hello); err != nil {
 		log.Printf("hello: %v", err)
 		return
 	}
+	var parked []protocol.Message
 	for {
+		parked = flushParkedStdin(parked)
 		msg, err := protocol.ReadFrame(c)
 		if err != nil {
 			if err != io.EOF {
@@ -81,31 +84,77 @@ func handleConn(c net.Conn) {
 			return
 		}
 		switch msg.Type {
-		case protocol.TypeExec:
-			sess := registerSession(msg.ID)
-			go func(req protocol.Message, s *session) {
-				defer finishSession(req.ID)
-				_ = s
-				Execute(req, w.write)
-			}(msg, sess)
 		case protocol.TypeStdin:
-			if s := lookupSession(msg.ID); s != nil {
-				s.writeStdin(msg.Data)
+			if !deliverStdin(msg, false) {
+				parked = append(parked, msg)
 			}
 		case protocol.TypeStdinEOF:
+			leftover := parked
+			parked = nil
+			go deliverStdinEOF(msg.ID, leftover)
+		case protocol.TypeSignal:
 			if s := lookupSession(msg.ID); s != nil {
-				s.closeStdin()
+				s.signal(syscall.Signal(msg.Signal))
 			}
-		case protocol.TypeKill:
-			if s := lookupSession(msg.ID); s != nil {
-				s.kill()
-			}
-		case protocol.TypeShutdown:
-			log.Printf("shutdown requested")
-			powerOff()
-			return
 		default:
-			_ = w.write(protocol.Message{Type: protocol.TypeError, ID: msg.ID, Error: "unexpected message"})
+			if !dispatchFrame(w, msg) {
+				return
+			}
 		}
 	}
+}
+
+// Stdin writes run outside this loop. A full guest pipe must not delay a
+// signal or kill that is already the next frame.
+func flushParkedStdin(parked []protocol.Message) []protocol.Message {
+	for len(parked) > 0 && deliverStdin(parked[0], false) {
+		parked = parked[1:]
+	}
+	return parked
+}
+
+func deliverStdin(msg protocol.Message, block bool) bool {
+	s := lookupSession(msg.ID)
+	if s == nil {
+		return true
+	}
+	if block {
+		s.writeStdin(msg.Data)
+		return true
+	}
+	return s.tryWriteStdin(msg.Data)
+}
+
+func deliverStdinEOF(id uint32, leftover []protocol.Message) {
+	s := lookupSession(id)
+	if s == nil {
+		return
+	}
+	for _, msg := range leftover {
+		s.writeStdin(msg.Data)
+	}
+	s.closeStdin()
+}
+
+func dispatchFrame(w *lockedConn, msg protocol.Message) bool {
+	switch msg.Type {
+	case protocol.TypeExec:
+		sess := registerSession(msg.ID)
+		go func(req protocol.Message, s *session) {
+			defer finishSession(req.ID)
+			_ = s
+			Execute(req, w.write)
+		}(msg, sess)
+	case protocol.TypeKill:
+		if s := lookupSession(msg.ID); s != nil {
+			s.kill()
+		}
+	case protocol.TypeShutdown:
+		log.Printf("shutdown requested")
+		powerOff()
+		return false
+	default:
+		_ = w.write(protocol.Message{Type: protocol.TypeError, ID: msg.ID, Error: "unexpected message"})
+	}
+	return true
 }

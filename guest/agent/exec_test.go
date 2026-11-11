@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"net"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -217,4 +219,124 @@ func TestStdinEOFIsDelivered(t *testing.T) {
 	if output.String() != "piped\n" || exitCode != 0 {
 		t.Fatalf("stdout %q code %d", output.String(), exitCode)
 	}
+}
+
+func TestSignalInterruptsForegroundSleep(t *testing.T) {
+	client, server := net.Pipe()
+	defer client.Close()
+	go handleConn(server)
+	if _, err := protocol.ReadFrame(client); err != nil {
+		t.Fatal(err)
+	}
+	if err := protocol.WriteFrame(client, protocol.Message{
+		Type: protocol.TypeExec, ID: 3, Argv: []string{"sleep", "30"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	started := false
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("sleep was not signaled")
+		default:
+		}
+		msg, err := protocol.ReadFrame(client)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if msg.Type == protocol.TypeStarted && !started {
+			started = true
+			payload := bytes.Repeat([]byte{'x'}, 64<<10)
+			for i := 0; i < 4; i++ {
+				if err := protocol.WriteFrame(client, protocol.Message{Type: protocol.TypeStdin, ID: 3, Data: payload}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := protocol.WriteFrame(client, protocol.Message{
+				Type: protocol.TypeSignal, ID: 3, Signal: int32(syscall.SIGINT),
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if msg.Type == protocol.TypeExit {
+			if msg.ExitSignal != int32(syscall.SIGINT) || msg.ExitCode != -1 {
+				t.Fatalf("exit code %d signal %d", msg.ExitCode, msg.ExitSignal)
+			}
+			return
+		}
+	}
+}
+
+func TestSignalReachesProcessGroupWhileStdinIsBlocked(t *testing.T) {
+	client, server := net.Pipe()
+	defer client.Close()
+	go handleConn(server)
+	hello, err := protocol.ReadFrame(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !protocol.AdvertisesSignal(hello.Agent) {
+		t.Fatalf("agent %q does not advertise signals", hello.Agent)
+	}
+	if protocol.AdvertisesSignal("microvm-agent") || protocol.AdvertisesSignal("microvm-agent signal=10") {
+		t.Fatal("old agent advertised signals")
+	}
+	err = protocol.WriteFrame(client, protocol.Message{
+		Type: protocol.TypeExec,
+		ID:   7,
+		Argv: []string{"python3", "-c", `
+import os, signal, time
+pid = os.fork()
+if pid == 0:
+    time.sleep(30)
+    os._exit(0)
+signal.signal(signal.SIGINT, signal.SIG_IGN)
+print("ready", flush=True)
+os.wait()
+print("done", flush=True)
+`},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout := make(chan []byte, 8)
+	readDone := make(chan struct{})
+	go func() {
+		defer close(readDone)
+		for {
+			msg, err := protocol.ReadFrame(client)
+			if err != nil {
+				return
+			}
+			if msg.Type == protocol.TypeStdout {
+				stdout <- append([]byte(nil), msg.Data...)
+			}
+		}
+	}()
+	var got bytes.Buffer
+	ready := false
+	timeout := time.After(4 * time.Second)
+	for !bytes.Contains(got.Bytes(), []byte("done\n")) {
+		select {
+		case chunk := <-stdout:
+			got.Write(chunk)
+			if !ready && bytes.Contains(got.Bytes(), []byte("ready\n")) {
+				ready = true
+				go func() {
+					payload := bytes.Repeat([]byte{'x'}, 64<<10)
+					for i := 0; i < 4; i++ {
+						_ = protocol.WriteFrame(client, protocol.Message{Type: protocol.TypeStdin, ID: 7, Data: payload})
+					}
+					_ = protocol.WriteFrame(client, protocol.Message{
+						Type: protocol.TypeSignal, ID: 7, Signal: int32(syscall.SIGINT),
+					})
+				}()
+			}
+		case <-timeout:
+			t.Fatalf("ready %v stdout %q", ready, got.String())
+		}
+	}
+	client.Close()
+	<-readDone
 }

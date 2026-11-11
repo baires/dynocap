@@ -12,12 +12,13 @@ final class ProtocolTests: XCTestCase {
         let file = try JSONDecoder().decode(VectorFile.self, from: data)
         let byName = Dictionary(uniqueKeysWithValues: file.frames.map { ($0.name, hexData($0.hex)) })
         let cases: [(String, GuestMessage)] = [
-            ("hello", .hello(version: 1, agent: "microvm-agent")),
+            ("hello", .hello(version: 1, agent: "microvm-agent signal=1")),
             ("exec-uname", .exec(ExecStart(id: 7, timeoutMS: 5000, argv: ["uname", "-a"], env: [], cwd: ""))),
             ("exec-shell", .exec(ExecStart(id: 9, timeoutMS: 0, argv: ["sh", "-c", "echo hello"], env: ["FOO=bar"], cwd: "/tmp"))),
             ("stdin-eof", .stdinEOF(id: 7)),
             ("stdin-binary", .stdin(id: 7, data: Data([0, 255, 10]))),
             ("kill", .kill(id: 7)),
+            ("signal-int", .signal(id: 7, signal: 2)),
             ("shutdown", .shutdown),
             ("started", .started(id: 7)),
             ("stdout-hello", .stdout(id: 7, data: Data("hello\n".utf8))),

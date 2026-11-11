@@ -230,7 +230,7 @@ public final class Daemon {
             case .shutdown:
                 try ControlCodec.write(fd, .result(try JSONEncoder().encode(OKResult(ok: true))))
                 DispatchQueue.global().async { [weak self] in self?.stop() }
-            case .result, .stdout, .stderr, .exit, .error, .stdin, .stdinEOF:
+            case .result, .stdout, .stderr, .exit, .error, .stdin, .stdinEOF, .signal:
                 try ControlCodec.write(fd, .error(daemonErrorText(MicroVMError("clients cannot send response frames"))))
             }
         } catch {
@@ -548,9 +548,11 @@ public final class Daemon {
         }
         lifecycle.lock.unlock()
         locked = false
-        if request.streamStdin && !state.isFinished {
+        if !state.isFinished {
+            let streaming = request.streamStdin
             Thread.detachNewThread { [weak self] in
-                self?.pumpExecInput(fd: fd, name: command.name, id: id, state: state, sem: sem)
+                self?.pumpExecInput(
+                    fd: fd, name: command.name, id: id, state: state, sem: sem, streaming: streaming, send: send)
             }
         }
         let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global())
@@ -576,10 +578,18 @@ public final class Daemon {
         lifecycle.lock.unlock()
     }
 
-
-    /// Reads client stdin until EOF, disconnect, or the exec finishing.
+    /// Reads client stdin and signal frames until disconnect or the exec finishing.
     /// The command deadline waits on another thread, so this read cannot block TTL or timeout.
-    private func pumpExecInput(fd: Int32, name: String, id: UInt32, state: ExecWait, sem: DispatchSemaphore) {
+    /// Stdin EOF does not end the read: a later signal must still reach the guest.
+    private func pumpExecInput(
+        fd: Int32,
+        name: String,
+        id: UInt32,
+        state: ExecWait,
+        sem: DispatchSemaphore,
+        streaming: Bool,
+        send: (ControlMessage, Bool) -> Void
+    ) {
         while !state.isFinished {
             let message: ControlMessage
             do {
@@ -591,16 +601,22 @@ public final class Daemon {
             if state.isFinished { return }
             do {
                 switch message {
-                case .stdin(let data):
+                case .stdin(let data) where streaming:
                     var offset = 0
                     while offset < data.count {
                         let end = min(offset + GuestProtocol.maxChunk, data.count)
                         try backend.writeStdin(name: name, id: id, data: data.subdata(in: offset..<end))
                         offset = end
                     }
-                case .stdinEOF:
+                case .stdinEOF where streaming:
                     try backend.closeStdin(name: name, id: id)
-                    return
+                case .signal(let signal):
+                    do {
+                        try backend.signalExec(name: name, id: id, signal: signal)
+                    } catch {
+                        let text = (error as? MicroVMError)?.message ?? String(describing: error)
+                        send(.stderr(Data((text + "\n").utf8)), false)
+                    }
                 default:
                     stopExecInput(name: name, id: id, state: state, sem: sem)
                     return
@@ -974,12 +990,15 @@ public struct DaemonClient {
         _ command: ExecCommand,
         readStdin: ((ExecStdinControl) -> Data?)? = nil,
         onStdout: (Data) -> Void = { _ in },
-        onStderr: (Data) -> Void = { _ in }
+        onStderr: (Data) -> Void = { _ in },
+        interrupt: ExecInterrupt? = nil
     ) throws -> ExecOutcome {
         if command.requireOffline == true { try requirePolicy() }
         let streaming = command.input == "pipe" || command.input == "interactive"
         if streaming { try requireExecStream() }
         let fd = try connect()
+        let fdLock = NSLock()
+        let canSignal = interrupt == nil ? false : (try? requireExecSignal()) != nil
         let writerDone = DispatchSemaphore(value: 0)
         var control: ExecStdinControl?
         var writerStarted = false
@@ -989,13 +1008,29 @@ public struct DaemonClient {
             _ = closeFD(fd)
         }
         try ControlCodec.write(fd, .exec(command))
+        interrupt?.bind(
+            forward: { signal in
+                control?.stop()
+                guard canSignal else {
+                    fputs("microvm: daemon cannot forward guest signals; rebuild and restart it\n", stderr)
+                    return
+                }
+                fdLock.lock()
+                defer { fdLock.unlock() }
+                try? ControlCodec.write(fd, .signal(signal))
+            },
+            abort: {
+                control?.stop()
+                _ = shutdown(fd, Int32(SHUT_RDWR))
+            }
+        )
         if streaming, let readStdin {
             let gate = ExecStdinControl()
             control = gate
             writerStarted = true
             Thread.detachNewThread {
                 defer { writerDone.signal() }
-                writeExecStdin(fd: fd, control: gate, read: readStdin)
+                writeExecStdin(fd: fd, control: gate, writeLock: fdLock, read: readStdin)
             }
         } else {
             writerStarted = true
@@ -1020,6 +1055,12 @@ public struct DaemonClient {
                 throw MicroVMError("unexpected exec reply")
             }
         }
+    }
+
+    private func requireExecSignal() throws {
+        let reply = try roundTrip(.ping)
+        guard case .result(let data) = reply else { throw messageError(reply) }
+        try validateExecSignalCapability(data)
     }
 
     private func requireExecStream() throws {
@@ -1049,27 +1090,32 @@ public struct DaemonClient {
     }
 }
 
-
-private func writeExecStdin(fd: Int32, control: ExecStdinControl, read: (ExecStdinControl) -> Data?) {
+private func writeExecStdin(
+    fd: Int32, control: ExecStdinControl, writeLock: NSLock, read: (ExecStdinControl) -> Data?
+) {
     let chunkSize = 32 * 1024
-    do {
-        while !control.isStopped {
-            guard let chunk = read(control), !chunk.isEmpty else {
-                if !control.isStopped {
-                    try ControlCodec.write(fd, .stdinEOF)
-                }
-                return
-            }
-            var offset = 0
-            while offset < chunk.count {
-                if control.isStopped { return }
-                let end = min(offset + chunkSize, chunk.count)
-                try ControlCodec.write(fd, .stdin(chunk.subdata(in: offset..<end)))
-                offset = end
-            }
+    func write(_ message: ControlMessage) -> Bool {
+        writeLock.lock()
+        defer { writeLock.unlock() }
+        if control.isStopped { return false }
+        do {
+            try ControlCodec.write(fd, message)
+            return true
+        } catch {
+            return false
         }
-    } catch {
-        return
+    }
+    while !control.isStopped {
+        guard let chunk = read(control), !chunk.isEmpty else {
+            if !control.isStopped { _ = write(.stdinEOF) }
+            return
+        }
+        var offset = 0
+        while offset < chunk.count && !control.isStopped {
+            let end = min(offset + chunkSize, chunk.count)
+            if !write(.stdin(chunk.subdata(in: offset..<end))) { return }
+            offset = end
+        }
     }
 }
 
