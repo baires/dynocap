@@ -284,21 +284,30 @@ let cliCommandSpecs: [CLICommandSpec] = [
         path: ["rm"],
         group: .primary,
         summary: "Remove a sandbox and release its name.",
-        usage: "microvm rm NAME_OR_ID [--purge]",
+        usage: "microvm rm NAME_OR_ID [--force] [--purge]",
         flags: [
+            CLIFlag(
+                name: "--force",
+                value: nil,
+                summary: "Discard a live sandbox and its unexported work. Required while the sandbox is starting, running, or finalizing."
+            ),
             CLIFlag(
                 name: "--purge",
                 value: nil,
-                summary: "Also delete the managed record, retained logs, and published result."
+                summary: "Also delete the managed record, retained logs, and published result. Does not authorize discarding a live sandbox."
             ),
         ],
         examples: [
             "microvm rm demo",
+            "microvm rm demo --force",
             "microvm rm demo --purge",
         ],
         discussion: """
-        Removal discards unexported work. Without --purge, published results keep their existing expiry. \
-        --purge deletes the managed record and result as well.
+        A live sandbox requires --force because removal discards unexported work. The daemon checks the phase when \
+        it mutates the record, so a stale lookup cannot bypass the check. Refusal names the sandbox and explains \
+        finish versus discard. Finished, failed, and interrupted sandboxes can be removed without --force. \
+        --purge separately deletes the retained result and does not imply --force. There is no confirmation prompt. \
+        A failed teardown keeps the record so removal can be retried. See docs/cli-removal.md.
         """
     ),
     CLICommandSpec(
@@ -336,7 +345,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
         usage: "microvm destroy NAME",
         flags: [],
         examples: ["microvm destroy demo"],
-        discussion: "destroy stops a raw sandbox. Use rm for a project sandbox."
+        discussion: "destroy stops a raw sandbox immediately. It refuses a live project sandbox; use finish to export that work or rm --force to discard it."
     ),
     CLICommandSpec(
         path: ["daemon"],

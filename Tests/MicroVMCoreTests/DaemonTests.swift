@@ -57,7 +57,10 @@ final class DaemonTests: XCTestCase {
         XCTAssertEqual(backend.lastExec?.cwd, "/tmp")
         XCTAssertEqual(backend.lastExec?.env, ["CI=1"])
         XCTAssertEqual(outcome.code, 7)
-        try client.destroy("underlying")
+        var remove = TaskCommand(op: "remove")
+        remove.id = "underlying"
+        remove.force = true
+        _ = try client.task(remove)
     }
 
     func testReapOnStartAndUnsupportedBoot() throws {

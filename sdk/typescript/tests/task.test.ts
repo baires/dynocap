@@ -114,8 +114,13 @@ test("named task handles stay pinned after alias reuse and expose management ope
     await opened.remove();
     assert.equal(daemon.runs.at(-1)?.id, "task-original");
     assert.equal(daemon.runs.at(-1)?.purge, false);
+    assert.equal(daemon.runs.at(-1)?.force, false);
+    await opened.remove({ force: true, purge: false });
+    assert.equal(daemon.runs.at(-1)?.force, true);
+    assert.equal(daemon.runs.at(-1)?.purge, false);
     await removeManaged("interview", { home: daemon.home, purge: true });
     assert.equal(daemon.runs.at(-1)?.purge, true);
+    assert.equal(daemon.runs.at(-1)?.force, false);
     assert.equal((await Task.list({ home: daemon.home })).length, 1);
     assert.equal((await listManaged({ home: daemon.home }))[0]?.kind, "task");
   } finally {

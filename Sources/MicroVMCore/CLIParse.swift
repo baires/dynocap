@@ -258,6 +258,7 @@ func parseLs(_ args: [String], _ prefix: inout InvocationPrefix) throws {
 func parseNamed(_ sub: String, _ args: [String], _ prefix: inout InvocationPrefix) throws -> TaskCommand {
     var name: String?
     var purge = false
+    var force = false
     var reader = OptionReader(args: args)
     while let token = try reader.next() {
         if prefix.help || prefix.version { return TaskCommand(op: sub) }
@@ -276,6 +277,9 @@ func parseNamed(_ sub: String, _ args: [String], _ prefix: inout InvocationPrefi
             if flag == "--purge" {
                 if inline != nil { throw usageError("--purge does not take a value") }
                 purge = true
+            } else if flag == "--force" {
+                if inline != nil { throw usageError("--force does not take a value") }
+                force = true
             } else {
                 throw usageError("unknown flag \(flag)")
             }
@@ -283,12 +287,15 @@ func parseNamed(_ sub: String, _ args: [String], _ prefix: inout InvocationPrefi
     }
     if prefix.help || prefix.version { return TaskCommand(op: sub) }
     guard let name else {
-        throw usageError("usage: microvm \(sub) NAME_OR_ID" + (sub == "rm" ? " [--purge]" : ""))
+        throw usageError("usage: microvm \(sub) NAME_OR_ID" + (sub == "rm" ? " [--force] [--purge]" : ""))
     }
     try rethrowUsage { try validateVMName(name) }
     var command = TaskCommand(op: sub == "rm" ? "remove" : sub)
     command.id = name
-    if sub == "rm" { command.purge = purge }
+    if sub == "rm" {
+        command.purge = purge
+        command.force = force
+    }
     return command
 }
 

@@ -428,8 +428,13 @@ test("named management tools return bounded previews, host paths, and explicit p
     assert.match((await microvmLs(options)).content[0].text, /"kind": "task"/);
     await microvmRm("interview", false, options);
     assert.equal(daemon.runs.at(-1)?.purge, false);
+    assert.equal(daemon.runs.at(-1)?.force, false);
+    await microvmRm("interview", false, options, true);
+    assert.equal(daemon.runs.at(-1)?.force, true);
+    assert.equal(daemon.runs.at(-1)?.purge, false);
     await microvmRm("task-fake", true, options);
     assert.equal(daemon.runs.at(-1)?.purge, true);
+    assert.equal(daemon.runs.at(-1)?.force, false);
   } finally {
     await daemon.close();
   }

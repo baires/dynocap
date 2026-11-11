@@ -4,6 +4,7 @@ public struct TaskCommand: Codable, Equatable {
     public var op: String
     public var name: String?
     public var purge: Bool?
+    public var force: Bool?
     public var id: String?
     public var projectPath: String?
     public var repositoryUrl: String?

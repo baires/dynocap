@@ -165,7 +165,7 @@ public final class Daemon {
                     data = try JSONEncoder().encode(tasks.inspect(target, sandboxes: store.list()))
                 case "remove":
                     guard let target = command.id else { throw MicroVMError("name or id required") }
-                    try removeManaged(target, purge: command.purge == true)
+                    try removeManaged(target, purge: command.purge == true, force: command.force == true)
                     data = Data("{}".utf8)
                 case "runtimeVerify": data = try JSONEncoder().encode(tasks.verifyRuntime(command.runtimes))
                 default: throw MicroVMError("unknown task operation")
@@ -188,6 +188,14 @@ public final class Daemon {
             case .exec(let command):
                 try performExec(fd, command)
             case .destroy(let name):
+                if let record = try tasks.records().first(where: { $0.id == name || $0.name == name }),
+                    TaskManager.discardsUnexportedWork(record.phase) {
+                    let target = record.name ?? name
+                    throw MicroVMError(
+                        "refusing to destroy live sandbox \(target)",
+                        code: .invalidPhase,
+                        recovery: "Run `microvm finish \(target)` to export work, or `microvm rm \(target) --force` to discard it.")
+                }
                 try destroyVM(name)
                 try ControlCodec.write(fd, .result(try JSONEncoder().encode(OKResult(ok: true))))
             case .shutdown:
@@ -242,13 +250,19 @@ public final class Daemon {
         return (projects + raw).sorted { ($0.name ?? $0.id) < ($1.name ?? $1.id) }
     }
 
-    private func removeManaged(_ target: String, purge: Bool) throws {
+    private func removeManaged(_ target: String, purge: Bool, force: Bool) throws {
         if let record = try tasks.records().first(where: { $0.id == target || $0.name == target }) {
-            try tasks.remove(record.id, purge: purge)
+            try tasks.remove(record.id, purge: purge, force: force)
             try store.remove(record.id)
         } else {
             try validateVMName(target)
-            guard try store.load(target) != nil else { throw MicroVMError("sandbox or task not found: \(target)", code: .notFound) }
+            guard let sandbox = try store.load(target) else { throw MicroVMError("sandbox or task not found: \(target)", code: .notFound) }
+            if [VMPhase.booting, .running, .stopping].contains(sandbox.phase), !force {
+                throw MicroVMError(
+                    "refusing to remove live sandbox \(target)",
+                    code: .invalidPhase,
+                    recovery: "This raw sandbox has no project result to finish. Run `microvm rm \(target) --force` to discard it.")
+            }
             tasks.namespace.lock()
             defer { tasks.namespace.unlock() }
             let lifecycle = lifecycle(target)

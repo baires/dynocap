@@ -223,10 +223,11 @@ export async function microvmLs(options?: ToolOptions): Promise<ToolResult> {
 export async function microvmRm(
   target: string,
   purge: boolean,
-  options?: ToolOptions
+  options?: ToolOptions,
+  force = false
 ): Promise<ToolResult> {
   return guard(async () => {
-    await removeManaged(target, { home: options?.home, purge });
+    await removeManaged(target, { home: options?.home, purge, force });
     return ok(`removed ${target}`);
   });
 }

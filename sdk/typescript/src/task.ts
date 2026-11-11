@@ -155,7 +155,9 @@ export class Task {
     }
     return value as TaskPreview;
   }
-  async remove(options: { purge?: boolean } = {}): Promise<void> {
+  async remove(
+    options: { purge?: boolean; force?: boolean } = {}
+  ): Promise<void> {
     await removeManaged(this.id, { home: this.#home, ...options });
   }
   static connect(
@@ -253,11 +255,12 @@ export async function listManaged(
 }
 export async function removeManaged(
   target: string,
-  options: ClientOptions & { purge?: boolean } = {}
+  options: ClientOptions & { purge?: boolean; force?: boolean } = {}
 ): Promise<void> {
   await taskOperation(resolveHome(options.home), {
     op: "remove",
     id: target,
     purge: options.purge === true,
+    force: options.force === true,
   });
 }

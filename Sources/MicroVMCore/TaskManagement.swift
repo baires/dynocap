@@ -87,7 +87,24 @@ extension TaskManager {
         }
     }
 
-    func remove(_ id: String, purge: Bool) throws {
+    static func discardsUnexportedWork(_ phase: String?) -> Bool {
+        ["starting", "running", "finalizing"].contains(phase ?? "")
+    }
+
+    func remove(_ id: String, purge: Bool, force: Bool = false) throws {
+        condition.lock()
+        let loaded = try? load(id)
+        let phase = (current?.id == id ? current?.phase : nil) ?? loaded?.phase
+        let target = (current?.id == id ? current?.name : nil) ?? loaded?.name ?? id
+        if Self.discardsUnexportedWork(phase), !force {
+            condition.unlock()
+            throw MicroVMError(
+                "refusing to remove live sandbox \(target)",
+                code: .invalidPhase,
+                recovery: "Run `microvm finish \(target)` to export work, or `microvm rm \(target) --force` to discard it. "
+                    + "--purge does not authorize discarding a live sandbox.")
+        }
+        condition.unlock()
         var duringStartup = false
         do {
             // Serialize cancellation with boot's record registration.

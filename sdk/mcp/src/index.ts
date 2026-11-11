@@ -172,10 +172,15 @@ export function createServer(options: ToolOptions = {}): McpServer {
     "microvm_rm",
     {
       description:
-        "Remove a sandbox or task and release its name. Published results remain unless purge is explicitly true. Unexported edits are discarded.",
-      inputSchema: { name: z.string(), purge: z.boolean().optional() },
+        "Remove a sandbox or task and release its name. Live sandboxes require force because unexported work is discarded. Published results remain unless purge is explicitly true.",
+      inputSchema: {
+        name: z.string(),
+        purge: z.boolean().optional(),
+        force: z.boolean().optional(),
+      },
     },
-    async (input) => microvmRm(input.name, input.purge === true, host)
+    async (input) =>
+      microvmRm(input.name, input.purge === true, host, input.force === true)
   );
   return server;
 }
