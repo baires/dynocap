@@ -45,7 +45,7 @@ final class CLITests: XCTestCase {
     }
 
     func testHelpMentionsExec() throws {
-        XCTAssertEqual(try parseCommand(["microvm"]).command, .help)
+        XCTAssertEqual(try parseCommand(["microvm"]).command, .help(topic: []))
         XCTAssertTrue(helpText.contains("microvm exec"))
         XCTAssertTrue(helpText.contains("uname -a"))
     }

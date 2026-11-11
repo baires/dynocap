@@ -1,0 +1,462 @@
+import Foundation
+
+struct CLIFlag {
+    var name: String
+    var value: String?
+    var summary: String
+}
+
+enum CLICommandGroup {
+    case primary
+    case advanced
+}
+
+struct CLICommandSpec {
+    var path: [String]
+    var group: CLICommandGroup
+    var summary: String
+    var usage: String
+    var flags: [CLIFlag]
+    var examples: [String]
+    var discussion: String
+    var allowsJSON: Bool = false
+}
+
+func usageError(_ message: String) -> MicroVMError {
+    MicroVMError(message, exitCode: 2)
+}
+
+func rethrowUsage(_ body: () throws -> Void) throws {
+    do {
+        try body()
+    } catch let error as MicroVMError {
+        throw usageError(error.message)
+    }
+}
+
+func cliSpec(_ path: [String]) -> CLICommandSpec? {
+    cliCommandSpecs.first { $0.path == path }
+}
+
+func knownFlag(_ path: [String], _ name: String) -> Bool {
+    cliSpec(path)?.flags.contains { $0.name == name } ?? false
+}
+
+/// True when `--verbose` is a CLI flag on an invocation that failed before a command was accepted.
+/// Successful parses use `CLIInvocation.verbose`, which understands the guest-argument boundary.
+public func invocationRequestsVerbose(_ args: [String]) -> Bool {
+    var index = 1
+    while index < args.count {
+        let token = args[index]
+        if token == "--" { break }
+        if token == "--verbose" { return true }
+        if token == "--home" {
+            index += 2
+            continue
+        }
+        index += 1
+    }
+    return false
+}
+
+public var helpText: String { commandHelp([]) }
+
+public func commandHelp(_ topic: [String]) -> String {
+    switch topic {
+    case []:
+        return topLevelHelp()
+    case ["advanced"]:
+        return advancedHelp()
+    case ["task"]:
+        return groupHelp(
+            "task",
+            "Project-task operations that overlap clone, exec, and finish.",
+            [["task", "start"], ["task", "exec"], ["task", "finish"]]
+        )
+    case ["runtime"]:
+        return groupHelp(
+            "runtime",
+            "Prepare the runtime disk a sandbox expects. Clone does not download one for you.",
+            [["runtime", "prepare"]]
+        )
+    default:
+        guard let spec = cliSpec(topic) else {
+            return "unknown command \(topic.joined(separator: " "))\n"
+        }
+        return render(spec)
+    }
+}
+
+func helpTopic(from positionals: [String], strict: Bool) throws -> [String] {
+    if positionals.isEmpty { return [] }
+    if positionals[0] == "advanced" {
+        if strict && positionals.count > 1 { throw usageError("unexpected argument \(positionals[1])") }
+        return ["advanced"]
+    }
+    if positionals[0] == "task" || positionals[0] == "runtime" {
+        if positionals.count == 1 { return [positionals[0]] }
+        let child = [positionals[0], positionals[1]]
+        guard cliSpec(child) != nil else { throw usageError("unknown command \(child.joined(separator: " "))") }
+        if strict && positionals.count > 2 { throw usageError("unexpected argument \(positionals[2])") }
+        return child
+    }
+    guard cliSpec([positionals[0]]) != nil else { throw usageError("unknown command \(positionals[0])") }
+    if strict && positionals.count > 1 { throw usageError("unexpected argument \(positionals[1])") }
+    return [positionals[0]]
+}
+
+private let networkChoice = """
+Network defaults to none, which attaches no virtual NIC. nat enables unrestricted \
+outbound access. filtered allows HTTPS only to registry.npmjs.org and, for a repository \
+URL, that URL's host. A repository URL is cloned inside the guest and requires nat or \
+filtered. An ssh URL requires nat. --git-token-env and --ssh-key are used only for that \
+guest fetch and are not imported. TTL defaults to 1800 seconds, including boot, and must \
+be an integer from 1 to 86400. There is no unlimited lifetime or automatic renewal.
+"""
+
+private let sandboxLifetime = """
+Network defaults to none. nat enables unrestricted outbound access. filtered allows HTTPS \
+only to registry.npmjs.org and, for a repository URL, that URL's host. TTL defaults to \
+1800 seconds, including boot, from 1 to 86400. There is no unlimited lifetime or automatic renewal.
+"""
+
+let cliCommandSpecs: [CLICommandSpec] = [
+    CLICommandSpec(
+        path: ["runtime", "prepare"],
+        group: .primary,
+        summary: "Prepare a runtime disk for a repository.",
+        usage: "microvm runtime prepare [REPO] [--runtime NAME:VERSION]",
+        flags: [
+            CLIFlag(name: "--runtime", value: "NAME:VERSION", summary: "Runtime to build. The default is node:22."),
+        ],
+        examples: [
+            "microvm runtime prepare ./project --runtime node:22",
+            "microvm runtime prepare ./project --runtime=node:22",
+        ],
+        discussion: """
+        Preparation is explicit. Creating a sandbox does not download or substitute a runtime. \
+        The default selection is node:22 when --runtime is omitted. REPO defaults to the current directory.
+        """
+    ),
+    CLICommandSpec(
+        path: ["clone"],
+        group: .primary,
+        summary: "Create a named project sandbox from a directory or repository URL.",
+        usage: "microvm clone SOURCE NAME [OPTIONS]",
+        flags: [
+            CLIFlag(name: "--runtime", value: "NAME:VERSION", summary: "Runtime the sandbox must use, such as node:22."),
+            CLIFlag(name: "--network", value: "none|nat|filtered", summary: "Sandbox network. The default is none."),
+            CLIFlag(name: "--ttl", value: "SEC", summary: "Sandbox lifetime in seconds, from 1 to 86400. The default is 1800."),
+            CLIFlag(name: "--cpus", value: "N", summary: "Guest CPUs. The default is 2 for a project sandbox."),
+            CLIFlag(name: "--memory", value: "MB", summary: "Guest memory in megabytes, at least 128."),
+            CLIFlag(name: "--ref", value: "NAME", summary: "Git branch or tag to fetch for a repository URL."),
+            CLIFlag(
+                name: "--git-token-env",
+                value: "VAR",
+                summary: "Environment variable holding an HTTPS token for the guest fetch."
+            ),
+            CLIFlag(name: "--ssh-key", value: "PATH", summary: "Private key used only for an ssh guest fetch."),
+        ],
+        examples: [
+            "microvm clone ./project demo --runtime node:22 --network none --ttl 1800 --cpus 2 --memory 1024 --ref main",
+            "microvm clone git@github.com:org/repo.git demo --network nat --git-token-env MICROVM_EXAMPLE_TOKEN --ssh-key /tmp/key",
+        ],
+        discussion: networkChoice
+            + " Names match [A-Za-z0-9][A-Za-z0-9._-]* and cannot start with task- or runtime-."
+    ),
+    CLICommandSpec(
+        path: ["ls"],
+        group: .primary,
+        summary: "List sandboxes and retained results.",
+        usage: "microvm ls [--json]",
+        flags: [
+            CLIFlag(name: "--json", value: nil, summary: "Print the machine-readable listing on stdout."),
+        ],
+        examples: [
+            "microvm ls",
+            "microvm ls --json",
+            "microvm --json ls",
+        ],
+        discussion: "Human-readable columns are the default, including when stdout is not a terminal.",
+        allowsJSON: true
+    ),
+    CLICommandSpec(
+        path: ["exec"],
+        group: .primary,
+        summary: "Run a command in a sandbox.",
+        usage: "microvm exec NAME_OR_ID [OPTIONS] [--] COMMAND [ARGS...]",
+        flags: [
+            CLIFlag(name: "--timeout", value: "SEC", summary: "Command deadline in seconds. The default is 60. Timeout exits 124."),
+            CLIFlag(name: "--cwd", value: "DIR", summary: "Guest working directory. Project sandboxes use /workspace when omitted."),
+            CLIFlag(name: "--env", value: "KEY=VAL", summary: "Environment entry for the guest command. Repeat for more than one."),
+        ],
+        examples: [
+            "microvm exec demo --timeout 30 --cwd /workspace --env CI=1 -- npm test -- --runInBand",
+            "microvm exec demo -- uname -a",
+        ],
+        discussion: """
+        Tokens after -- are the guest command and are preserved unchanged, including values that look \
+        like microvm flags such as --home or --json. A command may also start at the first argument after \
+        the sandbox name. The sandbox TTL is not renewed. Project sandboxes start in /workspace when --cwd \
+        is omitted.
+        """
+    ),
+    CLICommandSpec(
+        path: ["diff"],
+        group: .primary,
+        summary: "Print the verified patch for a project sandbox.",
+        usage: "microvm diff NAME_OR_ID",
+        flags: [],
+        examples: ["microvm diff demo"],
+        discussion: "The patch is the command's stdout. diff does not destroy the sandbox."
+    ),
+    CLICommandSpec(
+        path: ["finish"],
+        group: .primary,
+        summary: "Export the result and destroy the sandbox.",
+        usage: "microvm finish NAME_OR_ID",
+        flags: [],
+        examples: ["microvm finish demo"],
+        discussion: """
+        Finish closes command admission, exports the result, and destroys the sandbox. Repeating it returns \
+        the existing result. It does not modify the host checkout.
+        """
+    ),
+    CLICommandSpec(
+        path: ["rm"],
+        group: .primary,
+        summary: "Remove a sandbox and release its name.",
+        usage: "microvm rm NAME_OR_ID [--purge]",
+        flags: [
+            CLIFlag(
+                name: "--purge",
+                value: nil,
+                summary: "Also delete the managed record, retained logs, and published result."
+            ),
+        ],
+        examples: [
+            "microvm rm demo",
+            "microvm rm demo --purge",
+        ],
+        discussion: """
+        Removal discards unexported work. Without --purge, published results keep their existing expiry. \
+        --purge deletes the managed record and result as well.
+        """
+    ),
+    CLICommandSpec(
+        path: ["run"],
+        group: .advanced,
+        summary: "Start a raw sandbox that is not a project task.",
+        usage: "microvm run --name NAME [--cpus N] [--memory MB] [--ttl SEC] "
+            + "[--network none|nat|filtered] [--boot-timeout SEC]",
+        flags: [
+            CLIFlag(name: "--name", value: "NAME", summary: "Sandbox name. Required."),
+            CLIFlag(name: "--cpus", value: "N", summary: "Guest CPUs. The default is 1."),
+            CLIFlag(name: "--memory", value: "MB", summary: "Guest memory in megabytes, at least 128. The default is 1024."),
+            CLIFlag(name: "--ttl", value: "SEC", summary: "Sandbox lifetime in seconds, from 1 to 86400. The default is 1800."),
+            CLIFlag(name: "--network", value: "none|nat|filtered", summary: "Sandbox network. The default is none."),
+            CLIFlag(name: "--boot-timeout", value: "SEC", summary: "How long to wait for the guest agent. The default is 60."),
+        ],
+        examples: [
+            "microvm run --name demo --cpus 2 --memory 1024 --ttl 1800 --network none --boot-timeout 60",
+        ],
+        discussion: sandboxLifetime
+    ),
+    CLICommandSpec(
+        path: ["ps"],
+        group: .advanced,
+        summary: "List raw sandboxes.",
+        usage: "microvm ps",
+        flags: [],
+        examples: ["microvm ps"],
+        discussion: "ps shows raw sandbox records. Use ls for project sandboxes and retained results."
+    ),
+    CLICommandSpec(
+        path: ["destroy"],
+        group: .advanced,
+        summary: "Destroy a raw sandbox.",
+        usage: "microvm destroy NAME",
+        flags: [],
+        examples: ["microvm destroy demo"],
+        discussion: "destroy stops a raw sandbox. Use rm for a project sandbox."
+    ),
+    CLICommandSpec(
+        path: ["daemon"],
+        group: .advanced,
+        summary: "Run the per-user daemon in the foreground.",
+        usage: "microvm daemon",
+        flags: [],
+        examples: ["microvm daemon"],
+        discussion: "Commands that need the daemon start it automatically. daemon keeps it in the foreground for debugging."
+    ),
+    CLICommandSpec(
+        path: ["task", "start"],
+        group: .advanced,
+        summary: "Start a project task from a directory or repository URL.",
+        usage: "microvm task start PATH|URL [OPTIONS]",
+        flags: [
+            CLIFlag(name: "--name", value: "NAME", summary: "Friendly name. task- and runtime- prefixes are reserved."),
+            CLIFlag(name: "--runtime", value: "NAME:VERSION", summary: "Runtime the sandbox must use, such as node:22."),
+            CLIFlag(name: "--network", value: "none|nat|filtered", summary: "Sandbox network. The default is none."),
+            CLIFlag(name: "--ttl", value: "SEC", summary: "Sandbox lifetime in seconds, from 1 to 86400. The default is 1800."),
+            CLIFlag(name: "--cpus", value: "N", summary: "Guest CPUs, at least 1."),
+            CLIFlag(name: "--memory", value: "MB", summary: "Guest memory in megabytes, at least 128."),
+            CLIFlag(name: "--ref", value: "NAME", summary: "Git branch or tag to fetch for a repository URL."),
+            CLIFlag(name: "--git-token-env", value: "VAR", summary: "Environment variable holding an HTTPS token for the guest fetch."),
+            CLIFlag(name: "--ssh-key", value: "PATH", summary: "Private key used only for an ssh guest fetch."),
+        ],
+        examples: [
+            "microvm task start /tmp/project --name demo --runtime node:22 --network none --ttl 1800 "
+                + "--cpus 2 --memory 1024 --ref main --ssh-key /tmp/key --git-token-env MICROVM_EXAMPLE_TOKEN",
+        ],
+        discussion: networkChoice + " Prefer clone when choosing a name up front."
+    ),
+    CLICommandSpec(
+        path: ["task", "exec"],
+        group: .advanced,
+        summary: "Run a command in a project task.",
+        usage: "microvm task exec ID -- COMMAND [ARGS...]",
+        flags: [],
+        examples: ["microvm task exec demo -- npm test"],
+        discussion: """
+        Everything after -- is the guest command and is preserved unchanged, including tokens that look \
+        like microvm flags. Use exec to set the working directory, environment, or command timeout.
+        """
+    ),
+    CLICommandSpec(
+        path: ["task", "finish"],
+        group: .advanced,
+        summary: "Export a project task and destroy its sandbox.",
+        usage: "microvm task finish ID",
+        flags: [],
+        examples: ["microvm task finish demo"],
+        discussion: "Same export and destruction as finish. The argument is the task id."
+    ),
+    CLICommandSpec(
+        path: ["version"],
+        group: .advanced,
+        summary: "Print version and host virtualization support.",
+        usage: "microvm version",
+        flags: [],
+        examples: ["microvm version", "microvm --version"],
+        discussion: "The version flag is also accepted before or after another command and then exits without running it."
+    ),
+    CLICommandSpec(
+        path: ["help"],
+        group: .advanced,
+        summary: "Show help for a command.",
+        usage: "microvm help [COMMAND]",
+        flags: [],
+        examples: ["microvm help", "microvm help clone", "microvm clone --help"],
+        discussion: "microvm help COMMAND and microvm COMMAND --help show the same command help."
+    ),
+]
+
+private func topLevelHelp() -> String {
+    let commands = cliCommandSpecs.filter { $0.group == .primary }.map { spec in
+        "  \(spec.usage)\n        \(spec.summary)"
+    }.joined(separator: "\n")
+    return """
+    microvm \(MicroVMInfo.version) — local Linux microVMs on macOS
+
+    Bring a repository into a disposable sandbox, run commands there, and export a result.
+    Names are explicit targets. \(networkChoice)
+
+    WORKFLOW
+      microvm runtime prepare ./project --runtime node:22
+      microvm clone ./project demo
+      microvm ls
+      microvm exec demo -- npm test
+      microvm exec demo -- uname -a
+      microvm diff demo
+      microvm finish demo
+      microvm rm demo
+
+    COMMANDS
+    \(commands)
+
+    Run `microvm help <command>` or `microvm <command> --help` for flags and examples.
+    Run `microvm help advanced` for raw sandboxes, task commands, and the daemon.
+
+    \(globalOptions)
+
+    Images are built with scripts/fetch-image.sh and stored under MICROVM_HOME (default ~/.microvm).
+    Commands that need a daemon start one. Help and invalid usage do not.
+
+    """
+}
+
+private func advancedHelp() -> String {
+    let commands = cliCommandSpecs.filter { $0.group == .advanced }.map { spec in
+        "  \(spec.usage)\n        \(spec.summary)"
+    }.joined(separator: "\n")
+    return """
+    Advanced commands
+
+    These remain available beside the repository workflow. Overlapping commands share the same sandbox behavior.
+
+    \(commands)
+
+    \(globalOptions)
+    """
+}
+
+private func groupHelp(_ name: String, _ intro: String, _ paths: [[String]]) -> String {
+    let commands = paths.compactMap(cliSpec).map { spec in
+        "  \(spec.usage)\n        \(spec.summary)"
+    }.joined(separator: "\n")
+    return """
+    microvm \(name)
+
+    \(intro)
+
+    \(commands)
+
+    Run `microvm help \(name) <subcommand>` for flags and examples.
+
+    \(globalOptions)
+    """
+}
+
+private func render(_ spec: CLICommandSpec) -> String {
+    let options: String
+    if spec.flags.isEmpty {
+        options = "  This command accepts no flags besides the global options.\n"
+    } else {
+        options = spec.flags.map { flag in
+            let label = flag.value.map { "\(flag.name) \($0)" } ?? flag.name
+            return "  \(label)\n        \(flag.summary)"
+        }.joined(separator: "\n") + "\n"
+    }
+    let examples = spec.examples.map { "  \($0)" }.joined(separator: "\n")
+    return """
+    \(spec.summary)
+
+    USAGE
+      \(spec.usage)
+
+    OPTIONS
+    \(options)
+    \(spec.discussion)
+
+    EXAMPLES
+    \(examples)
+
+    \(globalOptions)
+    """
+}
+
+private let globalOptions = """
+GLOBAL OPTIONS
+  --home PATH
+        Use this directory instead of MICROVM_HOME. It may appear before or after the subcommand.
+  --verbose
+        On failure, repeat the process exit status on stderr.
+  -h, --help
+        Show help for the current command and exit.
+  --version
+        Print the version and exit.
+
+Valued options accept a separate argument or an equals sign, for example --network nat or --network=nat.
+Guest arguments after exec's -- are not read as options.
+"""

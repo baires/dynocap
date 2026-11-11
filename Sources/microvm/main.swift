@@ -12,23 +12,34 @@ import Glibc
 struct Main {
     static func main() {
         do {
-            try run(CommandLine.arguments)
+            let invocation = try parseCommand(CommandLine.arguments)
+            do {
+                try dispatch(invocation, CommandLine.arguments)
+            } catch {
+                fail(error, verbose: invocation.verbose)
+            }
         } catch {
-            let micro = error as? MicroVMError
-            let message = micro?.message ?? String(describing: error)
-            let code = micro?.exitCode ?? 1
-            fputs("microvm: \(message)\n", stderr)
-            exit(code)
+            fail(error, verbose: invocationRequestsVerbose(CommandLine.arguments))
         }
     }
 
-    static func run(_ args: [String]) throws {
-        let invocation = try parseCommand(args)
+    static func fail(_ error: Error, verbose: Bool) -> Never {
+        let micro = error as? MicroVMError
+        let message = micro?.message ?? String(describing: error)
+        let code = micro?.exitCode ?? 1
+        fputs("microvm: \(message)\n", stderr)
+        if verbose {
+            fputs("microvm: exit \(code)\n", stderr)
+        }
+        exit(code)
+    }
+
+    static func dispatch(_ invocation: CLIInvocation, _ args: [String]) throws {
         switch invocation.command {
-        case .ls(let json):
+        case .ls:
             let paths = try ready(invocation)
             let data = try DaemonClient(socketPath: paths.socket.path).task(TaskCommand(op: "entries"))
-            if json {
+            if invocation.output == .json {
                 print(String(data: data, encoding: .utf8) ?? "")
             } else {
                 let entries = try JSONDecoder().decode([ManagedEntry].self, from: data)
@@ -87,8 +98,8 @@ struct Main {
                 exit(result.signal > 0 ? 128 + result.signal : result.code)
             }
             print(String(data: try client.task(command), encoding: .utf8) ?? "")
-        case .help:
-            print(helpText)
+        case .help(let topic):
+            print(commandHelp(topic))
         case .version:
             print(MicroVMInfo.describe(), terminator: "")
         case .daemon:

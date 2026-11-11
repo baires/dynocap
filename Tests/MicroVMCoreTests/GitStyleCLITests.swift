@@ -20,7 +20,9 @@ final class GitStyleCLITests: XCTestCase {
         XCTAssertNil(remote.network)
     }
     func testListingRemovalFinishAndLegacyCommands() throws {
-        XCTAssertEqual(try parseCommand(["microvm", "ls", "--json"]).command, .ls(json: true))
+        let listed = try parseCommand(["microvm", "ls", "--json"])
+        XCTAssertEqual(listed.command, .ls)
+        XCTAssertEqual(listed.output, .json)
         guard case .managed(let remove) = try parseCommand(["microvm", "rm", "demo", "--purge"]).command else { return XCTFail("unexpected command") }
         XCTAssertEqual(remove.op, "remove")
         XCTAssertEqual(remove.purge, true)

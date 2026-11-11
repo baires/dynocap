@@ -183,6 +183,14 @@ microvm run --name online --network nat
 microvm exec demo --timeout 30 --cwd /tmp --env FOO=bar -- uname -a
 ```
 
+`microvm help run` and `microvm run --help` show the same command help. Top-level help
+teaches the repository workflow; `microvm help advanced` lists raw sandboxes, task
+commands, and the daemon. `--home`, `--verbose`, `--help`, and `--version` work
+before or after the subcommand. Valued options accept `--flag value` and
+`--flag=value`. Arguments after `exec`'s `--` are the guest command, unchanged,
+even when they look like microvm flags. Invalid usage exits 2 and names the
+offending argument. Help and invalid usage do not start the daemon.
+
 `--memory` is megabytes. `--ttl` defaults to 1800 seconds and accepts 1–86400.
 The limit includes boot time and exec never renews it. `ps` shows the effective
 `NETWORK` and `TTL_SEC`; `unknown` identifies absent historical metadata.
