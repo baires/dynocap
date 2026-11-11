@@ -132,7 +132,12 @@ public final class Daemon {
                     ) {
                         throw MicroVMError(message)
                     }
-                    data = try JSONEncoder().encode(TaskDescriptor(tasks.start(command)))
+                    let record = try tasks.start(command) { stage in
+                        if command.reportProgress == true {
+                            try? ControlCodec.write(fd, .stderr(Data((stage.rawValue + "\n").utf8)))
+                        }
+                    }
+                    data = try JSONEncoder().encode(TaskDescriptor(record, sandbox: store.load(record.id)))
                 case "finish":
                     guard let id = command.id else { throw MicroVMError("task id required") }
                     if let requested = command.network, let recorded = tasks.recordedNetwork(id) {
@@ -147,7 +152,7 @@ public final class Daemon {
                     guard let target = command.id else { throw MicroVMError("task name or id required") }
                     data = try JSONEncoder().encode(tasks.preview(tasks.resolve(target).id,
                         requireOffline: command.requireOffline == true, permitFiltered: command.permitFiltered))
-                case "list": data = try JSONEncoder().encode(tasks.records().map(TaskDescriptor.init))
+                case "list": data = try JSONEncoder().encode(tasks.records().map { TaskDescriptor($0) })
                 case "resolve":
                     guard let target = command.id else { throw MicroVMError("task name or id required") }
                     data = try JSONEncoder().encode(TaskDescriptor(tasks.resolve(target)))
@@ -779,14 +784,28 @@ public struct DaemonClient {
             throw MicroVMError("daemon lacks task management v1; rebuild and restart it", code: .incompatibleDaemon)
         }
     }
-    public func task(_ command: TaskCommand) throws -> Data {
+    public func task(_ command: TaskCommand, onProgress: ((String) -> Void)? = nil) throws -> Data {
         try requireTasks()
         if command.name != nil || ["list", "resolve", "entries", "remove", "diff"].contains(command.op) {
             try requireTaskManagement()
         }
-        let reply = try roundTrip(.task(command))
-        guard case .result(let data) = reply else { throw messageError(reply) }
-        return data
+        var request = command
+        request.reportProgress = onProgress != nil
+        let fd = try connect()
+        defer { _ = closeFD(fd) }
+        try ControlCodec.write(fd, .task(request))
+        while true {
+            let reply = try ControlCodec.read(fd)
+            switch reply {
+            case .result(let data): return data
+            case .stderr(let data) where onProgress != nil:
+                if let text = String(data: data, encoding: .utf8),
+                   let stage = CreationStage(rawValue: text.trimmingCharacters(in: .newlines)) {
+                    onProgress?(stage.rawValue)
+                }
+            default: throw messageError(reply)
+            }
+        }
     }
 
     public func ping() throws {

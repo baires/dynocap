@@ -44,8 +44,13 @@ struct Main {
             let paths = try ready(invocation)
             let client = DaemonClient(socketPath: paths.socket.path)
             try client.requireTaskManagement()
-            let data = try client.task(command)
-            if command.op == "diff" {
+            let progress: ((String) -> Void)? = invocation.output == .human && command.op == "start" ? { fputs($0 + "\n", stderr) } : nil
+            let data = try client.task(command, onProgress: progress)
+            if command.op == "start" {
+                let descriptor = try JSONDecoder().decode(TaskDescriptor.self, from: data)
+                print(try formatCreationResult(
+                    descriptor, command: command, home: paths.home, output: invocation.output, now: unixNow()), terminator: "")
+            } else if command.op == "diff" {
                 let preview = try JSONDecoder().decode(TaskPreview.self, from: data)
                 let file = try FileHandle(forReadingFrom: URL(fileURLWithPath: preview.patchPath))
                 defer { try? file.close() }
@@ -60,20 +65,25 @@ struct Main {
         case .runtimePrepare(let preparation):
             let paths = try ready(invocation)
             try DaemonClient(socketPath: paths.socket.path).requireTasks()
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: args[0]).standardizedFileURL.resolvingSymlinksInPath().deletingLastPathComponent()
+            if invocation.output == .human { fputs("Preparing the runtime; verified inputs may be downloaded...\n", stderr) }
+            let executable = URL(fileURLWithPath: args[0]).standardizedFileURL.resolvingSymlinksInPath().deletingLastPathComponent()
                 .appendingPathComponent("microvm-mkruntime")
-            process.arguments = [
-                preparation.repo, paths.home.path, HostArch.guest,
-                String(data: try JSONEncoder().encode(preparation.runtimes), encoding: .utf8) ?? "",
-            ]
-            try process.run()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else { throw MicroVMError("runtime preparation failed") }
+            let log = try buildRuntime(preparation, paths: paths, executable: executable) { log in
+                if invocation.output == .human { fputs("Runtime build log: \(log.path)\n", stderr) }
+            }
+            if invocation.output == .human { fputs("Verifying the prepared runtime (offline guest check for new artifacts)...\n", stderr) }
             var verification = TaskCommand(op: "runtimeVerify")
             verification.runtimes = preparation.runtimes
-            let data = try DaemonClient(socketPath: paths.socket.path).task(verification)
-            print(String(data: data, encoding: .utf8) ?? "")
+            let artifact: RuntimeArtifact
+            do {
+                let data = try DaemonClient(socketPath: paths.socket.path).task(verification)
+                artifact = try JSONDecoder().decode(RuntimeArtifact.self, from: data)
+            } catch {
+                var failure = error as? MicroVMError ?? MicroVMError("prepared runtime verification failed")
+                failure.recovery += " Runtime build log: \(log.path)."
+                throw failure
+            }
+            print(try formatRuntimePreparationResult(artifact, home: paths.home, log: log, output: invocation.output), terminator: "")
         case .task(let command):
             let paths = try ready(invocation)
             let client = DaemonClient(socketPath: paths.socket.path)

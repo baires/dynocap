@@ -212,6 +212,14 @@ func reusablePublished(home, selection, key string, tools map[string]string) (Ma
 			return Manifest{}, false
 		}
 	}
+	// Explicit preparation must rebuild incomplete artifacts instead of reusing a disk
+	// whose boot files are gone and sending callers back to preparation again.
+	for _, name := range []string{"kernel", "initrd"} {
+		info, err := os.Stat(filepath.Join(dir, name))
+		if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
+			return Manifest{}, false
+		}
+	}
 	sum, e := hashFile(filepath.Join(dir, "runtime.ext4"))
 	if e != nil || sum != cached.ArtifactDigest {
 		return Manifest{}, false

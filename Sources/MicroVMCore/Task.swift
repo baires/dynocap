@@ -18,6 +18,7 @@ public struct TaskCommand: Codable, Equatable {
     public var argv: [String]?
     public var requireOffline: Bool?
     public var permitFiltered: Bool?
+    public var reportProgress: Bool?
     public init(op: String) { self.op = op }
 }
 
@@ -58,12 +59,13 @@ public struct TaskDescriptor: Codable {
     public var runtimeDigest: String
     public var createdAtUnix: Int64
     public var expiresAtUnix: Int64
+    public var sandboxExpiresAtUnix: Int64?
     public var resultDirectory: String?
     public var sourceUrl: String?
     public var sourceRevision: String?
     public var timingsMS: [String: Double]
     public var network: NetworkMode
-    init(_ record: TaskRecord) {
+    init(_ record: TaskRecord, sandbox: VMRecord? = nil) {
         id = record.id
         name = record.name
         runtimes = record.runtimes
@@ -72,6 +74,7 @@ public struct TaskDescriptor: Codable {
         runtimeDigest = record.runtimeDigest
         createdAtUnix = record.createdAtUnix
         expiresAtUnix = record.expiresAtUnix
+        sandboxExpiresAtUnix = sandbox.flatMap { vm in vm.ttlSeconds.map { vm.createdAtUnix + Int64($0) } }
         resultDirectory = record.resultDirectory
         sourceUrl = record.sourceUrl
         sourceRevision = record.sourceRevision
@@ -186,7 +189,7 @@ final class TaskManager {
         condition.broadcast()
         condition.unlock()
     }
-    func start(_ command: TaskCommand) throws -> TaskRecord {
+    func start(_ command: TaskCommand, progress: (CreationStage) -> Void = { _ in }) throws -> TaskRecord {
         let started = ProcessInfo.processInfo.systemUptime
         var timings: [String: Double] = [:]
         var mark = started
@@ -195,13 +198,12 @@ final class TaskManager {
             timings[name] = (now - mark) * 1000
             mark = now
         }
+        let resolved = try TaskSourceResolver.resolve(command)
+        progress(.checkingRuntime)
         // Resolution precedes allocation and runtime requests are never silently substituted.
         let runtime = try RuntimeArtifact.directory(command.runtimes, home: paths.home, arch: arch)
         let artifact = try RuntimeArtifact.resolve(command.runtimes, directory: runtime, arch: arch)
-        guard try fileDigest(runtime.appendingPathComponent("runtime.ext4")) == artifact.artifactDigest else {
-            throw MicroVMError("prepared runtime hash mismatch")
-        }
-        let resolved = try TaskSourceResolver.resolve(command)
+        try RuntimeArtifact.verifyFiles(artifact, directory: runtime)
         try reserveName(command.name)
         defer { releaseNameReservation(command.name) }
         try admit()
@@ -220,19 +222,20 @@ final class TaskManager {
         var sourceURL: String?
         var sourceRevision: String?
         var credentialEnv: [String] = []
+        progress(.importingSource)
         switch resolved {
         case .directory(let source):
-            _ = try HostTree.run("microvm-workspace", ["pack", source, "project"], output: input)
+            _ = try hostTree("microvm-workspace", ["pack", source, "project"], nil, input)
             let history = directory.appendingPathComponent("history")
             let imported = String(
-                data: try HostTree.run("microvm-workspace", ["import-git", source, history.path]), encoding: .utf8)?
+                data: try hostTree("microvm-workspace", ["import-git", source, history.path], nil, nil), encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             if imported == "git" {
                 gitTar = directory.appendingPathComponent("git.tar")
-                _ = try HostTree.run("microvm-workspace", ["pack-git", history.path], output: gitTar)
+                _ = try hostTree("microvm-workspace", ["pack-git", history.path], nil, gitTar)
                 try fm.removeItem(at: history)
             }
-            _ = try HostTree.run("microvm-workspace", ["unpack", baseline.path], input: input)
+            _ = try hostTree("microvm-workspace", ["unpack", baseline.path], input, nil)
         case .guestClone(let repo):
             sourceURL = repo.url
             if repo.token != nil || repo.sshKeyPath != nil {
@@ -240,8 +243,9 @@ final class TaskManager {
             }
         }
         measured("snapshot")
+        progress(.creatingWorkspace)
         let disk = directory.appendingPathComponent("workspace.ext4")
-        _ = try HostTree.run("microvm-mkruntime", ["workspace", disk.path])
+        _ = try hostTree("microvm-mkruntime", ["workspace", disk.path], nil, nil)
         measured("workspaceDisk")
         var record = TaskRecord(
             id: id, name: command.name, runtimes: artifact.runtimes, phase: "starting", runtimeDigest: artifact.artifactDigest,
@@ -263,9 +267,11 @@ final class TaskManager {
         if request.network == .filtered, case .guestClone(let repo) = resolved {
             request.filteredRepositoryHost = FilteredEgress.repositoryHost(repo.url)
         }
+        progress(.booting)
         _ = try boot(request)
         measured("boot")
         if record.network == .nat || record.network == .filtered {
+            progress(.waitingForNetwork)
             _ = try execute(
                 id,
                 [
@@ -274,6 +280,7 @@ final class TaskManager {
                 ], [], nil, nil, 1 << 20)
         }
         measured("networkReady")
+        progress(.populatingWorkspace)
         switch resolved {
         case .directory:
             _ = try execute(id, ["/usr/local/bin/microvm-agent", "unpack", "/workspace"], [], input, nil, 256 << 20)
@@ -292,7 +299,7 @@ final class TaskManager {
             }
             sourceRevision = revision
             _ = try execute(id, ["/usr/local/bin/microvm-agent", "pack", "/workspace"], [], nil, input, 256 << 20)
-            _ = try HostTree.run("microvm-workspace", ["unpack", baseline.path], input: input)
+            _ = try hostTree("microvm-workspace", ["unpack", baseline.path], input, nil)
         }
         _ = try execute(id, ["/usr/local/bin/microvm-agent", "freeze", "/workspace"], [], nil, nil, 1 << 20)
         if fm.fileExists(atPath: input.path) { try fm.removeItem(at: input) }
@@ -300,6 +307,7 @@ final class TaskManager {
         record.sourceUrl = sourceURL
         record.sourceRevision = sourceRevision
         record.phase = "running"
+        progress(.restoringCache)
         record.dependencyCacheKey = try DependencyCache.key(baseline: baseline, runtime: artifact)
         if let key = record.dependencyCacheKey { try DependencyCache.restore(key: key, home: paths.home, id: id, execute: execute) }
         measured("cacheRestore")
@@ -497,9 +505,7 @@ final class TaskManager {
         if !fm.fileExists(atPath: candidate.path) {
             let runtime = try RuntimeArtifact.directory(requested, home: paths.home, arch: arch)
             let cached = try RuntimeArtifact.resolve(requested, directory: runtime, arch: arch)
-            guard try fileDigest(runtime.appendingPathComponent("runtime.ext4")) == cached.artifactDigest else {
-                throw MicroVMError("runtime hash mismatch")
-            }
+            try RuntimeArtifact.verifyFiles(cached, directory: runtime)
             return cached
         }
         defer { try? fm.removeItem(at: candidate) }
@@ -509,11 +515,9 @@ final class TaskManager {
             throw MicroVMError("candidate does not match requested runtime")
         }
         let artifact = try RuntimeArtifact.resolve(manifest.runtimes, directory: candidate, arch: arch)
-        guard try fileDigest(candidate.appendingPathComponent("runtime.ext4")) == artifact.artifactDigest else {
-            throw MicroVMError("runtime artifact hash mismatch")
-        }
+        try RuntimeArtifact.verifyFiles(artifact, directory: candidate)
         let disk = candidate.appendingPathComponent("verify.ext4")
-        _ = try HostTree.run("microvm-mkruntime", ["workspace", disk.path])
+        _ = try hostTree("microvm-mkruntime", ["workspace", disk.path], nil, nil)
         let name = "runtime-verify"
         defer {
             try? destroy(name)
@@ -530,7 +534,20 @@ final class TaskManager {
         let artifacts = paths.home.appendingPathComponent("runtimes")
         try fm.createDirectory(at: artifacts, withIntermediateDirectories: true)
         let dest = artifacts.appendingPathComponent(artifact.artifactDigest)
-        if fm.fileExists(atPath: dest.path) { try fm.removeItem(at: candidate) } else { try fm.moveItem(at: candidate, to: dest) }
+        var replace = !fm.fileExists(atPath: dest.path)
+        if !replace {
+            do {
+                let existing = try RuntimeArtifact.resolve(artifact.runtimes, directory: dest, arch: arch)
+                try RuntimeArtifact.verifyFiles(existing, directory: dest)
+                replace = existing.artifactDigest != artifact.artifactDigest
+            } catch { replace = true }
+        }
+        if replace {
+            if fm.fileExists(atPath: dest.path) { try fm.removeItem(at: dest) }
+            try fm.moveItem(at: candidate, to: dest)
+        } else {
+            try fm.removeItem(at: candidate)
+        }
         let catalogFile = paths.home.appendingPathComponent("runtime-catalog.json")
         var catalog = (try? JSONDecoder().decode([String: String].self, from: Data(contentsOf: catalogFile))) ?? [:]
         catalog[RuntimeArtifact.selectionKey(artifact.runtimes, arch: arch)] = artifact.artifactDigest

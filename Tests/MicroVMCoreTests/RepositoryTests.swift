@@ -3,11 +3,11 @@ import XCTest
 @testable import MicroVMCore
 
 final class RepositoryTests: XCTestCase {
-    func testPublicURLRequiresNATAndClonesInTheGuest() throws {
+    func testPublicURLRequiresExplicitNetworkingAndClonesInTheGuest() throws {
         var command = TaskCommand(op: "start")
         command.repositoryUrl = "https://github.com/org/repo.git"
         XCTAssertThrowsError(try TaskSourceResolver.resolve(command)) { error in
-            XCTAssertEqual(String(describing: error), "repository fetch requires --network nat")
+            XCTAssertEqual(String(describing: error), "repository fetch requires explicit --network nat or --network filtered")
         }
         command.network = .nat
         command.ref = "main"
@@ -57,7 +57,7 @@ final class RepositoryTests: XCTestCase {
         command.repositoryUrl = "https://github.com/org/private.git"
         command.gitToken = "secret-token"
         XCTAssertThrowsError(try TaskSourceResolver.resolve(command)) { error in
-            XCTAssertEqual(String(describing: error), "repository fetch requires --network nat")
+            XCTAssertEqual(String(describing: error), "repository fetch requires explicit --network nat or --network filtered")
         }
         command.network = .filtered
         guard case .guestClone(let repo) = try TaskSourceResolver.resolve(command) else {
@@ -108,7 +108,7 @@ final class RepositoryTests: XCTestCase {
         }
         ssh.sshKeyPath = "/tmp/id_ed25519"
         XCTAssertThrowsError(try TaskSourceResolver.resolve(ssh)) { error in
-            XCTAssertEqual(String(describing: error), "repository fetch requires --network nat")
+            XCTAssertEqual(String(describing: error), "repository fetch requires explicit --network nat or --network filtered")
         }
         ssh.network = .filtered
         XCTAssertThrowsError(try TaskSourceResolver.resolve(ssh)) { error in

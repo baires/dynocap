@@ -114,18 +114,22 @@ let cliCommandSpecs: [CLICommandSpec] = [
         path: ["runtime", "prepare"],
         group: .primary,
         summary: "Prepare a runtime disk for a repository.",
-        usage: "microvm runtime prepare [REPO] [--runtime NAME:VERSION]",
+        usage: "microvm runtime prepare [REPO] [--runtime NAME:VERSION] [--json]",
         flags: [
+            CLIFlag(name: "--json", value: nil, summary: "Print a documented success or error object; suppress human progress."),
             CLIFlag(name: "--runtime", value: "NAME:VERSION", summary: "Runtime to build. The default is node:22."),
         ],
         examples: [
-            "microvm runtime prepare ./project --runtime node:22",
-            "microvm runtime prepare ./project --runtime=node:22",
+            "microvm runtime prepare . --runtime node:22",
+            "microvm runtime prepare . --runtime=node:22 --json",
         ],
         discussion: """
         Preparation is explicit. Creating a sandbox does not download or substitute a runtime. \
-        The default selection is node:22 when --runtime is omitted. REPO defaults to the current directory.
-        """
+        The default selection is node:22 when --runtime is omitted. REPO is the microvm source tree, defaulting to the current directory.
+        Progress goes to human stderr; companion output is saved in a build log. JSON suppresses progress.
+        See docs/cli-creation.md for result schemas.
+        """,
+        allowsJSON: true
     ),
     CLICommandSpec(
         path: ["clone"],
@@ -133,6 +137,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
         summary: "Create a named project sandbox from a directory or repository URL.",
         usage: "microvm clone SOURCE NAME [OPTIONS]",
         flags: [
+            CLIFlag(name: "--json", value: nil, summary: "Print a documented success or error object; suppress human progress."),
             CLIFlag(name: "--runtime", value: "NAME:VERSION", summary: "Runtime the sandbox must use, such as node:22."),
             CLIFlag(name: "--network", value: "none|nat|filtered", summary: "Sandbox network. The default is none."),
             CLIFlag(name: "--ttl", value: "SEC", summary: "Sandbox lifetime in seconds, from 1 to 86400. The default is 1800."),
@@ -147,11 +152,14 @@ let cliCommandSpecs: [CLICommandSpec] = [
             CLIFlag(name: "--ssh-key", value: "PATH", summary: "Private key used only for an ssh guest fetch."),
         ],
         examples: [
-            "microvm clone ./project demo --runtime node:22 --network none --ttl 1800 --cpus 2 --memory 1024 --ref main",
+            "microvm clone ./project demo --runtime node:22 --network none --ttl 1800 --cpus 2 --memory 1024 --ref main --json",
             "microvm clone git@github.com:org/repo.git demo --network nat --git-token-env MICROVM_EXAMPLE_TOKEN --ssh-key /tmp/key",
         ],
         discussion: networkChoice
             + " Names match [A-Za-z0-9][A-Za-z0-9._-]* and cannot start with task- or runtime-."
+            + " Creation reports runtime, network, and remaining TTL; expiration discards unexported edits."
+            + " Human progress uses stderr; JSON suppresses it. See docs/cli-creation.md for result schemas.",
+        allowsJSON: true
     ),
     CLICommandSpec(
         path: ["ls"],

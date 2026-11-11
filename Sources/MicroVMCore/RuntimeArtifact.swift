@@ -33,31 +33,58 @@ public struct RuntimeArtifact: Codable {
     public static func selectionKey(_ requested: [RuntimeSelection], arch: String) -> String {
         arch + "/" + requested.map { $0.name + "@" + $0.version }.sorted().joined(separator: "+")
     }
+    public static func preparationInstruction(_ requested: [RuntimeSelection]?) -> String {
+        let flags = (requested ?? defaultRuntimes).map { "--runtime " + shellQuote($0.name + ":" + $0.version) }.joined(separator: " ")
+        return "Run microvm runtime prepare /path/to/microvm " + flags + " using the same --home before creating a sandbox."
+    }
+
     public static func directory(_ requested: [RuntimeSelection]?, home: URL, arch: String) throws -> URL {
         guard let data = try? Data(contentsOf: home.appendingPathComponent("runtime-catalog.json")),
             let catalog = try? JSONDecoder().decode([String: String].self, from: data)
         else {
-            throw MicroVMError("no prepared runtime; run microvm runtime prepare REPO --runtime node:22")
+            throw MicroVMError("no prepared runtime", recovery: preparationInstruction(requested))
         }
         let key = selectionKey(requested ?? defaultRuntimes, arch: arch)
         guard let digest = catalog[key], digest.count == 64, digest.allSatisfy({ $0.isHexDigit }) else {
-            throw MicroVMError("unsupported or unprepared runtimes: \(key); prepare matching artifacts; no version substitution")
+            throw MicroVMError(
+                "unsupported or unprepared runtimes: \(key); no version substitution", recovery: preparationInstruction(requested))
         }
         return home.appendingPathComponent("runtimes").appendingPathComponent(digest)
     }
 
     public static func resolve(_ requested: [RuntimeSelection]?, directory: URL, arch: String) throws -> RuntimeArtifact {
-        let artifact = try JSONDecoder().decode(
-            RuntimeArtifact.self, from: Data(contentsOf: directory.appendingPathComponent("runtime.json")))
+        let artifact: RuntimeArtifact
+        do {
+            artifact = try JSONDecoder().decode(
+                RuntimeArtifact.self, from: Data(contentsOf: directory.appendingPathComponent("runtime.json")))
+        } catch {
+            throw MicroVMError("prepared runtime manifest is missing or invalid", recovery: preparationInstruction(requested))
+        }
         guard artifact.formatVersion == currentFormatVersion else {
-            throw MicroVMError("runtime artifact is outdated; run microvm runtime prepare before creating tasks")
+            throw MicroVMError("runtime artifact is outdated", recovery: preparationInstruction(requested))
         }
         guard artifact.arch == arch,
             artifact.runtimes == (requested ?? defaultRuntimes)
         else {
-            throw MicroVMError("unsupported runtimes or architecture; prepare a matching artifact; no version substitution is performed")
+            throw MicroVMError(
+                "unsupported runtimes or architecture; no version substitution is performed", recovery: preparationInstruction(requested))
         }
         return artifact
+    }
+
+    static func verifyFiles(_ artifact: RuntimeArtifact, directory: URL) throws {
+        guard let digest = try? fileDigest(directory.appendingPathComponent("runtime.ext4")), digest == artifact.artifactDigest else {
+            throw MicroVMError(
+                "prepared runtime disk is missing or has a hash mismatch", recovery: preparationInstruction(artifact.runtimes))
+        }
+        let bootImagesPresent = ["kernel", "initrd"].allSatisfy { name in
+            let file = directory.appendingPathComponent(name)
+            let values = try? file.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+            return values?.isRegularFile == true && (values?.fileSize ?? 0) > 0
+        }
+        guard bootImagesPresent else {
+            throw MicroVMError("prepared runtime boot images are missing", recovery: preparationInstruction(artifact.runtimes))
+        }
     }
 
     public static let defaultRuntimes = [RuntimeSelection(name: "node", version: "22")]

@@ -59,6 +59,11 @@ func TestOldNodeArtifactIsNotReused(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "runtime.ext4"), body, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	for _, name := range []string{"kernel", "initrd"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("boot image"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	selection := selectionKey("aarch64", recipe.Requests)
 	staleKey := strings.Repeat("ab", 32)
 	write := func(manifest Manifest) {
@@ -93,6 +98,12 @@ func TestOldNodeArtifactIsNotReused(t *testing.T) {
 	got, ok := reusablePublished(home, selection, "current-key", recipe.Tools)
 	if !ok || got.Tools["node"] != "v22.23.4" || got.Tools["npm"] != "10.9.9" {
 		t.Fatalf("current artifact refused: %+v ok=%v", got.Tools, ok)
+	}
+	if err := os.Remove(filepath.Join(dir, "initrd")); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := reusablePublished(home, selection, "current-key", recipe.Tools); ok {
+		t.Fatal("reused runtime with a missing boot image instead of rebuilding it")
 	}
 }
 

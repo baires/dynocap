@@ -82,6 +82,7 @@ final class TaskTests: XCTestCase {
         var task = TaskCommand(op: "start")
         task.projectPath = "/tmp/project"
         task.runtimes = RuntimeArtifact.defaultRuntimes
+        task.reportProgress = true
         for message in [
             ControlMessage.task(task),
             .transfer(
@@ -163,7 +164,8 @@ final class TaskTests: XCTestCase {
             environment: [:], formatVersion: 1, verificationCommand: [])
         try JSONEncoder().encode(legacy).write(to: root.appendingPathComponent("runtime.json"))
         XCTAssertThrowsError(try RuntimeArtifact.resolve(nil, directory: root, arch: "aarch64")) { error in
-            XCTAssertTrue(String(describing: error).contains("runtime prepare"))
+            XCTAssertTrue((error as? MicroVMError)?.message.contains("outdated") == true)
+            XCTAssertTrue((error as? MicroVMError)?.recovery.contains("runtime prepare") == true)
         }
     }
 

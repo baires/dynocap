@@ -53,7 +53,9 @@ enum TaskSourceResolver {
             guard parsed.kind == "https" else { throw MicroVMError("ssh repository requires --ssh-key") }
         }
         guard command.network == .nat || command.network == .filtered else {
-            throw MicroVMError("repository fetch requires --network nat")
+            throw MicroVMError(
+                "repository fetch requires explicit --network nat or --network filtered",
+                recovery: "Select filtered for allowlisted HTTPS or nat for unrestricted outbound access; an offline sandbox cannot fetch a URL.")
         }
         // Filtered egress is TCP 443 only, so an SSH fetch cannot leave the guest on that mode.
         if key != nil && command.network != .nat {
