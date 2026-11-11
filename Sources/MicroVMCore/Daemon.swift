@@ -230,7 +230,7 @@ public final class Daemon {
             case .shutdown:
                 try ControlCodec.write(fd, .result(try JSONEncoder().encode(OKResult(ok: true))))
                 DispatchQueue.global().async { [weak self] in self?.stop() }
-            case .result, .stdout, .stderr, .exit, .error:
+            case .result, .stdout, .stderr, .exit, .error, .stdin, .stdinEOF:
                 try ControlCodec.write(fd, .error(daemonErrorText(MicroVMError("clients cannot send response frames"))))
             }
         } catch {
@@ -407,9 +407,14 @@ public final class Daemon {
 
     private func performExec(_ fd: Int32, _ command: ExecCommand) throws {
         var command = command
+        if let input = command.input, !["none", "pipe", "interactive"].contains(input) {
+            throw MicroVMError("unsupported exec input \(input)")
+        }
         if let task = try tasks.records().first(where: { $0.id == command.name || $0.name == command.name }) {
             command.name = task.id
             if command.cwd.isEmpty { command.cwd = "/workspace" }
+        } else if command.cwd.isEmpty {
+            command.cwd = "/"
         }
         try POSIX.setWriteTimeout(fd, seconds: 5)
         let taskIndex: Int?
@@ -447,7 +452,7 @@ public final class Daemon {
         if nextExecID == 0 { nextExecID = 1 }
         let id = nextExecID
         lock.unlock()
-        let request = ExecRequest(
+        var request = ExecRequest(
             name: command.name,
             id: id,
             argv: command.argv,
@@ -455,6 +460,7 @@ public final class Daemon {
             cwd: command.cwd,
             timeoutSeconds: command.timeoutSeconds
         )
+        request.streamStdin = command.input == "pipe" || command.input == "interactive"
         let writeLock = NSLock()
         let state = ExecWait()
         let sem = DispatchSemaphore(value: 0)
@@ -485,6 +491,7 @@ public final class Daemon {
                 // A caller that stops reading output must not prevent host teardown.
                 DispatchQueue.global().async {
                     send(.error(daemonErrorText(MicroVMError(reason))), terminal: true)
+                    _ = shutdown(fd, Int32(SHUT_RD))
                     sem.signal()
                 }
             }
@@ -501,6 +508,7 @@ public final class Daemon {
                         self.backend.cancelExec(name: command.name, id: id)
                         if state.markFinished() {
                             send(.error(daemonErrorText(MicroVMError(taskError!))), terminal: true)
+                            _ = shutdown(fd, Int32(SHUT_RD))
                             sem.signal()
                         }
                         DispatchQueue.global().async { try? self.destroyVM(command.name) }
@@ -516,6 +524,7 @@ public final class Daemon {
                         self.backend.cancelExec(name: command.name, id: id)
                         if state.markFinished() {
                             send(.error(daemonErrorText(MicroVMError(taskError!))), terminal: true)
+                            _ = shutdown(fd, Int32(SHUT_RD))
                             sem.signal()
                         }
                         DispatchQueue.global().async { try? self.destroyVM(command.name) }
@@ -525,18 +534,25 @@ public final class Daemon {
                 if state.markFinished() {
                     taskCode = signal > 0 ? 128 + signal : code
                     send(.exit(code: code, signal: signal), terminal: true)
+                    _ = shutdown(fd, Int32(SHUT_RD))
                     sem.signal()
                 }
             case .failed(let message):
                 if state.markFinished() {
                     taskError = message
                     send(.error(daemonErrorText(MicroVMError(message))), terminal: true)
+                    _ = shutdown(fd, Int32(SHUT_RD))
                     sem.signal()
                 }
             }
         }
         lifecycle.lock.unlock()
         locked = false
+        if request.streamStdin && !state.isFinished {
+            Thread.detachNewThread { [weak self] in
+                self?.pumpExecInput(fd: fd, name: command.name, id: id, state: state, sem: sem)
+            }
+        }
         let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global())
         timer.schedule(deadline: .now() + .seconds(command.timeoutSeconds))
         timer.setEventHandler { [weak self] in
@@ -548,6 +564,7 @@ public final class Daemon {
                 taskCode = 124
                 taskError = "exec in \(command.name) timed out after \(command.timeoutSeconds)s"
                 send(.error(daemonErrorText(MicroVMError(taskError!, exitCode: 124, code: .commandTimeout))), terminal: true)
+                _ = shutdown(fd, Int32(SHUT_RD))
                 sem.signal()
             }
         }
@@ -557,6 +574,49 @@ public final class Daemon {
         lifecycle.lock.lock()
         live.execs[id] = nil
         lifecycle.lock.unlock()
+    }
+
+
+    /// Reads client stdin until EOF, disconnect, or the exec finishing.
+    /// The command deadline waits on another thread, so this read cannot block TTL or timeout.
+    private func pumpExecInput(fd: Int32, name: String, id: UInt32, state: ExecWait, sem: DispatchSemaphore) {
+        while !state.isFinished {
+            let message: ControlMessage
+            do {
+                message = try ControlCodec.read(fd)
+            } catch {
+                stopExecInput(name: name, id: id, state: state, sem: sem)
+                return
+            }
+            if state.isFinished { return }
+            do {
+                switch message {
+                case .stdin(let data):
+                    var offset = 0
+                    while offset < data.count {
+                        let end = min(offset + GuestProtocol.maxChunk, data.count)
+                        try backend.writeStdin(name: name, id: id, data: data.subdata(in: offset..<end))
+                        offset = end
+                    }
+                case .stdinEOF:
+                    try backend.closeStdin(name: name, id: id)
+                    return
+                default:
+                    stopExecInput(name: name, id: id, state: state, sem: sem)
+                    return
+                }
+            } catch {
+                stopExecInput(name: name, id: id, state: state, sem: sem)
+                return
+            }
+        }
+    }
+
+    private func stopExecInput(name: String, id: UInt32, state: ExecWait, sem: DispatchSemaphore) {
+        if state.markFinished() {
+            backend.cancelExec(name: name, id: id)
+            sem.signal()
+        }
     }
 
     private func destroyVM(_ name: String) throws {
@@ -912,13 +972,35 @@ public struct DaemonClient {
 
     public func exec(
         _ command: ExecCommand,
+        readStdin: ((ExecStdinControl) -> Data?)? = nil,
         onStdout: (Data) -> Void = { _ in },
         onStderr: (Data) -> Void = { _ in }
     ) throws -> ExecOutcome {
         if command.requireOffline == true { try requirePolicy() }
+        let streaming = command.input == "pipe" || command.input == "interactive"
+        if streaming { try requireExecStream() }
         let fd = try connect()
-        defer { _ = closeFD(fd) }
+        let writerDone = DispatchSemaphore(value: 0)
+        var control: ExecStdinControl?
+        var writerStarted = false
+        defer {
+            control?.stop()
+            if writerStarted { writerDone.wait() }
+            _ = closeFD(fd)
+        }
         try ControlCodec.write(fd, .exec(command))
+        if streaming, let readStdin {
+            let gate = ExecStdinControl()
+            control = gate
+            writerStarted = true
+            Thread.detachNewThread {
+                defer { writerDone.signal() }
+                writeExecStdin(fd: fd, control: gate, read: readStdin)
+            }
+        } else {
+            writerStarted = true
+            writerDone.signal()
+        }
         var stdout = Data()
         var stderr = Data()
         while true {
@@ -940,6 +1022,12 @@ public struct DaemonClient {
         }
     }
 
+    private func requireExecStream() throws {
+        let reply = try roundTrip(.ping)
+        guard case .result(let data) = reply else { throw messageError(reply) }
+        try validateExecStreamCapability(data)
+    }
+
     private func connect() throws -> Int32 {
         do { return try POSIX.connectUnix(socketPath) } catch {
             throw MicroVMError("cannot connect to daemon at \(socketPath)", code: .daemonUnavailable)
@@ -958,6 +1046,30 @@ public struct DaemonClient {
             return daemonError(text)
         }
         return MicroVMError("unexpected daemon reply")
+    }
+}
+
+
+private func writeExecStdin(fd: Int32, control: ExecStdinControl, read: (ExecStdinControl) -> Data?) {
+    let chunkSize = 32 * 1024
+    do {
+        while !control.isStopped {
+            guard let chunk = read(control), !chunk.isEmpty else {
+                if !control.isStopped {
+                    try ControlCodec.write(fd, .stdinEOF)
+                }
+                return
+            }
+            var offset = 0
+            while offset < chunk.count {
+                if control.isStopped { return }
+                let end = min(offset + chunkSize, chunk.count)
+                try ControlCodec.write(fd, .stdin(chunk.subdata(in: offset..<end)))
+                offset = end
+            }
+        }
+    } catch {
+        return
     }
 }
 

@@ -51,6 +51,8 @@ export type ExecOptions = {
   cwd?: string;
   env?: Record<string, string>;
   timeoutSeconds?: number;
+  /** Streamed to the guest, then closed. Requires an exec stream v1 daemon. */
+  stdin?: Uint8Array;
   /** Raw guest bytes for this chunk. A character may be split across chunks. */
   onStdout?: (chunk: Uint8Array) => void;
   onStderr?: (chunk: Uint8Array) => void;
@@ -147,8 +149,10 @@ export class Sandbox {
         env: envEntries(options.env ?? {}),
         cwd: options.cwd ?? "",
         timeoutSeconds: options.timeoutSeconds ?? 60,
+        ...(options.stdin === undefined ? {} : { input: "pipe" as const }),
       },
-      options
+      options,
+      options.stdin
     );
     const exitCode = outcome.signal > 0 ? 128 + outcome.signal : outcome.code;
     return {

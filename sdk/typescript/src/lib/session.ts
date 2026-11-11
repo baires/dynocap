@@ -1,7 +1,13 @@
 import net from "node:net";
 
 import { SandboxError, classifyDaemonMessage } from "./errors.ts";
-import { FrameReader, decodeBody, type Inbound } from "./framing.ts";
+import {
+  ControlType,
+  FrameReader,
+  decodeBody,
+  encodeFrame,
+  type Inbound,
+} from "./framing.ts";
 
 export type ExecHandlers = {
   maxOutputBytes?: number;
@@ -39,51 +45,66 @@ export async function roundTrip(
 export async function execStream(
   socketPath: string,
   frame: Buffer,
-  handlers: ExecHandlers
+  handlers: ExecHandlers,
+  stdin?: Uint8Array
 ): Promise<ExecStream> {
   return withSocket(socketPath, async (socket) => {
     const incoming = new Incoming(socket);
     await writeFrame(socket, frame);
-    const stdout: Buffer[] = [];
-    const stderr: Buffer[] = [];
-    let stdoutBytes = 0,
-      stderrBytes = 0;
-    const limit = handlers.maxOutputBytes ?? Infinity;
-    for (;;) {
-      const message = await incoming.next();
-      if (!message) break;
-      switch (message.kind) {
-        case "stdout":
-          if (stdoutBytes < limit)
-            stdout.push(
-              Buffer.from(message.data).subarray(0, limit - stdoutBytes)
-            );
-          stdoutBytes += message.data.length;
-          handlers.onStdout?.(message.data);
-          break;
-        case "stderr":
-          if (stderrBytes < limit)
-            stderr.push(
-              Buffer.from(message.data).subarray(0, limit - stderrBytes)
-            );
-          stderrBytes += message.data.length;
-          handlers.onStderr?.(message.data);
-          break;
-        case "exit":
-          return {
-            truncated: stdoutBytes > limit || stderrBytes > limit,
-            code: message.code,
-            signal: message.signal,
-            stdout: concat(stdout),
-            stderr: concat(stderr),
-          };
-        case "error":
-          throw classifyDaemonMessage(message.message, true);
-        default:
-          throw new SandboxError("daemon", "unexpected exec reply");
+    let stdinFailed: Error | undefined;
+    const stdinWrite = writeExecStdin(socket, stdin).catch((error: unknown) => {
+      stdinFailed = error instanceof Error ? error : new Error(String(error));
+      socket.destroy();
+    });
+    try {
+      const stdout: Buffer[] = [];
+      const stderr: Buffer[] = [];
+      let stdoutBytes = 0,
+        stderrBytes = 0;
+      const limit = handlers.maxOutputBytes ?? Infinity;
+      for (;;) {
+        const message = await incoming.next();
+        if (!message) break;
+        switch (message.kind) {
+          case "stdout":
+            if (stdoutBytes < limit)
+              stdout.push(
+                Buffer.from(message.data).subarray(0, limit - stdoutBytes)
+              );
+            stdoutBytes += message.data.length;
+            handlers.onStdout?.(message.data);
+            break;
+          case "stderr":
+            if (stderrBytes < limit)
+              stderr.push(
+                Buffer.from(message.data).subarray(0, limit - stderrBytes)
+              );
+            stderrBytes += message.data.length;
+            handlers.onStderr?.(message.data);
+            break;
+          case "exit":
+            socket.destroy();
+            return {
+              truncated: stdoutBytes > limit || stderrBytes > limit,
+              code: message.code,
+              signal: message.signal,
+              stdout: concat(stdout),
+              stderr: concat(stderr),
+            };
+          case "error":
+            throw classifyDaemonMessage(message.message, true);
+          default:
+            throw new SandboxError("daemon", "unexpected exec reply");
+        }
       }
+      throw new SandboxError("daemon", "daemon closed the exec stream");
+    } catch (error) {
+      await stdinWrite;
+      if (stdinFailed) throw new SandboxError("daemon", stdinFailed.message);
+      throw error;
+    } finally {
+      await stdinWrite;
     }
-    throw new SandboxError("daemon", "daemon closed the exec stream");
   });
 }
 
@@ -118,6 +139,25 @@ function connect(socketPath: string): Promise<net.Socket> {
       resolve(socket);
     });
   });
+}
+
+async function writeExecStdin(
+  socket: net.Socket,
+  stdin: Uint8Array | undefined
+): Promise<void> {
+  if (!stdin) return;
+  const chunkSize = 32 * 1024;
+  for (let offset = 0; offset < stdin.length; offset += chunkSize) {
+    const chunk = stdin.subarray(
+      offset,
+      Math.min(offset + chunkSize, stdin.length)
+    );
+    await writeFrame(
+      socket,
+      encodeFrame(ControlType.stdin, Buffer.from(chunk))
+    );
+  }
+  await writeFrame(socket, encodeFrame(ControlType.stdinEOF, Buffer.alloc(0)));
 }
 
 function writeFrame(socket: net.Socket, frame: Buffer): Promise<void> {

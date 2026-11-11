@@ -242,18 +242,25 @@ let cliCommandSpecs: [CLICommandSpec] = [
         usage: "microvm exec NAME_OR_ID [OPTIONS] [--] COMMAND [ARGS...]",
         flags: [
             CLIFlag(name: "--timeout", value: "SEC", summary: "Command deadline in seconds. The default is 60. Timeout exits 124."),
-            CLIFlag(name: "--cwd", value: "DIR", summary: "Guest working directory. Project sandboxes use /workspace when omitted."),
+            CLIFlag(name: "--cwd", value: "DIR", summary: "Guest working directory. Project sandboxes use /workspace; raw sandboxes use /."),
             CLIFlag(name: "--env", value: "KEY=VAL", summary: "Environment entry for the guest command. Repeat for more than one."),
+            CLIFlag(name: "-i", value: nil, summary: "Forward host stdin until EOF, including when stdin is a terminal."),
+            CLIFlag(name: "--interactive", value: nil, summary: "Same as -i. This does not allocate a guest terminal."),
+            CLIFlag(name: "--no-input", value: nil, summary: "Do not read host stdin. The guest receives immediate EOF."),
         ],
         examples: [
             "microvm exec demo --timeout 30 --cwd /workspace --env CI=1 -- npm test -- --runInBand",
             "microvm exec demo -- uname -a",
+            "microvm exec --interactive demo -- cat",
+            "microvm exec --no-input demo -- true",
         ],
         discussion: """
         Tokens after -- are the guest command and are preserved unchanged, including values that look \
         like microvm flags such as --home or --json. A command may also start at the first argument after \
         the sandbox name. The sandbox TTL is not renewed. Project sandboxes start in /workspace when --cwd \
-        is omitted.
+        is omitted. Raw sandboxes start in /. A pipe or file is streamed until EOF and then guest stdin \
+        is closed. A terminal is not read unless -i or --interactive is set. --no-input closes guest stdin \
+        immediately and cannot be combined with -i. Stdout and stderr stay separate. See docs/cli-exec.md.
         """
     ),
     CLICommandSpec(

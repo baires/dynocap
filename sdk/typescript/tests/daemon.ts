@@ -46,6 +46,7 @@ export async function fakeDaemon(
   const sandboxes = new Map<string, Recorded>();
   const execs: FakeExec[] = [];
   const runs: Record<string, unknown>[] = [];
+  const openExecs = new Map<net.Socket, Buffer[]>();
   const server = net.createServer((socket) => {
     const reader = new FrameReader();
     socket.on("data", (chunk: Buffer) => {
@@ -61,7 +62,7 @@ export async function fakeDaemon(
         return;
       }
       for (const body of bodies)
-        handle(socket, body, sandboxes, execs, runs, behavior, home);
+        handle(socket, body, sandboxes, execs, runs, behavior, home, openExecs);
     });
   });
   await new Promise<void>((resolve, reject) => {
@@ -87,6 +88,7 @@ type FakeBehavior = {
   policyVersion: number | null;
   taskVersion: number | null;
   taskManagementVersion: number | null;
+  execStreamVersion: number | null;
   resolveID: string;
   execNetwork: "none" | "nat";
   recordedNetwork: "none" | "nat" | "unknown";
@@ -100,7 +102,8 @@ function handle(
   execs: FakeExec[],
   runs: Record<string, unknown>[],
   behavior: Partial<FakeBehavior>,
-  home: string
+  home: string,
+  openExecs: Map<net.Socket, Buffer[]>
 ) {
   if (body.length === 0) return;
   const type = body[0]!;
@@ -128,6 +131,9 @@ function handle(
               ...(behavior.policyVersion === null
                 ? {}
                 : { isolationPolicyVersion: behavior.policyVersion ?? 1 }),
+              ...(behavior.execStreamVersion === null
+                ? {}
+                : { execStreamVersion: behavior.execStreamVersion ?? 1 }),
             })
           )
         );
@@ -281,6 +287,10 @@ function handle(
           cwd: String(request.cwd ?? ""),
           timeoutSeconds: Number(request.timeoutSeconds),
         });
+        if (request.input === "pipe" || request.input === "interactive") {
+          openExecs.set(socket, []);
+          return;
+        }
         if (argv[0] === "sleep" || command.startsWith("sleep")) {
           writeFrame(
             socket,
@@ -323,6 +333,34 @@ function handle(
         }
         sandboxes.delete(name);
         writeFrame(socket, 16, Buffer.from(JSON.stringify({ ok: true })));
+        return;
+      }
+      case 21: {
+        const chunks = openExecs.get(socket);
+        if (!chunks) {
+          writeFrame(
+            socket,
+            20,
+            Buffer.from("stdin frame without a streaming exec")
+          );
+          return;
+        }
+        chunks.push(Buffer.from(payload));
+        return;
+      }
+      case 22: {
+        const chunks = openExecs.get(socket);
+        if (!chunks) {
+          writeFrame(
+            socket,
+            20,
+            Buffer.from("stdin EOF without a streaming exec")
+          );
+          return;
+        }
+        openExecs.delete(socket);
+        writeFrame(socket, 17, Buffer.concat(chunks));
+        writeFrame(socket, 19, exitFrame(0, 0));
         return;
       }
       default:

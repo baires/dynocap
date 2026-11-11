@@ -183,3 +183,38 @@ func TestLargeStdinAfterStarted(t *testing.T) {
 		t.Fatalf("got %d bytes", output.Len())
 	}
 }
+
+func TestStdinEOFIsDelivered(t *testing.T) {
+	const id = 44
+	s := registerSession(id)
+	defer finishSession(id)
+	done := make(chan struct{})
+	var output bytes.Buffer
+	var exitCode int32 = -1
+	go func() {
+		defer close(done)
+		Execute(protocol.Message{Type: protocol.TypeExec, ID: id, Argv: []string{"cat"}}, func(m protocol.Message) error {
+			if m.Type == protocol.TypeStarted {
+				go func() {
+					s.writeStdin([]byte("piped\n"))
+					s.closeStdin()
+				}()
+			}
+			if m.Type == protocol.TypeStdout {
+				output.Write(m.Data)
+			}
+			if m.Type == protocol.TypeExit {
+				exitCode = m.ExitCode
+			}
+			return nil
+		})
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("cat did not see EOF")
+	}
+	if output.String() != "piped\n" || exitCode != 0 {
+		t.Fatalf("stdout %q code %d", output.String(), exitCode)
+	}
+}

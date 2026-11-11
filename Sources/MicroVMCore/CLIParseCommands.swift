@@ -194,6 +194,7 @@ func parseExec(_ args: [String], _ prefix: inout InvocationPrefix) throws -> Exe
     var cwd = ""
     var env: [String] = []
     var argv: [String] = []
+    var input: String?
     var reader = OptionReader(args: args)
     while let token = try reader.next() {
         if prefix.help || prefix.version { break }
@@ -220,20 +221,28 @@ func parseExec(_ args: [String], _ prefix: inout InvocationPrefix) throws -> Exe
                 let entry = try reader.value(flag, inline)
                 guard GuestProtocol.validEnv(entry) else { throw usageError("--env expects KEY=VAL, got \(entry)") }
                 env.append(entry)
+            case "-i", "--interactive":
+                if inline != nil { throw usageError("\(flag) does not take a value") }
+                if input == "none" { throw usageError("--interactive cannot be combined with --no-input") }
+                input = "interactive"
+            case "--no-input":
+                if inline != nil { throw usageError("--no-input does not take a value") }
+                if input == "interactive" { throw usageError("--no-input cannot be combined with --interactive") }
+                input = "none"
             default:
                 throw usageError("unknown flag \(flag)")
             }
         }
     }
     if prefix.help || prefix.version {
-        return ExecCommand(name: name ?? "help", argv: ["true"], env: env, cwd: cwd, timeoutSeconds: timeout)
+        return ExecCommand(name: name ?? "help", argv: ["true"], env: env, cwd: cwd, timeoutSeconds: timeout, input: input)
     }
     guard let name else { throw usageError("usage: microvm exec NAME_OR_ID -- COMMAND") }
     try rethrowUsage { try validateVMName(name) }
     guard !argv.isEmpty, !argv[0].isEmpty else {
         throw usageError("exec requires a command. Example: microvm exec \(name) -- uname -a")
     }
-    return ExecCommand(name: name, argv: argv, env: env, cwd: cwd, timeoutSeconds: timeout)
+    return ExecCommand(name: name, argv: argv, env: env, cwd: cwd, timeoutSeconds: timeout, input: input)
 }
 
 func applyStartFlag(_ command: inout TaskCommand, _ flag: String, _ raw: String, allowName: Bool) throws {

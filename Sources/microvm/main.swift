@@ -113,8 +113,11 @@ struct Main {
             let paths = try ready(invocation)
             let client = DaemonClient(socketPath: paths.socket.path)
             if command.op == "exec", let id = command.id, let argv = command.argv {
+                var request = ExecCommand(name: id, argv: argv, env: [], cwd: "/workspace", timeoutSeconds: 300)
+                request.input = resolveExecInput(requested: nil, stdinIsTerminal: isatty(STDIN_FILENO) == 1)
                 let result = try client.exec(
-                    ExecCommand(name: id, argv: argv, env: [], cwd: "/workspace", timeoutSeconds: 300),
+                    request,
+                    readStdin: request.input == "none" ? nil : { readExecStdin($0) },
                     onStdout: { try? FileHandle.standardOutput.write(contentsOf: $0) },
                     onStderr: { try? FileHandle.standardError.write(contentsOf: $0) })
                 exit(result.signal > 0 ? 128 + result.signal : result.code)
@@ -148,8 +151,11 @@ struct Main {
             print("\(status.name) \(status.phase)")
         case .exec(let command):
             let paths = try ready(invocation)
+            var command = command
+            command.input = resolveExecInput(requested: command.input, stdinIsTerminal: isatty(STDIN_FILENO) == 1)
             let outcome = try DaemonClient(socketPath: paths.socket.path).exec(
                 command,
+                readStdin: command.input == "none" ? nil : { readExecStdin($0) },
                 onStdout: { try? FileHandle.standardOutput.write(contentsOf: $0) },
                 onStderr: { try? FileHandle.standardError.write(contentsOf: $0) }
             )
@@ -160,6 +166,28 @@ struct Main {
             try DaemonClient(socketPath: paths.socket.path).destroy(name)
             print("destroyed \(name)")
         }
+    }
+
+    static func readExecStdin(_ control: ExecStdinControl) -> Data? {
+        var item = pollfd(fd: STDIN_FILENO, events: Int16(POLLIN), revents: 0)
+        while !control.isStopped {
+            let ready = poll(&item, 1, 50)
+            if ready < 0 {
+                if errno == EINTR { continue }
+                return nil
+            }
+            if ready == 0 { continue }
+            var buffer = [UInt8](repeating: 0, count: 32 * 1024)
+            let count = buffer.withUnsafeMutableBytes { raw -> Int in
+                guard let base = raw.baseAddress else { return 0 }
+                return read(STDIN_FILENO, base, raw.count)
+            }
+            if count > 0 { return Data(buffer.prefix(count)) }
+            if count == 0 { return nil }
+            if errno == EINTR || errno == EAGAIN { continue }
+            return nil
+        }
+        return nil
     }
 
     static func listingWidth() -> Int {

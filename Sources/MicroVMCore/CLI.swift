@@ -29,10 +29,13 @@ public struct ExecCommand: Codable, Equatable {
     public var timeoutSeconds: Int
     public var requireOffline: Bool?
     public var permitFiltered: Bool?
+    /// `none` closes guest stdin immediately, `pipe` streams host stdin until EOF,
+    /// and `interactive` does the same even when host stdin is a terminal.
+    public var input: String?
 
     public init(
         name: String, argv: [String], env: [String], cwd: String, timeoutSeconds: Int,
-        requireOffline: Bool? = nil, permitFiltered: Bool? = nil
+        requireOffline: Bool? = nil, permitFiltered: Bool? = nil, input: String? = nil
     ) {
         self.name = name
         self.argv = argv
@@ -41,6 +44,35 @@ public struct ExecCommand: Codable, Equatable {
         self.timeoutSeconds = timeoutSeconds
         self.requireOffline = requireOffline
         self.permitFiltered = permitFiltered
+        self.input = input
+    }
+}
+
+/// Stop flag for a host stdin reader. Set when the guest command finishes.
+public final class ExecStdinControl {
+    private let lock = NSLock()
+    private var stopped = false
+
+    public func stop() {
+        lock.lock()
+        stopped = true
+        lock.unlock()
+    }
+
+    public var isStopped: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return stopped
+    }
+}
+
+/// A terminal without `-i` sends no input. A pipe streams until EOF. Explicit modes win.
+public func resolveExecInput(requested: String?, stdinIsTerminal: Bool) -> String {
+    switch requested {
+    case "none", "pipe", "interactive":
+        return requested ?? "none"
+    default:
+        return stdinIsTerminal ? "none" : "pipe"
     }
 }
 

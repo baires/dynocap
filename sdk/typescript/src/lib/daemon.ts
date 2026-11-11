@@ -33,6 +33,7 @@ export type BootRequest = {
 export type ExecBody = {
   requireOffline?: boolean;
   permitFiltered?: boolean;
+  input?: "none" | "pipe" | "interactive";
   name: string;
   argv: string[];
   env: string[];
@@ -71,13 +72,18 @@ export async function list(home: string): Promise<SandboxInfo[]> {
 export async function exec(
   home: string,
   request: ExecBody,
-  handlers: ExecHandlers
+  handlers: ExecHandlers,
+  stdin?: Uint8Array
 ): Promise<ExecStream> {
   if (request.requireOffline) await requirePolicy(home);
+  if (request.input === "pipe" || request.input === "interactive") {
+    await requireExecStream(home);
+  }
   return execStream(
     daemonSocket(home),
     encodeJSON(ControlType.exec, request),
-    handlers
+    handlers,
+    stdin
   );
 }
 
@@ -149,6 +155,23 @@ function numberField(value: unknown, name: string): number {
     throw new SandboxError("daemon", `daemon ps reply had a bad ${name}`);
   }
   return value;
+}
+
+async function requireExecStream(home: string): Promise<void> {
+  const reply = await roundTrip(
+    daemonSocket(home),
+    encodeFrame(ControlType.ping, new Uint8Array())
+  );
+  if (
+    !reply ||
+    typeof reply !== "object" ||
+    (reply as Record<string, unknown>).execStreamVersion !== 1
+  ) {
+    throw new SandboxError(
+      "daemon",
+      "daemon lacks exec stream v1; rebuild and restart it"
+    );
+  }
 }
 
 async function requirePolicy(home: string): Promise<void> {

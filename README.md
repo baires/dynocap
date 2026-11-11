@@ -64,6 +64,7 @@ cd microvm
 ./scripts/fetch-image.sh
 .build/release/microvm run --name demo --cpus 2 --memory 1024
 .build/release/microvm exec demo -- uname -a
+echo hello | .build/release/microvm exec demo -- cat
 .build/release/microvm exec demo -- sh -c 'echo hello'
 .build/release/microvm ps
 .build/release/microvm destroy demo
@@ -87,6 +88,9 @@ sudo install -m 755 .build/release/microvm /usr/local/bin/microvm
 `run` returns when the guest agent answers on vsock, not when you destroy
 the VM. `exec` prints the guest's stdout and stderr as they arrive and exits
 with the guest status (128+signal if it was killed, 124 on timeout).
+Piped stdin is streamed to the guest and closed at EOF. A terminal is not
+read unless you pass `-i`. `--no-input` closes guest stdin immediately.
+Project sandboxes start in `/workspace`; raw sandboxes start in `/`.
 
 ## Image
 

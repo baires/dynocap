@@ -48,6 +48,22 @@ public final class VirtualizationBackend: VMBackend {
         DispatchQueue.global().async { vm?.cancelExec(id) }
     }
 
+    public func writeStdin(name: String, id: UInt32, data: Data) throws {
+        lock.lock()
+        let vm = machines[name]
+        lock.unlock()
+        guard let vm else { throw MicroVMError("VM \(name) is not running") }
+        try vm.writeStdin(id, data)
+    }
+
+    public func closeStdin(name: String, id: UInt32) throws {
+        lock.lock()
+        let vm = machines[name]
+        lock.unlock()
+        guard let vm else { throw MicroVMError("VM \(name) is not running") }
+        try vm.closeStdin(id)
+    }
+
     public func destroy(name: String, completion: @escaping (Result<Void, Error>) -> Void) {
         lock.lock()
         let vm = machines[name]
@@ -143,6 +159,7 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
         handlerLock.unlock()
         do {
             try link.write(.exec(start))
+            if request.streamStdin { return }
             if let file = request.stdinFile {
                 guard started.wait(timeout: .now() + .seconds(max(1, bounded))) == .success else {
                     throw MicroVMError("guest did not acknowledge stdin command")
@@ -158,6 +175,16 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
             clearHandler(request.id)
             emit(.failed(String(describing: error)))
         }
+    }
+
+    func writeStdin(_ id: UInt32, _ data: Data) throws {
+        guard let link = connectedLink else { throw MicroVMError("guest agent is not connected") }
+        try link.write(.stdin(id: id, data: data))
+    }
+
+    func closeStdin(_ id: UInt32) throws {
+        guard let link = connectedLink else { throw MicroVMError("guest agent is not connected") }
+        try link.write(.stdinEOF(id: id))
     }
 
     func cancelExec(_ id: UInt32) {

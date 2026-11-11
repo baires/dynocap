@@ -1,6 +1,7 @@
 import Foundation
 
-/// CLI ↔ daemon frames. One request per connection.
+/// CLI ↔ daemon frames. One request per connection, except an exec that streams
+/// stdin may send stdin frames until EOF while the daemon writes output.
 ///
 ///	u32 length
 ///	u8  type
@@ -19,6 +20,8 @@ public enum ControlMessage: Equatable {
     case stderr(Data)
     case exit(code: Int32, signal: Int32)
     case error(String)
+    case stdin(Data)
+    case stdinEOF
 }
 
 public enum ControlType {
@@ -35,6 +38,8 @@ public enum ControlType {
     public static let stderr: UInt8 = 18
     public static let exit: UInt8 = 19
     public static let error: UInt8 = 20
+    public static let stdin: UInt8 = 21
+    public static let stdinEOF: UInt8 = 22
 }
 
 public enum ControlCodec {
@@ -84,6 +89,12 @@ public enum ControlCodec {
         case .error(let text):
             type = ControlType.error
             payload = Data(text.utf8)
+        case .stdin(let data):
+            type = ControlType.stdin
+            payload = data
+        case .stdinEOF:
+            type = ControlType.stdinEOF
+            payload = Data()
         }
         var out = Data()
         out.appendU32(UInt32(1 + payload.count))
@@ -134,6 +145,11 @@ public enum ControlCodec {
                 throw MicroVMError("error frame is not utf-8")
             }
             return .error(text)
+        case ControlType.stdin:
+            return .stdin(Data(payload))
+        case ControlType.stdinEOF:
+            guard payload.isEmpty else { throw MicroVMError("stdin EOF frame is not empty") }
+            return .stdinEOF
         default:
             throw MicroVMError("unknown control type \(type)")
         }
@@ -211,6 +227,17 @@ public struct PolicyCapabilities: Codable {
     public var taskManagementVersion: Int? = 1
     public var taskVersion: Int? = 1
     public var transferVersion: Int? = 1
+    public var execStreamVersion: Int? = 1
+}
+
+public func validateExecStreamCapability(_ data: Data) throws {
+    guard let capability = try? JSONDecoder().decode(PolicyCapabilities.self, from: data),
+        capability.execStreamVersion == 1
+    else {
+        throw MicroVMError(
+            "daemon lacks exec stream v1; rebuild and restart it",
+            code: .incompatibleDaemon)
+    }
 }
 
 public struct TransferCommand: Codable, Equatable {
