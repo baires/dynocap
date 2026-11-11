@@ -157,6 +157,9 @@ public final class Daemon {
                     guard let target = command.id else { throw MicroVMError("task name or id required") }
                     data = try JSONEncoder().encode(TaskDescriptor(tasks.resolve(target)))
                 case "entries": data = try JSONEncoder().encode(managedEntries())
+                case "logs":
+                    guard let target = command.id else { throw MicroVMError("sandbox name or id required") }
+                    data = try JSONEncoder().encode(tasks.executionLogs(target))
                 case "inspect":
                     guard let target = command.id else { throw MicroVMError("sandbox name or id required") }
                     data = try JSONEncoder().encode(tasks.inspect(target, sandboxes: store.list()))
@@ -499,8 +502,9 @@ public final class Daemon {
                 lifecycle.lock.lock()
                 if lifecycle.live === live { self.backend.cancelExec(name: command.name, id: id) }
                 lifecycle.lock.unlock()
-                send(.error(daemonErrorText(MicroVMError(
-                    "exec in \(command.name) timed out after \(command.timeoutSeconds)s", exitCode: 124, code: .commandTimeout))), terminal: true)
+                taskCode = 124
+                taskError = "exec in \(command.name) timed out after \(command.timeoutSeconds)s"
+                send(.error(daemonErrorText(MicroVMError(taskError!, exitCode: 124, code: .commandTimeout))), terminal: true)
                 sem.signal()
             }
         }
@@ -789,7 +793,7 @@ public struct DaemonClient {
     }
     public func task(_ command: TaskCommand, onProgress: ((String) -> Void)? = nil) throws -> Data {
         try requireTasks()
-        if command.name != nil || ["list", "resolve", "entries", "remove", "diff", "inspect"].contains(command.op) {
+        if command.name != nil || ["list", "resolve", "entries", "remove", "diff", "inspect", "logs"].contains(command.op) {
             try requireTaskManagement()
         }
         if command.op == "inspect" {
@@ -797,6 +801,13 @@ public struct DaemonClient {
             guard case .result(let data) = reply,
                   let capabilities = try? JSONDecoder().decode(PolicyCapabilities.self, from: data), capabilities.inspectionVersion == 1 else {
                 throw MicroVMError("daemon lacks inspection v1", code: .incompatibleDaemon)
+            }
+        }
+        if command.op == "logs" {
+            let reply = try roundTrip(.ping)
+            guard case .result(let data) = reply,
+                  let capabilities = try? JSONDecoder().decode(PolicyCapabilities.self, from: data), capabilities.executionLogsVersion == 1 else {
+                throw MicroVMError("daemon lacks execution logs v1", code: .incompatibleDaemon)
             }
         }
         var request = command

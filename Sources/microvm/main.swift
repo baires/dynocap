@@ -31,6 +31,17 @@ struct Main {
 
     static func dispatch(_ invocation: CLIInvocation, _ args: [String]) throws {
         switch invocation.command {
+        case .logs(let command):
+            let paths = try ready(invocation)
+            var request = TaskCommand(op: "logs")
+            request.id = command.target
+            let data = try DaemonClient(socketPath: paths.socket.path).task(request)
+            let logs = try JSONDecoder().decode(ExecutionLogs.self, from: data)
+            if command.list {
+                print(formatExecutionList(logs, arguments: args), terminator: "")
+            } else {
+                try replayExecutionLogs(logs, execution: command.execution)
+            }
         case .doctor(let runtimes):
             let executable = URL(fileURLWithPath: args[0]).standardizedFileURL.resolvingSymlinksInPath()
             let host = DoctorHost(

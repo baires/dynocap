@@ -26,6 +26,9 @@ public func parseCommand(_ args: [String]) throws -> CLIInvocation {
     }
     let commandArgs = Array(rest.dropFirst())
     switch sub {
+    case "logs":
+        let command = try parseLogs(commandArgs, &prefix)
+        return try finishParse(prefix, ["logs"], .logs(command))
     case "doctor":
         let runtimes = try parseDoctor(commandArgs, &prefix)
         return try finishParse(prefix, ["doctor"], .doctor(runtimes))
@@ -391,4 +394,36 @@ func parseDoctor(_ args: [String], _ prefix: inout InvocationPrefix) throws -> [
         }
     }
     return try runtimeSelections(runtime)
+}
+
+func parseLogs(_ args: [String], _ prefix: inout InvocationPrefix) throws -> LogsCommand {
+    var target: String?
+    var execution: Int?
+    var list = false
+    var reader = OptionReader(args: args)
+    while let token = try reader.next() {
+        if prefix.help || prefix.version { return LogsCommand(target: "help", list: false) }
+        switch token {
+        case .separator: throw usageError("unexpected argument --")
+        case .positional(let value):
+            guard target == nil else { throw usageError("unexpected argument \(value)") }
+            target = value
+        case .flag(let name, let inline):
+            if try consumeGlobal(name, inline, reader: &reader, prefix: &prefix) { continue }
+            switch name {
+            case "--list":
+                guard inline == nil else { throw usageError("--list does not take a value") }
+                list = true
+            case "--exec":
+                guard execution == nil else { throw usageError("--exec specified more than once") }
+                execution = try integerFlag(name, try reader.value(name, inline), min: 0)
+            default: throw usageError("unknown flag \(name)")
+            }
+        }
+    }
+    if prefix.help || prefix.version { return LogsCommand(target: "help", list: false) }
+    guard let target else { throw usageError("usage: microvm logs NAME_OR_ID [--list | --exec N]") }
+    guard !list || execution == nil else { throw usageError("--list and --exec cannot be combined") }
+    try rethrowUsage { try validateVMName(target) }
+    return LogsCommand(target: target, execution: execution, list: list)
 }

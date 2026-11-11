@@ -165,11 +165,15 @@ final class CLIHelpTests: XCTestCase {
         XCTAssertEqual(inspectHelp.status, 0)
         XCTAssertEqual(inspectHelp.stderr, "")
         XCTAssertTrue(inspectHelp.stdout.contains("NAME_OR_ID"))
+        let logsHelp = try runCLI(binary, ["--home", home.path, "logs", "--help"])
+        XCTAssertEqual(logsHelp.status, 0)
+        XCTAssertEqual(logsHelp.stderr, "")
+        XCTAssertTrue(logsHelp.stdout.contains("--exec"))
         XCTAssertFalse(FileManager.default.fileExists(atPath: home.path))
     }
 
     private func assertNoUnimplementedCommands(_ text: String) {
-        for hidden in ["microvm shell", "microvm logs", "microvm fork"] {
+        for hidden in ["microvm shell", "microvm fork"] {
             XCTAssertFalse(text.contains(hidden), hidden)
         }
     }

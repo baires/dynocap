@@ -202,6 +202,23 @@ let cliCommandSpecs: [CLICommandSpec] = [
         allowsJSON: true
     ),
     CLICommandSpec(
+        path: ["logs"],
+        group: .primary,
+        summary: "Discover executions or replay their retained output.",
+        usage: "microvm logs NAME_OR_ID [--list | --exec N]",
+        flags: [
+            CLIFlag(name: "--list", value: nil, summary: "List zero-based execution IDs, outcomes, and log integrity."),
+            CLIFlag(name: "--exec", value: "N", summary: "Replay this execution ID; default is the latest journal index."),
+        ],
+        examples: ["microvm logs demo", "microvm logs demo --list", "microvm logs demo --exec=0"],
+        discussion: """
+        Replay sends stored stdout to stdout and stored stderr to stderr, without labels or a reconstructed chronology.
+        Active, missing, or detectably truncated logs are refused before output. Legacy lengths may be unknown; --list reports that.
+        Successful replay exits 0 regardless of the original guest status. --json is unsupported, including with --list.
+        Logs are retained with the task after shutdown until its original retention deadline. See docs/cli-logs.md.
+        """
+    ),
+    CLICommandSpec(
         path: ["inspect"],
         group: .primary,
         summary: "Inspect a sandbox or its retained result.",

@@ -88,7 +88,7 @@ final class CLIErrorsTests: XCTestCase {
         XCTAssertTrue(missing.errorText.contains("microvm ls"))
         XCTAssertFalse(missing.errorText.contains("microvm-error-v1:"))
 
-        for command in [["exec", "demo", "--json", "--", "true"], ["diff", "demo", "--json"]] {
+        for command in [["exec", "demo", "--json", "--", "true"], ["diff", "demo", "--json"], ["logs", "demo", "--json"]] {
             let invalid = try runCLI(home, command)
             XCTAssertEqual(invalid.status, 2)
             XCTAssertEqual(invalid.stdout, Data())

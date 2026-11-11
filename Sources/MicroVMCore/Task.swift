@@ -30,6 +30,10 @@ public struct TaskCommandRecord: Codable {
     var error: String?
     var stdout: String
     var stderr: String
+    var stdoutBytes: Int64?
+    var stderrBytes: Int64?
+    var logsTruncated: Bool?
+    var outputFormat: String?
 }
 
 public struct TaskRecord: Codable {
@@ -336,7 +340,9 @@ final class TaskManager {
         if !DependencyCache.compatibleCommand(argv: argv, env: env) { record.dependencyCacheKey = nil }
         let index = record.commands.count
         record.commands.append(
-            TaskCommandRecord(argv: argv, startedAtUnix: unixNow(), stdout: "\(index).stdout", stderr: "\(index).stderr"))
+            TaskCommandRecord(
+                argv: argv, startedAtUnix: unixNow(), stdout: "\(index).stdout", stderr: "\(index).stderr",
+                stdoutBytes: 0, stderrBytes: 0, logsTruncated: false, outputFormat: "separate"))
         guard record.commands.count <= 1000, try JSONEncoder().encode(record).count <= 4 << 20 else {
             throw MicroVMError("task command journal limit exceeded")
         }
@@ -351,13 +357,30 @@ final class TaskManager {
         condition.lock()
         defer { condition.unlock() }
         guard var record = current, record.id == name else { return }
-        guard record.logBytes + data.count <= 32 << 20 else { throw MicroVMError("task log limit exceeded") }
+        guard record.logBytes + data.count <= 32 << 20 else {
+            record.commands[index].logsTruncated = true
+            current = record
+            try? save(record)
+            throw MicroVMError("task log limit exceeded")
+        }
         let path = dir(name).appendingPathComponent(stderr ? record.commands[index].stderr : record.commands[index].stdout)
         if !fm.fileExists(atPath: path.path) { fm.createFile(atPath: path.path, contents: nil) }
-        let file = try FileHandle(forWritingTo: path)
-        defer { try? file.close() }
-        try file.seekToEnd()
-        try file.write(contentsOf: data)
+        do {
+            let file = try FileHandle(forWritingTo: path)
+            defer { try? file.close() }
+            try file.seekToEnd()
+            try file.write(contentsOf: data)
+        } catch {
+            record.commands[index].logsTruncated = true
+            current = record
+            try? save(record)
+            throw error
+        }
+        if stderr {
+            record.commands[index].stderrBytes = (record.commands[index].stderrBytes ?? 0) + Int64(data.count)
+        } else {
+            record.commands[index].stdoutBytes = (record.commands[index].stdoutBytes ?? 0) + Int64(data.count)
+        }
         record.logBytes += data.count
         current = record
     }

@@ -56,6 +56,7 @@ public enum CLICommand: Equatable {
     case ps
     case ls
     case doctor([RuntimeSelection])
+    case logs(LogsCommand)
     case managed(TaskCommand)
     case run(RunRequest)
     case exec(ExecCommand)
@@ -76,4 +77,10 @@ public struct CLIInvocation: Equatable {
         self.verbose = verbose
         self.command = command
     }
+}
+
+public struct LogsCommand: Equatable {
+    public var target: String
+    public var execution: Int?
+    public var list: Bool
 }
