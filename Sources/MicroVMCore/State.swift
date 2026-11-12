@@ -82,6 +82,17 @@ public struct DaemonIdentity: Codable, Equatable {
     }
 }
 
+/// The teardown reason the daemon records when a sandbox's TTL ends.
+let sandboxLifetimeExpired = "sandbox lifetime expired"
+
+/// What a command sees when its sandbox's TTL ends. Expiry neither renews nor exports.
+func sandboxExpiredError(_ name: String) -> MicroVMError {
+    MicroVMError(
+        "sandbox \(name) lifetime expired; its unexported edits are lost", code: .invalidPhase,
+        recovery: "Expiry does not renew the TTL or export work. Retained logs and any published result keep their own "
+            + "retention deadline; see microvm inspect \(name). Create a new sandbox to continue.")
+}
+
 public func vmIsExpired(_ record: VMRecord, now: Int64) -> Bool {
     guard let ttl = record.ttlSeconds, ttl > 0 else { return false }
     switch record.phase {

@@ -41,6 +41,9 @@ public struct ExecCommand: Codable, Equatable {
     /// Set to run on a guest terminal of this size. Output is one combined stdout stream.
     /// An older daemon ignores this field, so clients must check `execTerminalVersion`.
     public var terminal: TerminalSize?
+    /// Asks the daemon to send the sandbox's expiration deadline before any output.
+    /// An older daemon ignores this field, so clients must check `execDeadlineVersion`.
+    public var reportDeadline: Bool?
 
     public init(
         name: String, argv: [String], env: [String], cwd: String, timeoutSeconds: Int,

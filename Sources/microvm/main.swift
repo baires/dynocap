@@ -199,6 +199,23 @@ struct Main {
                 })
             }
         }
+        // A terminal session warns on stderr before the sandbox TTL ends. Writes share a lock
+        // so a warning never lands inside a chunk of guest output.
+        let output = NSLock()
+        var warnings: DispatchSourceTimer?
+        defer { warnings?.cancel() }
+        let onDeadline: ((Int64) -> Void)? = command.terminal == nil ? nil : { deadline in
+            var schedule = TTLWarningSchedule(deadline: deadline)
+            let timer = DispatchSource.makeTimerSource(queue: .global())
+            timer.schedule(deadline: .now(), repeating: 1)
+            timer.setEventHandler {
+                guard let remaining = schedule.due(now: unixNow()) else { return }
+                let text = ttlWarningText(name: command.name, remaining: remaining, deadline: deadline)
+                output.withLock { try? FileHandle.standardError.write(contentsOf: Data(text.utf8)) }
+            }
+            timer.resume()
+            warnings = timer
+        }
         let interrupt = ExecInterrupt()
         let lock = NSLock()
         var count = 0
@@ -220,10 +237,11 @@ struct Main {
             let outcome = try client.exec(
                 command,
                 readStdin: command.input == "none" ? nil : { readExecStdin($0) },
-                onStdout: { try? FileHandle.standardOutput.write(contentsOf: $0) },
-                onStderr: { try? FileHandle.standardError.write(contentsOf: $0) },
+                onStdout: { data in output.withLock { try? FileHandle.standardOutput.write(contentsOf: data) } },
+                onStderr: { data in output.withLock { try? FileHandle.standardError.write(contentsOf: data) } },
                 interrupt: interrupt,
-                resize: resize
+                resize: resize,
+                onDeadline: onDeadline
             )
             return cliExitStatus(code: outcome.code, signal: outcome.signal)
         } catch {

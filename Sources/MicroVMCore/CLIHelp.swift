@@ -270,7 +270,8 @@ let cliCommandSpecs: [CLICommandSpec] = [
         terminal is put in raw mode and restored on exit, window resizes are forwarded, and Ctrl-C is a keystroke \
         that the guest terminal turns into SIGINT for its foreground job. A second Ctrl-C does not stop waiting \
         in this mode. stdout and stderr arrive combined on stdout, and logs replays that transcript. -t needs a \
-        terminal on stdin and cannot be combined with --no-input. TERM defaults to xterm-256color. See docs/cli-exec.md.
+        terminal on stdin and cannot be combined with --no-input. TERM defaults to xterm-256color. With -t, a stderr \
+        warning comes 5 minutes and 1 minute before the sandbox TTL ends. See docs/cli-exec.md.
         """
     ),
     CLICommandSpec(
@@ -286,7 +287,8 @@ let cliCommandSpecs: [CLICommandSpec] = [
         The host terminal is put in raw mode, window resizes are forwarded, and Ctrl-C is a keystroke that \
         interrupts the guest foreground job, not the shell. The host terminal is restored when the shell ends, \
         including when the connection is lost or the sandbox expires. There is no command deadline; the shell \
-        lasts until you exit it or the sandbox TTL ends it, and the TTL is not renewed. Leaving the shell does \
+        lasts until you exit it or the sandbox TTL ends it, and the TTL is not renewed. A stderr warning comes \
+        5 minutes and 1 minute before expiry; expiry discards unexported edits. Leaving the shell does \
         not finish or remove the sandbox; run finish or rm --force explicitly. The CLI exits with the shell's \
         status. Stdin and stdout must be terminals; use exec to script commands. --json is unsupported. \
         The session is retained as a terminal transcript for logs. See docs/cli-shell.md.

@@ -230,7 +230,7 @@ public final class Daemon {
             case .shutdown:
                 try ControlCodec.write(fd, .result(try JSONEncoder().encode(OKResult(ok: true))))
                 DispatchQueue.global().async { [weak self] in self?.stop() }
-            case .result, .stdout, .stderr, .exit, .error, .stdin, .stdinEOF, .signal, .resize:
+            case .result, .stdout, .stderr, .exit, .error, .stdin, .stdinEOF, .signal, .resize, .deadline:
                 try ControlCodec.write(fd, .error(daemonErrorText(MicroVMError("clients cannot send response frames"))))
             }
         } catch {
@@ -389,7 +389,7 @@ public final class Daemon {
             throw MicroVMError("sandbox \(request.name) stopped or expired during boot")
         }
         if vmIsExpired(current, now: unixNow()) {
-            try destroyLocked(request.name, lifecycle: lifecycle, reason: "sandbox lifetime expired")
+            try destroyLocked(request.name, lifecycle: lifecycle, reason: sandboxLifetimeExpired)
             throw MicroVMError("sandbox lifetime expired during boot")
         }
         switch result {
@@ -407,6 +407,7 @@ public final class Daemon {
 
     private func performExec(_ fd: Int32, _ command: ExecCommand) throws {
         var command = command
+        let requested = command.name
         if let input = command.input, !["none", "pipe", "interactive"].contains(input) {
             throw MicroVMError("unsupported exec input \(input)")
         }
@@ -439,8 +440,8 @@ public final class Daemon {
             throw MicroVMError("sandbox \(command.name) is \(record.phase.rawValue)", code: .invalidPhase)
         }
         if vmIsExpired(record, now: unixNow()) {
-            try destroyLocked(command.name, lifecycle: lifecycle, reason: "sandbox lifetime expired")
-            throw MicroVMError("sandbox \(command.name) lifetime expired", code: .invalidPhase)
+            try destroyLocked(command.name, lifecycle: lifecycle, reason: sandboxLifetimeExpired)
+            throw sandboxExpiredError(requested)
         }
         if let message = NetworkAdmission.rejection(
             network: record.network, requireOffline: command.requireOffline == true,
@@ -494,11 +495,15 @@ public final class Daemon {
             if state.markFinished() {
                 // A caller that stops reading output must not prevent host teardown.
                 DispatchQueue.global().async {
-                    send(.error(daemonErrorText(MicroVMError(reason))), terminal: true)
+                    let failure = reason == sandboxLifetimeExpired ? sandboxExpiredError(requested) : MicroVMError(reason)
+                    send(.error(daemonErrorText(failure)), terminal: true)
                     _ = shutdown(fd, Int32(SHUT_RD))
                     sem.signal()
                 }
             }
+        }
+        if command.reportDeadline == true, let ttl = record.ttlSeconds, ttl > 0 {
+            send(.deadline(record.createdAtUnix + Int64(ttl)))
         }
         backend.exec(request) { event in
             switch event {
@@ -718,7 +723,7 @@ public final class Daemon {
                 current.phase == .stopping || vmIsExpired(current, now: unixNow())
             else { continue }
             do {
-                try destroyLocked(record.name, lifecycle: lifecycle, reason: current.message ?? "sandbox lifetime expired")
+                try destroyLocked(record.name, lifecycle: lifecycle, reason: current.message ?? sandboxLifetimeExpired)
             } catch {
                 log("teardown will retry for \(record.name): \(error)")
             }
@@ -1000,8 +1005,12 @@ public struct DaemonClient {
         onStdout: (Data) -> Void = { _ in },
         onStderr: (Data) -> Void = { _ in },
         interrupt: ExecInterrupt? = nil,
-        resize: ExecResize? = nil
+        resize: ExecResize? = nil,
+        onDeadline: ((Int64) -> Void)? = nil
     ) throws -> ExecOutcome {
+        var command = command
+        // The deadline is advisory, so an older daemon runs the command without it.
+        command.reportDeadline = onDeadline != nil && (try? requireExecDeadline()) != nil ? true : nil
         if command.requireOffline == true { try requirePolicy() }
         let streaming = command.input == "pipe" || command.input == "interactive" || command.terminal != nil
         if streaming { try requireExecStream() }
@@ -1079,6 +1088,8 @@ public struct DaemonClient {
                 return ExecOutcome(code: code, signal: signal, stdout: stdout, stderr: stderr)
             case .error(let text):
                 throw daemonError(text)
+            case .deadline(let unix) where command.reportDeadline == true:
+                onDeadline?(unix)
             default:
                 throw MicroVMError("unexpected exec reply")
             }
@@ -1095,6 +1106,15 @@ public struct DaemonClient {
         let reply = try roundTrip(.ping)
         guard case .result(let data) = reply else { throw messageError(reply) }
         try validateExecTerminalCapability(data)
+    }
+
+    private func requireExecDeadline() throws {
+        let reply = try roundTrip(.ping)
+        guard case .result(let data) = reply,
+              let capabilities = try? JSONDecoder().decode(PolicyCapabilities.self, from: data),
+              capabilities.execDeadlineVersion == 1 else {
+            throw MicroVMError("daemon lacks exec deadline v1", code: .incompatibleDaemon)
+        }
     }
 
     private func requireExecUntimed() throws {

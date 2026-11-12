@@ -6,15 +6,18 @@ Checks input, initial size, resizing, Ctrl-C, exit status, host terminal restora
 SIGKILL, guest connection loss, and daemon death), and that the sandbox stays usable. Also interrupts
 an ordinary (non-terminal) foreground command. `shell` is checked for line editing and history, resizing,
 Ctrl-C of a child, outliving the ordinary 60-second command deadline, exit status, the sandbox staying
-alive, connection loss, and TTL expiry. Unless --skip-project is given, it prepares a node:22 runtime
+alive, connection loss, and TTL expiry. A 75-second sandbox checks TTL warning timing against the
+deadline the CLI reports. Unless --skip-project is given, it prepares a node:22 runtime
 (seeded from --cache; missing verified inputs are downloaded), checks that `shell` opens in /workspace,
 and checks terminal transcripts in a project task's logs, before and after finish.
 """
 import argparse
+import datetime
 import fcntl
 import os
 import pathlib
 import platform
+import re
 import select
 import shutil
 import signal
@@ -72,6 +75,20 @@ class Session:
                 if not chunk and self.process.poll() is not None:
                     raise AssertionError(f"CLI exited {self.process.returncode} before {needle!r}; output {self.text!r}")
                 self.output += chunk
+
+    def read_count(self, needle, count, timeout=20):
+        """Waits until `needle` has appeared `count` times; returns the time it did."""
+        deadline = time.monotonic() + timeout
+        while self.output.count(needle.encode()) < count:
+            if time.monotonic() >= deadline:
+                raise AssertionError(f"timed out waiting for {count}x {needle!r}; output {self.text!r}")
+            ready, _, _ = select.select([self.ptmx], [], [], 0.05)
+            if ready:
+                try:
+                    self.output += os.read(self.ptmx, 4096)
+                except OSError:
+                    pass
+        return time.time()
 
     def type(self, text):
         os.write(self.ptmx, text.encode())
@@ -273,6 +290,29 @@ def main():
                 assert ending.finish(timeout=30) == 1, ending.text
                 assert "lifetime expired" in ending.text and "left the shell" not in ending.text, ending.text
                 print("PASS: sandbox expiry ends the shell with status 1 and restores the terminal", flush=True)
+
+                cli("run", "--name", "warned", "--ttl", "75")
+                warned = Session(prefix, ["shell", "warned"])
+                warned.read_count(" UTC);", 1)
+                match = re.search(r"\r\nmicrovm: warned expires in ([0-9ms ]+) \(([0-9-]+ [0-9:]+) UTC\)", warned.text)
+                assert match, warned.text
+                deadline = datetime.datetime.strptime(match.group(2), "%Y-%m-%d %H:%M:%S").replace(
+                    tzinfo=datetime.timezone.utc).timestamp()
+                assert 60 < deadline - time.time() <= 75, (match.group(0), time.time())
+                warned.read_until("/ ")
+                warned.type("echo still-typing\r")
+                warned.read_until("still-typing\r\n")
+                second = warned.read_count("warned expires in", 2, timeout=80)
+                assert abs(second - (deadline - 60)) <= 2.5, (second, deadline)
+                assert re.search(r"warned expires in (1m|59s|58s) \(", warned.text), warned.text
+                assert warned.finish(timeout=80) == 1, warned.text
+                ended = time.time()
+                assert -1 <= ended - deadline <= 4, (ended, deadline)
+                assert warned.text.count("expires in") == 2, warned.text
+                assert "warned lifetime expired; its unexported edits are lost" in warned.text, warned.text
+                assert "own retention deadline" in warned.text, warned.text
+                print(f"PASS: TTL warnings at open and {second - (deadline - 60):+.1f}s from the 1-minute mark; "
+                      f"expiry {ended - deadline:+.1f}s from the deadline explains the loss and restores the terminal", flush=True)
 
                 killed = Session(prefix, ["exec", "-t", "term", "--", "sh", "-c", "echo ready; sleep 60"])
                 killed.read_until("ready")

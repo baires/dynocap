@@ -51,7 +51,8 @@ final class ExecTerminalTests: XCTestCase {
 
     func testExecHelpDocumentsTerminalMode() {
         let help = commandHelp(["exec"])
-        for text in ["-t", "--tty", "raw mode", "restored", "resizes", "combined", "terminal on stdin", "xterm-256color"] {
+        for text in ["-t", "--tty", "raw mode", "restored", "resizes", "combined", "terminal on stdin", "xterm-256color",
+                     "5 minutes and 1 minute before the sandbox TTL ends"] {
             XCTAssertTrue(help.contains(text), text)
         }
     }
@@ -80,7 +81,8 @@ final class ExecTerminalTests: XCTestCase {
         XCTAssertEqual(try parseCommand(["microvm", "help", "shell"]).command, .help(topic: ["shell"]))
         let help = commandHelp(["shell"])
         for text in ["microvm shell NAME_OR_ID", "/workspace", "Bash is not required", "no command deadline", "TTL",
-                     "does not finish or remove", "restored", "--json is unsupported", "docs/cli-shell.md"] {
+                     "does not finish or remove", "restored", "--json is unsupported", "docs/cli-shell.md",
+                     "5 minutes and 1 minute before expiry"] {
             XCTAssertTrue(help.contains(text), text)
         }
         XCTAssertTrue(commandHelp([]).contains("microvm shell demo"))
@@ -171,6 +173,60 @@ final class ExecTerminalTests: XCTestCase {
         guard case .error(let text) = try ControlCodec.read(negative) else { return XCTFail("expected rejection") }
         XCTAssertTrue(text.contains("timeoutSeconds"), text)
         XCTAssertEqual(harness.backend.requests.count, 1, "a negative deadline starts nothing")
+    }
+
+    func testDaemonReportsTheSandboxDeadlineOnlyWhenAsked() throws {
+        let harness = try TerminalHarness()
+        defer { harness.close() }
+        let fd = try POSIX.connectUnix(harness.daemon.paths.socket.path)
+        defer { _ = closeFD(fd) }
+        try ControlCodec.write(fd, .ping)
+        guard case .result(let ping) = try ControlCodec.read(fd) else { return XCTFail("expected ping result") }
+        XCTAssertEqual(try JSONDecoder().decode(PolicyCapabilities.self, from: ping).execDeadlineVersion, 1)
+        let record = try XCTUnwrap(try harness.client.ps().first { $0.name == "demo" })
+        let expected = record.createdAtUnix + Int64(try XCTUnwrap(record.ttlSeconds))
+
+        var command = ExecCommand(name: "demo", argv: ["top"], env: [], cwd: "", timeoutSeconds: 30, input: "interactive")
+        command.terminal = TerminalSize(rows: 24, cols: 80)
+        command.reportDeadline = true
+        let asked = try POSIX.connectUnix(harness.daemon.paths.socket.path)
+        defer { _ = closeFD(asked) }
+        try ControlCodec.write(asked, .exec(command))
+        XCTAssertEqual(try ControlCodec.read(asked), .deadline(expected), "the deadline precedes any output")
+        XCTAssertEqual(try ControlCodec.read(asked), .stdout(Data("ready\r\n".utf8)))
+        try ControlCodec.write(asked, .stdin(Data("q".utf8)))
+        XCTAssertEqual(try ControlCodec.read(asked), .exit(code: 0, signal: 0))
+
+        command.reportDeadline = nil
+        let plain = try POSIX.connectUnix(harness.daemon.paths.socket.path)
+        defer { _ = closeFD(plain) }
+        try ControlCodec.write(plain, .exec(command))
+        XCTAssertEqual(try ControlCodec.read(plain), .stdout(Data("ready\r\n".utf8)), "older clients never see the frame")
+        try ControlCodec.write(plain, .stdin(Data("q".utf8)))
+        XCTAssertEqual(try ControlCodec.read(plain), .exit(code: 0, signal: 0))
+
+        var received: [Int64] = []
+        command.reportDeadline = nil
+        let client = harness.client
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) {
+            let id = harness.backend.requests.last!.id
+            try? harness.backend.writeStdin(name: "demo", id: id, data: Data("q".utf8))
+        }
+        _ = try client.exec(command, readStdin: { _ in nil }, onDeadline: { received.append($0) })
+        XCTAssertEqual(received, [expected])
+    }
+
+    func testExpiryExplainsTheLossInATypedError() throws {
+        let harness = try TerminalHarness()
+        defer { harness.close() }
+        _ = try harness.client.run(RunRequest(name: "short", cpus: 1, memoryMB: 256, ttlSeconds: 1, bootTimeoutSeconds: 5))
+        XCTAssertThrowsError(try harness.client.exec(ExecCommand(name: "short", argv: ["top"], env: [], cwd: "", timeoutSeconds: 30))) {
+            let error = $0 as? MicroVMError
+            XCTAssertEqual(error?.code, .invalidPhase)
+            XCTAssertEqual(error?.message, "sandbox short lifetime expired; its unexported edits are lost")
+            XCTAssertTrue(error?.recovery.contains("does not renew the TTL or export") == true)
+            XCTAssertTrue(error?.recovery.contains("own retention deadline; see microvm inspect short") == true)
+        }
     }
 
     func testNonTerminalInputIsRefusedBeforeDaemonWork() throws {
@@ -519,6 +575,50 @@ final class ExecTerminalTests: XCTestCase {
         XCTAssertTrue(pty.waitFor("lifetime expired"), pty.text)
         XCTAssertFalse(pty.text.contains("left the shell"), pty.text)
         XCTAssertTrue(sameSettings(before, try pty.settings()))
+    }
+
+    func testTerminalSessionWarnsOnceBeforeExpiryWithoutTouchingTheGuest() throws {
+        let harness = try TerminalHarness()
+        defer { harness.close() }
+        _ = try harness.client.run(RunRequest(name: "short", cpus: 1, memoryMB: 256, ttlSeconds: 3, bootTimeoutSeconds: 5))
+        for args in [["shell", "short"], ["exec", "-t", "short", "--timeout", "30", "--", "top"]] {
+            let pty = try PTYProcess(home: harness.home, args: args, rows: 24, cols: 80)
+            defer { pty.close() }
+            let before = try pty.settings()
+            XCTAssertTrue(pty.waitFor("short expires in"), pty.text)
+            if args[0] == "shell" { pty.type("ab") }
+            XCTAssertEqual(pty.wait(seconds: 10), 1, pty.text)
+            XCTAssertEqual(pty.text.components(separatedBy: "expires in").count - 1, 1, "one warning, not repeated: \(pty.text)")
+            XCTAssertTrue(pty.text.contains("\r\nmicrovm: short expires in "), pty.text)
+            XCTAssertTrue(pty.waitFor("short lifetime expired; its unexported edits are lost"), pty.text)
+            XCTAssertTrue(pty.text.contains("own retention deadline"), pty.text)
+            XCTAssertTrue(sameSettings(before, try pty.settings()))
+            if args[0] == "exec" { break }
+            // The sandbox is gone, so the exec form below is refused at admission instead.
+            _ = try harness.client.run(RunRequest(name: "short", cpus: 1, memoryMB: 256, ttlSeconds: 3, bootTimeoutSeconds: 5))
+        }
+        XCTAssertFalse((String(bytes: harness.backend.input, encoding: .utf8) ?? "").contains("microvm"), "nothing was injected into guest input")
+    }
+
+    func testOrdinaryExecDoesNotWarn() throws {
+        let harness = try TerminalHarness()
+        defer { harness.close() }
+        _ = try harness.client.run(RunRequest(name: "short", cpus: 1, memoryMB: 256, ttlSeconds: 2, bootTimeoutSeconds: 5))
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: ProcessInfo.processInfo.environment["MICROVM_BIN"] ?? ".build/debug/microvm")
+        process.arguments = ["--home", harness.home.path, "exec", "short", "--timeout", "30", "--", "top"]
+        process.standardInput = FileHandle.nullDevice
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+        try process.run()
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 1)
+        let text = String(bytes: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        XCTAssertFalse(text.contains("expires in"), "stderr carries guest data without a terminal: \(text)")
+        XCTAssertTrue(text.contains("lifetime expired; its unexported edits are lost"), text)
+        XCTAssertEqual(stdout.fileHandleForReading.readDataToEndOfFile(), Data())
     }
 
     func testShellWithoutATerminalIsRejectedWithoutStartingADaemon() throws {

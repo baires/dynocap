@@ -296,6 +296,11 @@ struct Cursor {
         Int32(bitPattern: try u32())
     }
 
+    mutating func i64() throws -> Int64 {
+        let high = UInt64(try u32())
+        return Int64(bitPattern: high << 32 | UInt64(try u32()))
+    }
+
     mutating func bytes(_ n: Int) throws -> Data {
         guard n >= 0, index + n <= data.count else { throw MicroVMError("short frame") }
         let slice = data.subdata(in: index..<(index + n))
@@ -342,6 +347,12 @@ extension Data {
 
     mutating func appendI32(_ value: Int32) {
         appendU32(UInt32(bitPattern: value))
+    }
+
+    mutating func appendI64(_ value: Int64) {
+        let bits = UInt64(bitPattern: value)
+        appendU32(UInt32(bits >> 32))
+        appendU32(UInt32(bits & 0xffff_ffff))
     }
 
     mutating func appendString16(_ text: String) throws {

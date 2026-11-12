@@ -2,6 +2,7 @@ import Foundation
 
 /// CLI ↔ daemon frames. One request per connection, except an exec that streams
 /// stdin may send stdin frames until EOF, and may send signal and resize frames, while the daemon writes output.
+/// An exec that sets `reportDeadline` receives one deadline frame before its output.
 ///
 ///	u32 length
 ///	u8  type
@@ -24,6 +25,8 @@ public enum ControlMessage: Equatable {
     case stdinEOF
     case signal(Int32)
     case resize(TerminalSize)
+    /// The sandbox's expiration as Unix seconds. Daemon to client.
+    case deadline(Int64)
 }
 
 public enum ControlType {
@@ -44,6 +47,7 @@ public enum ControlType {
     public static let stdinEOF: UInt8 = 22
     public static let signal: UInt8 = 23
     public static let resize: UInt8 = 24
+    public static let deadline: UInt8 = 25
 }
 
 public enum ControlCodec {
@@ -111,6 +115,11 @@ public enum ControlCodec {
             body.appendU16(size.rows)
             body.appendU16(size.cols)
             payload = body
+        case .deadline(let unix):
+            type = ControlType.deadline
+            var body = Data()
+            body.appendI64(unix)
+            payload = body
         }
         var out = Data()
         out.appendU32(UInt32(1 + payload.count))
@@ -177,6 +186,11 @@ public enum ControlCodec {
             let size = TerminalSize(rows: try c.u16(), cols: try c.u16())
             try c.expectEnd()
             return .resize(size)
+        case ControlType.deadline:
+            var c = Cursor(Data(payload))
+            let unix = try c.i64()
+            try c.expectEnd()
+            return .deadline(unix)
         default:
             throw MicroVMError("unknown control type \(type)")
         }
@@ -259,6 +273,8 @@ public struct PolicyCapabilities: Codable {
     public var execTerminalVersion: Int? = 1
     /// 1 means `timeoutSeconds: 0` runs without a command deadline. Older daemons time out immediately.
     public var execUntimedVersion: Int? = 1
+    /// 1 means an exec with `reportDeadline` receives a deadline frame before its output.
+    public var execDeadlineVersion: Int? = 1
 }
 
 public func validateExecTerminalCapability(_ data: Data) throws {
