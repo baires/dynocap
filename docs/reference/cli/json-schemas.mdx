@@ -1,0 +1,151 @@
+---
+title: "CLI JSON Schemas"
+description: "Exact JSON schemas and field definitions for scripting and automated integration with the microvm CLI."
+sidebar_position: 3
+---
+
+# CLI JSON Schemas
+
+When passed `--json`, management commands print a single line-delimited JSON payload to `stdout`. Absent values are explicitly represented as `null`, timestamps are integer Unix epoch seconds (UTC), and consumers must tolerate extra fields.
+
+---
+
+## 1. Listing Schema (`microvm ls --json`)
+
+Returns an array of sandbox and task records:
+
+```json
+[
+  {
+    "id": "task-8f92b7c1",
+    "name": "demo",
+    "kind": "task",
+    "phase": "running",
+    "runtime": "node:22",
+    "network": "none",
+    "sandboxExpiresAtUnix": 1794958200,
+    "resultExpiresAtUnix": 1795563000,
+    "resultDirectory": null
+  }
+]
+```
+
+### Fields
+
+| Field                  | Type              | Description                                                                                      |
+| :--------------------- | :---------------- | :----------------------------------------------------------------------------------------------- |
+| `id`                   | `string`          | Immutable task ID or raw sandbox name.                                                           |
+| `name`                 | `string \| null`  | Friendly name assigned at creation, or `null`.                                                   |
+| `kind`                 | `string`          | `"task"` (project sandbox) or `"sandbox"` (raw).                                                 |
+| `phase`                | `string`          | Lifecycle phase: `"booting"`, `"running"`, `"stopping"`, `"stopped"`, `"completed"`, `"failed"`. |
+| `runtime`              | `string`          | Runtime identifier (e.g. `"node:22"`, `"minimal"`).                                              |
+| `network`              | `string \| null`  | `"none"`, `"filtered"`, `"nat"`, or `null`.                                                      |
+| `sandboxExpiresAtUnix` | `integer \| null` | Absolute TTL deadline in seconds. `null` if VM is stopped.                                       |
+| `resultExpiresAtUnix`  | `integer \| null` | Absolute retention deadline for logs and diffs (7 days from creation).                           |
+| `resultDirectory`      | `string \| null`  | Absolute path to exported host result directory, or `null`.                                      |
+
+---
+
+## 2. Creation Schema (`microvm clone --json`)
+
+Returned by `microvm clone` and `microvm task start`:
+
+```json
+{
+  "id": "task-8f92b7c1",
+  "name": "demo",
+  "phase": "running",
+  "runtimeDigest": "sha256:d8b2...",
+  "createdAtUnix": 1794956400,
+  "expiresAtUnix": 1794958200,
+  "sourceUrl": null,
+  "sourceRevision": "4b92c41"
+}
+```
+
+---
+
+## 3. Finish Schema (`microvm finish --json`)
+
+Returned when a task is finalized and exported:
+
+```json
+{
+  "id": "task-8f92b7c1",
+  "name": "demo",
+  "phase": "completed",
+  "patchPath": "/Users/user/.microvm/tasks/task-8f92b7c1/result/changes.patch",
+  "resultDirectory": "/Users/user/.microvm/tasks/task-8f92b7c1/result",
+  "expiresAtUnix": 1795563000
+}
+```
+
+---
+
+## 4. Inspection Schema (`microvm inspect --json`)
+
+Returned by `microvm inspect NAME`:
+
+```json
+{
+  "id": "task-8f92b7c1",
+  "name": "demo",
+  "kind": "task",
+  "taskPhase": "completed",
+  "sandboxPhase": "stopped",
+  "runtime": "node:22",
+  "network": "none",
+  "createdAtUnix": 1794956400,
+  "sandboxExpiresAtUnix": 1794958200,
+  "resultExpiresAtUnix": 1795563000,
+  "resultDirectory": "/Users/user/.microvm/tasks/task-8f92b7c1/result",
+  "patchPath": "/Users/user/.microvm/tasks/task-8f92b7c1/result/changes.patch",
+  "sourcePath": "/tmp/demo-project",
+  "sourceRevision": "4b92c41"
+}
+```
+
+---
+
+## 5. Removal Schema (`microvm rm --json`)
+
+Returned by `microvm rm` and `microvm destroy`:
+
+```json
+{
+  "target": "demo",
+  "removed": true,
+  "purged": false
+}
+```
+
+---
+
+## 6. Doctor Schema (`microvm doctor --json`)
+
+Diagnostic report of host readiness:
+
+```json
+{
+  "ok": true,
+  "home": "/Users/user/.microvm",
+  "runtime": "node:22",
+  "checks": [
+    {
+      "id": "platform",
+      "status": "pass",
+      "detail": "macOS 15.1 (arm64)"
+    },
+    {
+      "id": "signing",
+      "status": "pass",
+      "detail": "valid signature and virtualization entitlement"
+    },
+    {
+      "id": "daemon",
+      "status": "warn",
+      "detail": "daemon is not currently running"
+    }
+  ]
+}
+```

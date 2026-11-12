@@ -1,0 +1,79 @@
+---
+title: "Task Lifecycle and Finite TTL"
+description: "The architectural philosophy behind finite sandbox lifetimes, non-renewable TTLs, and 7-day result retention."
+sidebar_position: 3
+---
+
+# Task Lifecycle and Finite TTL
+
+One of the defining design decisions of MicroVM is that **sandboxes are strictly temporary**. There are no long-lived, perpetual virtual machines, no snapshot resumption, and no background processes that run indefinitely.
+
+---
+
+## 1. Why Finite TTL?
+
+When autonomous AI coding agents run in a loop, several failure modes frequently occur:
+
+- **Infinite Loops:** An agent writes a recursive function or looping shell command that never exits.
+- **Runaway Token / Compute Waste:** A stuck process consumes 100% CPU on your Mac for hours.
+- **Resource Leaks:** Forgotten virtual machines, orphaned processes, and multi-gigabyte virtual disks accumulate unnoticed on disk.
+
+To prevent these problems, MicroVM enforces an **immutable Time-To-Live (TTL)** on every sandbox:
+
+- Default TTL: **30 minutes (1,800 seconds)**.
+- Maximum TTL: **24 hours (86,400 seconds)**.
+- Minimum TTL: **30 seconds**.
+
+---
+
+## 2. Activity Never Renews TTL
+
+In many systems, user activity or network packets "refresh" a timeout lease. In MicroVM, **activity never extends or renews the TTL deadline**:
+
+```
+Creation (t = 0) ---------------------------------------------> Expiration (t = 30m)
+   |                |                     |                          |
+   Boot             exec: npm test        exec: feature edits        Sandbox DESTROYED
+   (TTL ticking)    (TTL ticking)         (TTL ticking)              (Unexported work lost)
+```
+
+The expiration deadline is calculated once at creation time:
+$$\text{ExpiresAt} = \text{CreatedAt} + \text{TTL}$$
+
+Regardless of how many commands are executed, how much data is streamed, or whether an interactive shell is active, the sandbox will be stopped and destroyed when `ExpiresAt` is reached.
+
+### Warning Indicators
+
+When using interactive modes (`microvm shell` or `microvm exec -t`), MicroVM prints clear countdown warnings to `stderr` as the TTL deadline approaches (at 5 minutes and 1 minute remaining), giving developers time to export their work using `microvm finish`.
+
+---
+
+## 3. The 7-Day Result Retention Rule
+
+When you finish a task using `microvm finish`, two things occur simultaneously:
+
+1. **The virtual machine is immediately destroyed:** Memory is reclaimed and the guest block device is deleted.
+2. **The result artifacts are preserved on the host:** The verified Git patch (`changes.patch`), changed files, runtime metadata, and execution journals are saved to `~/.microvm/tasks/<task-id>/result/`.
+
+These retained results persist on the host for **7 days from the moment the task was created**.
+
+```
+t = 0 (Create Task)
+  |
+  +-- Work in sandbox (TTL: up to 30 mins)
+  |
+  +-- microvm finish (Sandbox destroyed; Results published)
+  |
+  |   [ Retained Result Accessible on Host for 7 Days ]
+  |   - Replay logs: microvm logs <name> --list
+  |   - View diff:   microvm inspect <name>
+  |   - Apply patch: git apply <patch-path>
+  |
+t = +7 days (Automatic Purge)
+```
+
+### Key Properties:
+
+- Retention begins at **task creation**, not at finish.
+- If a task is interrupted or fails, its metadata and logs are still preserved for 7 days, allowing you to diagnose what went wrong.
+- You can manually delete results at any time with `microvm rm <name> --purge`.

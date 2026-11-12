@@ -1,0 +1,62 @@
+---
+title: "CLI Overview and Standards"
+description: "Global options, environment variables, exit codes, and signal conventions for the microvm command-line interface."
+sidebar_position: 1
+---
+
+# CLI Overview and Standards
+
+The `microvm` command-line tool manages local Linux sandboxes and project tasks on macOS.
+
+---
+
+## Global Options
+
+Global options can be placed either before or after the subcommand:
+
+```sh
+microvm --home /tmp/mvm ls
+microvm ls --home /tmp/mvm
+```
+
+| Option         | Description                                                                                          |
+| :------------- | :--------------------------------------------------------------------------------------------------- |
+| `--home PATH`  | Directory holding daemon socket, images, and sandboxes. Defaults to `$MICROVM_HOME` or `~/.microvm`. |
+| `--verbose`    | Emits detailed operational diagnostics to `stderr`.                                                  |
+| `--help`, `-h` | Displays help message and exits 0 (does not start daemon).                                           |
+| `--version`    | Displays CLI and runtime version and exits 0. Accepts `--json`.                                      |
+| `--json`       | Requests structured JSON output on stdout (supported on management commands).                        |
+
+---
+
+## Environment Variables
+
+| Variable         | Description                                                         | Default              |
+| :--------------- | :------------------------------------------------------------------ | :------------------- |
+| `MICROVM_HOME`   | Base directory for daemon socket, disks, and state records.         | `~/.microvm`         |
+| `MICROVM_MKE2FS` | Explicit path to `mke2fs` binary for formatting ext4 virtual disks. | Resolved via `$PATH` |
+| `NO_COLOR`       | Disables colored human terminal output when set.                    | Unset                |
+| `TERM`           | If set to `dumb`, interactive escape sequences are disabled.        | Inherited from host  |
+
+---
+
+## Exit Statuses
+
+MicroVM follows standard POSIX exit status conventions:
+
+| Exit Status    | Meaning                                                                    |
+| :------------- | :------------------------------------------------------------------------- |
+| `0`            | Success (host operation succeeded, or guest command exited with 0).        |
+| `1`            | Operational failure (daemon unreachable, boot error, task not found).      |
+| `2`            | Invalid CLI arguments (unknown flag, missing required parameter).          |
+| `124`          | Command deadline exceeded (`--timeout` elapsed).                           |
+| _Guest Code_   | `microvm exec` returns the exact numeric exit status of the guest command. |
+| `128 + Signal` | Execution terminated by signal (e.g. `130` for SIGINT, `143` for SIGTERM). |
+
+---
+
+## Stream Policy and Formatting
+
+- **Stdout:** Reserved exclusively for command results (JSON payloads, raw exec stdout, unified diff patches).
+- **Stderr:** Reserved for human progress lines, execution warnings, and structured error payloads.
+- **Content vs. Management Commands:** Commands that output content streams (`exec`, `logs`, `diff`, `shell`) do not support `--json`. Management commands (`clone`, `finish`, `ls`, `inspect`, `rm`, `doctor`) support `--json`.

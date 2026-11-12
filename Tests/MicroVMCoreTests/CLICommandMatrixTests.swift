@@ -2,7 +2,7 @@ import XCTest
 
 @testable import MicroVMCore
 
-/// Checks every exposed command against docs/cli-commands.md: help, JSON support,
+/// Checks every exposed command against docs/reference/cli/commands.mdx: help, JSON support,
 /// usage errors, and the overlapping forms that must behave like their primary command.
 final class CLICommandMatrixTests: XCTestCase {
     /// A minimal valid invocation for every command in the help specs.
@@ -41,7 +41,7 @@ final class CLICommandMatrixTests: XCTestCase {
     }
 
     private func matrixRows() throws -> [[String]: MatrixRow] {
-        let text = try String(contentsOfFile: "docs/cli-commands.md", encoding: .utf8)
+        let text = try String(contentsOfFile: "docs/reference/cli/commands.mdx", encoding: .utf8)
         var rows: [[String]: MatrixRow] = [:]
         for line in text.split(separator: "\n") where line.hasPrefix("| `microvm ") {
             let cells = line.split(separator: "|").map { $0.trimmingCharacters(in: .whitespaces) }
@@ -58,7 +58,7 @@ final class CLICommandMatrixTests: XCTestCase {
         let specs = Set(cliCommandSpecs.map(\.path))
         XCTAssertEqual(specs, Set(Self.samples.keys), "every command needs a sample invocation")
         let rows = try matrixRows()
-        XCTAssertEqual(Set(rows.keys), specs, "docs/cli-commands.md lists exactly the exposed commands")
+        XCTAssertEqual(Set(rows.keys), specs, "docs/reference/cli/commands.mdx lists exactly the exposed commands")
         for spec in cliCommandSpecs {
             let row = try XCTUnwrap(rows[spec.path])
             XCTAssertEqual(row.json, spec.allowsJSON, spec.path.joined(separator: " "))

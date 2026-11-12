@@ -1,0 +1,57 @@
+---
+title: "CLI Error Contracts"
+description: "Structured error reporting format on stderr, error codes, and recovery suggestions."
+sidebar_position: 4
+---
+
+# CLI Error Contracts
+
+When a command fails, `microvm` sends error details to `stderr` and preserves standard output.
+
+---
+
+## JSON Error Envelope
+
+When `--json` is used on a management command, any validation or operational failure prints exactly one JSON object to `stderr` followed by a newline:
+
+```json
+{
+  "error": {
+    "code": "live_sandbox_refusal",
+    "message": "sandbox 'demo' is running; unexported changes would be lost",
+    "recovery": "Export with 'microvm finish demo' or discard with 'microvm rm demo --force'.",
+    "exitCode": 1
+  }
+}
+```
+
+- `stdout` remains completely empty.
+- The process terminates with the numeric `exitCode` specified in the envelope.
+
+---
+
+## Human Error Format
+
+Without `--json`, failures write clean, human-readable diagnostics to `stderr` without stack traces or global help dumps:
+
+```text
+microvm: rm: sandbox 'demo' is running; unexported changes would be lost
+Next: Export with 'microvm finish demo' or discard with 'microvm rm demo --force'.
+```
+
+---
+
+## Standard Error Codes
+
+| Error Code                 | Exit Code | Description                                                                    |
+| :------------------------- | :-------- | :----------------------------------------------------------------------------- |
+| `invalid_usage`            | `2`       | Unknown flag, invalid argument combination, or missing required parameter.     |
+| `not_found`                | `1`       | Specified sandbox, task ID, or result directory does not exist or has expired. |
+| `already_exists`           | `1`       | A sandbox or task already exists with the requested friendly name.             |
+| `live_sandbox_refusal`     | `1`       | Attempted to delete an active sandbox without `--force`.                       |
+| `command_timeout`          | `124`     | Guest command exceeded `--timeout` deadline.                                   |
+| `daemon_unreachable`       | `1`       | Unable to connect to `~/.microvm/daemon.sock` after startup timeout.           |
+| `unsupported_platform`     | `1`       | Running on unsupported OS (non-macOS) or unsupported architecture.             |
+| `entitlement_missing`      | `1`       | Binary lacks `com.apple.security.virtualization` code signature.               |
+| `runtime_not_prepared`     | `1`       | Requested runtime rootfs has not been prepared with `runtime prepare`.         |
+| `network_policy_violation` | `1`       | Outbound request blocked by egress policy or restricted host flags.            |

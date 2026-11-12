@@ -1,0 +1,170 @@
+---
+title: "Integrate the TypeScript SDK"
+description: "How to programmatically start sandboxes, execute commands, preview diffs, and collect results using @microvm/sdk."
+sidebar_position: 4
+---
+
+# Integrate the TypeScript SDK
+
+MicroVM provides a native TypeScript/JavaScript SDK (`@microvm/sdk`) for developers building AI agent harnesses, automated evaluators, or developer tool integrations.
+
+The SDK communicates directly with the local user daemon over UNIX domain socket `~/.microvm/daemon.sock` (mode `0600`).
+
+---
+
+## Installation
+
+Within the `microvm` repository or a local workspace linking the package:
+
+```json
+{
+  "dependencies": {
+    "@microvm/sdk": "file:./sdk/typescript"
+  }
+}
+```
+
+```sh
+npm install
+```
+
+---
+
+## Pattern 1: Managing Project Tasks (`Task` API)
+
+The `Task` class provides the full project lifecycle: cloning a workspace, executing commands, streaming output, previewing diffs, and exporting results.
+
+```ts
+import { Task, SandboxError } from "@microvm/sdk";
+
+async function runAgent() {
+  try {
+    // 1. Start a task with an imported project directory
+    const task = await Task.start({
+      name: "pr-fixer",
+      projectPath: "./my-project",
+      runtimes: [{ name: "node", version: "22" }],
+      network: "none", // offline by default
+      ttlSeconds: 1800, // 30-minute sandbox lifetime
+    });
+
+    console.log(`Spawned task ${task.id} (name: ${task.name})`);
+
+    // 2. Execute a command in /workspace
+    const result = await task.exec("npm test", {
+      timeoutSeconds: 60,
+    });
+
+    console.log(`Exit code: ${result.exitCode}`);
+    console.log(`Stdout: ${result.stdout}`);
+
+    // 3. Inspect a real-time diff preview
+    const preview = await task.diff();
+    console.log(`Verified patch path: ${preview.patchPath}`);
+
+    // 4. Finish the task: exports result & destroys the VM
+    const finished = await task.finish();
+    console.log(`Final patch exported to: ${finished.patchPath}`);
+    console.log(`Result directory: ${finished.resultDirectory}`);
+  } catch (error) {
+    if (error instanceof SandboxError) {
+      console.error(`MicroVM error [${error.kind}]: ${error.message}`);
+    } else {
+      throw error;
+    }
+  }
+}
+
+runAgent();
+```
+
+---
+
+## Pattern 2: Raw Ephemeral Sandboxes (`Sandbox` API)
+
+If you only need an isolated minimal Linux execution environment without importing a project workspace or generating diffs, use `Sandbox`:
+
+```ts
+import { Sandbox } from "@microvm/sdk";
+
+async function executeInSandbox() {
+  // Boot raw sandbox
+  const sandbox = await Sandbox.create({
+    name: "eval-box",
+    cpus: 2,
+    memoryMB: 1024,
+    network: "none",
+    ttlSeconds: 300,
+  });
+
+  // Run command
+  const execResult = await sandbox.exec("uname -a && cat /etc/alpine-release", {
+    timeoutSeconds: 10,
+  });
+
+  console.log(execResult.stdout);
+
+  // Clean up
+  await sandbox.destroy();
+}
+```
+
+---
+
+## Re-attaching to Existing Tasks
+
+Tasks can be re-opened by their friendly name or immutable ID across different processes:
+
+```ts
+import { Task } from "@microvm/sdk";
+
+// Open existing task by name
+const task = await Task.open("pr-fixer", {
+  requireOffline: true, // throw if sandbox has network access enabled
+});
+
+// Run further commands
+await task.exec("npm run build");
+```
+
+---
+
+## Streaming Standard Input & Terminal Transcripts
+
+The SDK allows piping standard input bytes and capturing combined terminal transcripts:
+
+```ts
+// Pipe stdin bytes to a guest process
+const inputBytes = new TextEncoder().encode("console.log(process.version);\n");
+const res = await task.exec("node", {
+  stdin: inputBytes,
+});
+
+// Run in a pseudo-terminal (PTY)
+const ttyRes = await task.exec("npm test", {
+  terminal: { rows: 24, cols: 80 },
+});
+// ttyRes.stdout contains combined terminal transcript (including ANSI controls)
+console.log(ttyRes.stdout);
+```
+
+---
+
+## Listing and Housekeeping
+
+Query managed sandboxes and purge expired tasks:
+
+```ts
+import { listManaged, removeManaged } from "@microvm/sdk";
+
+// List all active and retained tasks
+const entries = await listManaged();
+for (const entry of entries) {
+  console.log(
+    `${entry.name ?? entry.id}: phase=${entry.phase}, TTL=${entry.sandboxExpiresAtUnix}`
+  );
+}
+
+// Purge a completed task and remove retained logs/results
+await removeManaged("pr-fixer", { purge: true });
+```

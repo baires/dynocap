@@ -1,0 +1,310 @@
+---
+title: "End-to-End Agent Task Workflow"
+description: "Learn how to import a repository into an isolated Node 22 sandbox, run coding tasks, preview diffs, and safely export patches."
+sidebar_position: 2
+---
+
+# End-to-End Agent Task Workflow
+
+This tutorial demonstrates the core developer workflow of MicroVM: importing a project into an isolated sandbox, executing autonomous coding tasks or tests, inspecting changes, and extracting a verified Git patch.
+
+By the end of this lesson, you will:
+
+1. Prepare the verified Node 22 task runtime.
+2. Clone a project into an isolated sandbox with filtered egress.
+3. Install dependencies and run test suites.
+4. Preview changes in real time with `microvm diff`.
+5. Finish the task, destroy the microVM, and apply the exported patch to your host repo.
+
+---
+
+## What is a Task?
+
+Unlike a raw sandbox, a **task** has:
+
+- A disposable Linux ext4 root filesystem containing an imported project tree located at `/workspace`.
+- A pre-warmed execution runtime (e.g. Node.js 22).
+- Automatic execution logging and diff calculation.
+- An exported **result directory** on the host that persists for 7 days after the sandbox is destroyed.
+
+Your host repository is **never mounted or shared**. Changes made inside the sandbox are completely isolated.
+
+---
+
+## Step 1: Prepare the Node 22 Runtime
+
+Project tasks require a prepared runtime disk. MicroVM uses explicit runtime preparation: it downloads verified packages and verifies hashes before publishing the artifact.
+
+In your `microvm` source checkout, run:
+
+```sh
+microvm runtime prepare . --runtime node:22
+```
+
+This builds and validates the Node 22 runtime disk (including Node, npm, and sanitized git utilities) and saves it to your `~/.microvm` cache.
+
+---
+
+## Step 2: Set Up an Example Project
+
+For this tutorial, create a small sample project with a test suite in a temporary directory:
+
+```sh
+mkdir -p /tmp/demo-project
+cd /tmp/demo-project
+
+# Initialize package.json
+cat << 'EOF' > package.json
+{
+  "name": "demo-project",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}
+EOF
+
+# Create a sample test
+cat << 'EOF' > index.test.js
+import test from 'node:test';
+import assert from 'node:assert/strict';
+
+test('simple math', () => {
+  assert.equal(1 + 1, 2);
+});
+EOF
+
+# Initialize git repository
+git init
+git add .
+git commit -m "Initial commit"
+```
+
+---
+
+## Step 3: Clone the Project into an Isolated Sandbox
+
+Now import the project into a named sandbox using `microvm clone`:
+
+```sh
+microvm clone /tmp/demo-project agent-task --network none
+```
+
+Output:
+
+```text
+cloned /tmp/demo-project into agent-task (task-8f92b7c1)
+phase: running
+runtime: node:22
+network: none
+ttl: 30m
+Next: microvm exec agent-task -- npm test
+```
+
+Let's understand what happened:
+
+- MicroVM created a disposable ext4 disk containing a copy of your Git checkout.
+- It booted a Linux guest with Node 22.
+- The working directory defaults to `/workspace`.
+- The network is set to `none`: the guest has no outbound Internet connectivity.
+
+---
+
+## Step 4: Run Commands Inside the Project
+
+Execute the test suite inside the isolated guest:
+
+```sh
+microvm exec agent-task -- npm test
+```
+
+Output:
+
+```text
+✔ simple math (1.234ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 52.34
+```
+
+The command ran completely inside the Linux virtual machine.
+
+Now simulate an AI agent adding a new feature and an accompanying test. Use `microvm exec` to append code:
+
+```sh
+microvm exec agent-task -- sh -c "cat << 'EOF' > feature.js
+export function greet(name) {
+  return \`Hello, \${name}!\`;
+}
+EOF"
+
+microvm exec agent-task -- sh -c "cat << 'EOF' >> index.test.js
+
+test('greet function', async () => {
+  const { greet } = await import('./feature.js');
+  assert.equal(greet('World'), 'Hello, World!');
+});
+EOF"
+```
+
+Re-run the test suite to verify the changes:
+
+```sh
+microvm exec agent-task -- npm test
+```
+
+Output:
+
+```text
+✔ simple math (1.102ms)
+✔ greet function (0.841ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+```
+
+---
+
+## Step 5: Preview the Diff
+
+Before exporting, you can preview the changes made by the sandbox at any time:
+
+```sh
+microvm diff agent-task
+```
+
+Output:
+
+```diff
+diff --git a/feature.js b/feature.js
+new file mode 100644
+index 0000000..745b78b
+--- /dev/null
++++ b/feature.js
+@@ -0,0 +1,3 @@
++export function greet(name) {
++  return `Hello, ${name}!`;
++}
+diff --git a/index.test.js b/index.test.js
+index 4b92c41..9f81a7d 100644
+--- a/index.test.js
++++ b/index.test.js
+@@ -4,3 +4,8 @@ test('simple math', () => {
+   assert.equal(1 + 1, 2);
+ });
++
++test('greet function', async () => {
++  const { greet } = await import('./feature.js');
++  assert.equal(greet('World'), 'Hello, World!');
++});
+```
+
+`microvm diff` streams clean, standard unified diff bytes to stdout without altering or halting the running sandbox.
+
+---
+
+## Step 6: Review Command Execution Logs
+
+MicroVM records every execution in a tamper-resistant execution journal. Discover what commands ran:
+
+```sh
+microvm logs agent-task --list
+```
+
+Output:
+
+```text
+ID  STATE      STARTED              EXIT  STDOUT_BYTES  STDERR_BYTES  CMD
+0   completed  2026-11-12 16:30:10  0     182           0             npm test
+1   completed  2026-11-12 16:31:02  0     0             0             sh -c cat << 'EOF' > feature.js...
+2   completed  2026-11-12 16:31:25  0     0             0             sh -c cat << 'EOF' >> index.test.js...
+3   completed  2026-11-12 16:31:40  0     238           0             npm test
+```
+
+You can replay the exact stdout and stderr of any specific execution:
+
+```sh
+microvm logs agent-task --exec 3
+```
+
+---
+
+## Step 7: Finish the Task and Apply the Patch
+
+When work is complete, run `microvm finish`:
+
+```sh
+microvm finish agent-task
+```
+
+Output:
+
+```text
+stopped agent-task
+id: task-8f92b7c1
+phase: completed
+patch: ~/.microvm/tasks/task-8f92b7c1/result/changes.patch
+result: ~/.microvm/tasks/task-8f92b7c1/result
+retention: 6d 23h (expires 2026-11-19 16:30:00 UTC)
+
+Apply changes to your checkout with:
+git apply --check '~/.microvm/tasks/task-8f92b7c1/result/changes.patch' && git apply '~/.microvm/tasks/task-8f92b7c1/result/changes.patch'
+```
+
+Notice what happened:
+
+1. Command admission closed immediately.
+2. The verified patch and changed files were written to the host result directory.
+3. The guest microVM and its disposable virtual disk were destroyed.
+4. Your host source repository `/tmp/demo-project` remained 100% untouched until you decide to apply the patch.
+
+Now apply the verified patch to your host repo:
+
+```sh
+cd /tmp/demo-project
+git apply ~/.microvm/tasks/task-8f92b7c1/result/changes.patch
+git status
+```
+
+Output:
+
+```text
+On branch main
+Changes not staged for commit:
+  modified:   index.test.js
+
+Untracked files:
+  feature.js
+```
+
+---
+
+## Step 8: Clean Up Retained Results
+
+The retained result directory, metadata, and logs will automatically be swept after 7 days. If you want to delete them immediately:
+
+```sh
+microvm rm agent-task --purge
+```
+
+Output:
+
+```text
+removed agent-task; deleted its retained record, logs, and result
+```
+
+---
+
+## Summary
+
+You have completed the full lifecycle of an autonomous agent task in MicroVM:
+
+- **Zero Host Risk:** Untrusted code executed inside a Linux microVM without host filesystem access or network privileges.
+- **Auditable Execution:** Full execution logs and verified diffs were produced.
+- **Explicit Integration:** You applied the changes to your working tree using standard `git apply` only after review.

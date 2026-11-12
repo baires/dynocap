@@ -1,0 +1,95 @@
+---
+title: "Architecture Overview"
+description: "How the MicroVM CLI, background daemon, Apple Virtualization.framework, and Linux guest agent interact."
+sidebar_position: 1
+---
+
+# Architecture Overview
+
+MicroVM is an isolated, local execution platform designed specifically for untrusted AI coding workflows on macOS. This document explains the high-level architecture, process topology, and communication paths.
+
+---
+
+## Topology
+
+```
++-----------------------------------------------------------------------------------+
+| macOS Host                                                                        |
+|                                                                                   |
+|  [microvm CLI]          [TypeScript SDK]          [MCP Client (Claude/Cursor)]    |
+|         \                       |                       /                         |
+|          +----------------------+----------------------+                          |
+|                                 |                                                 |
+|                        UNIX Domain Socket                                         |
+|                     (~/.microvm/daemon.sock)                                      |
+|                                 v                                                 |
+|               +-----------------------------------+                               |
+|               |          microvm daemon           |                               |
+|               |  (Single process per user/home)   |                               |
+|               +-----------------+-----------------+                               |
+|                                 |                                                 |
+|                   Apple Virtualization.framework                                  |
+|            +--------------------+--------------------+                            |
+|            | VZLinuxBootLoader                       |                            |
+|            | virtio-console -> ~/.microvm/.../console|                            |
+|            | virtio-net     -> [Filtered / NAT / None]                            |
+|            | virtio-vsock   -> Guest Port 5252       |                            |
+|            +--------------------+--------------------+                            |
++---------------------------------|-------------------------------------------------+
+                                  v
++-----------------------------------------------------------------------------------+
+| Linux Guest (ARM64 VM)                                                            |
+|                                                                                   |
+|   Linux Kernel (6.12.46)                                                          |
+|      v                                                                            |
+|   /init (PID 1, Alpine minirootfs)                                                |
+|      v                                                                            |
+|   microvm-agent (Static Go Binary)                                                |
+|      - Listens on vsock port 5252                                                 |
+|      - Spawns /bin/sh or command processes                                        |
+|      - Streams stdout/stderr/exit status back to host                             |
+|                                                                                   |
+|   /workspace (Disposable ext4 project root disk)                                  |
++-----------------------------------------------------------------------------------+
+```
+
+---
+
+## 1. The Host Daemon
+
+- **Lifecycle:** The daemon process runs per user/home (`~/.microvm/daemon.sock`). If no daemon is running, invoking any `microvm` client command automatically launches one in the background.
+- **Single Source of Truth:** The daemon maintains in-memory tracking of all running virtual machines, serialized state records on disk, lockfiles, and active sockets.
+- **Kernel Teardown Guarantees:** Each running VM is represented as a `VZVirtualMachine` object managed on its own dedicated serial dispatch queue inside the daemon. If the daemon process crashes or terminates, the macOS kernel immediately cleans up the associated hypervisor virtual machines. Stale records are automatically reaped on the next run.
+
+---
+
+## 2. Apple Virtualization.framework
+
+Rather than relying on heavy emulation (like QEMU) or container translation layers, MicroVM leverages macOS's native `Virtualization.framework`.
+
+- **Hardware Acceleration:** Uses Apple Silicon's hardware virtualization extensions directly.
+- **Fast Boot:** Kernel and initramfs boot directly into userspace without an emulated BIOS or UEFI firmware phase. Boot times average under **200–300 milliseconds**.
+- **Memory & CPU:** Each guest receives dedicated virtual CPU cores and RAM mapped directly by the hypervisor.
+
+---
+
+## 3. Communication Over virtio-vsock
+
+MicroVM does not use TCP/IP for internal control or command streaming. Instead, it utilizes **virtio-vsock**:
+
+- **Zero Network Overhead:** Packets are copied directly through hypervisor memory buffers without IP routing, network stacks, or host port binding.
+- **Guest Agent:** The guest kernel starts `/init`, which mounts `/proc`, `/sys`, and `/dev`, and immediately launches `microvm-agent` (a static Go binary).
+- **Binary Wire Protocol:** Host and guest exchange big-endian, length-prefixed frames (`GuestProtocol.swift` and `guest/internal/protocol`) carrying stdin chunks, stdout/stderr streams, terminal window resize signals, and process exit codes.
+
+---
+
+## 4. Disposable Workspace Disks
+
+MicroVM avoids host file-sharing technologies (such as VirtioFS or 9P mounts) for project tasks because they introduce subtle file permission leaks, host cache invalidation issues, and file system escape risks.
+
+Instead:
+
+1. MicroVM creates a fresh, isolated `ext4` virtual disk image for each task.
+2. The project directory or Git repository is imported into the disk image before boot using the `microvm-workspace` companion tool.
+3. The guest mounts this virtual block device at `/workspace`.
+4. When the task finishes, only the verified Git diff and modified files are extracted back to the host, and the disk is destroyed.

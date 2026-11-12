@@ -1,0 +1,129 @@
+---
+title: "Manage Dependencies and Caching"
+description: "How to safely pre-warm npm caches using filtered network egress and restore them in completely offline sandboxes."
+sidebar_position: 1
+---
+
+# Manage Dependencies and Caching
+
+When running automated agent tasks or CI checks locally, executing `npm install` inside an untrusted sandbox creates a dilemma: packages need to be downloaded, but giving an agent full Internet access risks data exfiltration or credential theft.
+
+MicroVM solves this by pairing **filtered network egress** with **automatic lockfile-keyed dependency caching**.
+
+This guide shows you how to:
+
+1. Warm an npm cache using a one-time sandbox with restricted egress to `registry.npmjs.org`.
+2. Reuse the cached dependencies in subsequent sandboxes with zero network devices.
+3. Invalidate or refresh the dependency cache when lockfiles change.
+
+---
+
+## The Workflow Pattern: "Deps" Sandbox vs. "Worker" Sandbox
+
+The standard pattern consists of two steps:
+
+1. **Preparation step:** Boot a sandbox named `deps` with `--network filtered`. Run `npm ci`. Finish it to persist the cache to `~/.microvm/cache/npm/<lockfile-hash>`.
+2. **Execution step:** Boot sandboxes with `--network none`. Run `npm ci --offline`. Packages install from the host cache without any network interface.
+
+```
++-------------------------------------------------------------+
+| 1. WARM CACHE (deps)                                        |
+| microvm clone ./project deps --network filtered             |
+| microvm exec deps -- npm ci                                 |
+| microvm finish deps   ---> Saves cache keyed by lockfile    |
++-------------------------------------------------------------+
+                              |
+                              v
++-------------------------------------------------------------+
+| 2. OFFLINE TASKS (worker)                                   |
+| microvm clone ./project worker --network none               |
+| microvm exec worker -- npm ci --offline                     |
+| (Installs directly from restored host cache, zero network)  |
++-------------------------------------------------------------+
+```
+
+---
+
+## Step 1: Pre-warm the Dependency Cache
+
+Ensure your project contains a valid `package.json` and `package-lock.json`.
+
+Clone your project into a sandbox named `deps`, specifying `--network filtered`:
+
+```sh
+microvm clone ./my-project deps --network filtered
+```
+
+> **Why `--network filtered`?**  
+> Under filtered mode, MicroVM connects a virtio-net interface that forwards HTTPS traffic _only_ to `registry.npmjs.org` and (if applicable) the Git origin. All other IP addresses and ports are dropped at the host forwarder.
+
+Now run clean install inside the sandbox:
+
+```sh
+microvm exec deps --timeout 300 -- npm ci
+```
+
+Once the install completes, finish the sandbox:
+
+```sh
+microvm finish deps
+```
+
+When finishing a sandbox that performed package installations, MicroVM automatically archives the guest's `~/.npm` cache into the host cache directory (`~/.microvm/cache/npm/`). The cache key is computed from the SHA-256 hash of `package-lock.json`.
+
+Clean up the finished record:
+
+```sh
+microvm rm deps
+```
+
+---
+
+## Step 2: Run Worker Tasks Completely Offline
+
+Now clone your project again for your agent or test runner, leaving the network at its default (`none`):
+
+```sh
+microvm clone ./my-project worker
+```
+
+Notice that `microvm clone` detects that the project's `package-lock.json` matches a known cache entry. Before starting the VM, MicroVM automatically provisions the cached npm tarballs into the guest.
+
+Now run `npm ci` with the `--offline` flag:
+
+```sh
+microvm exec worker -- npm ci --offline
+```
+
+Installation finishes in seconds without sending a single network packet.
+
+Run your tests or let your coding agent work:
+
+```sh
+microvm exec worker -- npm test
+```
+
+---
+
+## Cache Invalidation and Updates
+
+The cache is strictly keyed by the exact bytes of `package-lock.json`.
+
+- **If you change dependencies:** When you update `package.json` or `package-lock.json`, the SHA-256 hash changes. Subsequent offline `clone` calls will not find a cache match.
+- **To update the cache:** Re-run Step 1 with `--network filtered` to download the new packages and generate a new cache entry.
+- **Cache Location:** The cache lives on the host under `~/.microvm/cache/npm/<hash>/`. You can inspect or clear old cache entries safely using standard host tools:
+  ```sh
+  ls -lh ~/.microvm/cache/npm
+  ```
+
+---
+
+## Troubleshooting
+
+### `ENOTFOUND registry.npmjs.org` in offline mode
+
+You ran `npm ci` without `--offline` in a sandbox booted with `--network none`. Always pass `npm ci --offline` when operating without a network device.
+
+### Download blocked during `npm ci` in filtered mode
+
+Filtered egress allows HTTPS traffic only to port 443 of `registry.npmjs.org`. If your dependencies reference private Git repositories or custom registries (e.g. Artifactory, GitHub Packages), filtered mode will block them. In those specific enterprise scenarios, you must use `--network nat`.

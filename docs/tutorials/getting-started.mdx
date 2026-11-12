@@ -1,0 +1,202 @@
+---
+title: "Getting Started with MicroVM"
+description: "Step-by-step tutorial to build MicroVM on macOS, verify prerequisites, and execute commands in an isolated Linux microVM."
+sidebar_position: 1
+---
+
+# Getting Started with MicroVM
+
+This tutorial guides you from a fresh checkout to booting an isolated Linux microVM on macOS and running your first command inside it.
+
+By the end of this lesson, you will:
+
+1. Verify system prerequisites on Apple Silicon.
+2. Build the signed CLI binary and guest artifacts.
+3. Validate your host setup with `microvm doctor`.
+4. Launch a raw sandbox and execute commands over vsock.
+5. Safely destroy the sandbox.
+
+---
+
+## Prerequisites
+
+MicroVM requires:
+
+- **Hardware:** Apple Silicon Mac (M1/M2/M3/M4).
+- **Operating System:** macOS 13 (Ventura) or newer.
+- **Developer Tools:**
+  - Xcode Command Line Tools (`xcode-select --install`, Swift 5.9+)
+  - Go 1.22+ (`brew install go`)
+  - Node.js 22+ (`brew install node`)
+  - `mke2fs` from e2fsprogs (`brew install e2fsprogs`)
+
+Verify that the tools are present in your shell:
+
+```sh
+swift --version
+go version
+node --version
+mke2fs -V
+```
+
+---
+
+## Step 1: Install Dependencies and Build the Release CLI
+
+MicroVM uses Apple's `Virtualization.framework`, which requires the `com.apple.security.virtualization` entitlement. The build script compiles the Swift CLI in release mode, compiles the companion Go binaries, and applies the code signature.
+
+From the root of your `microvm` repository:
+
+```sh
+# Install repository development tooling
+npm ci
+
+# Build the release CLI and sign it with the virtualization entitlement
+./scripts/build-macos.sh
+```
+
+Add the built binary to your `PATH` for the current terminal session:
+
+```sh
+export PATH="$PWD/.build/release:$PATH"
+which microvm
+```
+
+> **Note:** If you rebuild `microvm` at any point, re-run `./scripts/build-macos.sh` to ensure the binary is properly code-signed.
+
+---
+
+## Step 2: Download the Guest Base Image
+
+MicroVM boots a custom, minimal Linux kernel and Alpine initramfs designed to reach `/init` in less than 50ms.
+
+Run the image fetch script:
+
+```sh
+./scripts/fetch-image.sh
+```
+
+This verifies and writes the kernel and initramfs files to `~/.microvm/images/aarch64`.
+
+---
+
+## Step 3: Run Diagnostic Checks
+
+Before starting any sandboxes, run `microvm doctor` to check permissions, companion binaries, kernel image hashes, and socket path constraints:
+
+```sh
+microvm doctor
+```
+
+You should see all required checks passing:
+
+```text
+[PASS] platform: macOS 15.x (arm64)
+[PASS] backend: Virtualization.framework available
+[PASS] signing: binary code-signed with com.apple.security.virtualization
+[PASS] home: /Users/username/.microvm is writable
+[PASS] microvm-workspace: companion binary found
+[PASS] microvm-mkruntime: companion binary found
+[PASS] images: verified kernel and initramfs hashes
+[WARN] daemon: daemon is not running (will start on first command)
+```
+
+The warning that the daemon is not running is expected; MicroVM starts the background daemon automatically when needed.
+
+---
+
+## Step 4: Boot a Raw Sandbox
+
+A raw sandbox boots the minimal Alpine Linux image without importing a project workspace.
+
+Start a sandbox named `my-first-box`:
+
+```sh
+microvm run --name my-first-box
+```
+
+Output:
+
+```text
+running my-first-box
+```
+
+Behind the scenes:
+
+1. The `microvm` CLI launched the per-user background daemon (`~/.microvm/daemon.sock`).
+2. The daemon booted a Linux virtual machine with 1 vCPU and 1024 MB RAM via Virtualization.framework.
+3. The guest booted its initramfs in under 200ms and launched the internal Go `microvm-agent`.
+4. The agent connected back over `virtio-vsock` (guest port 5252).
+
+Verify the sandbox status:
+
+```sh
+microvm ps
+```
+
+You will see:
+
+```text
+NAME/ID       KIND     PHASE    RUNTIME  NETWORK  TTL    RETENTION
+my-first-box  sandbox  running  minimal  none     29m    -
+```
+
+Notice that `NETWORK` is `none`. The sandbox is completely offline—no network interface exists inside the guest.
+
+---
+
+## Step 5: Execute Commands Inside the Sandbox
+
+Run commands inside your guest with `microvm exec`:
+
+```sh
+microvm exec my-first-box -- uname -a
+```
+
+Output:
+
+```text
+Linux microvm 6.12.46-microvm #1 SMP PREEMPT_DYNAMIC aarch64 Linux
+```
+
+Test running an isolated shell command:
+
+```sh
+microvm exec my-first-box -- sh -c "echo 'Hello from MicroVM' && id"
+```
+
+Output:
+
+```text
+Hello from MicroVM
+uid=0(root) gid=0(root) groups=0(root)
+```
+
+MicroVM streams stdout and stderr separately, and exits with the exact status code returned by the guest command.
+
+---
+
+## Step 6: Destroy the Sandbox
+
+When your work is done, remove the sandbox:
+
+```sh
+microvm rm my-first-box --force
+```
+
+Output:
+
+```text
+removed my-first-box
+```
+
+Because `my-first-box` was actively running, `--force` explicitly confirms discarding running processes. The daemon terminates the virtual machine and cleans up runtime descriptors.
+
+---
+
+## Next Steps
+
+Now that you know how to build MicroVM and run raw Linux commands, proceed to:
+
+- **[End-to-End Agent Task Workflow](/tutorials/agent-task-workflow)**: Learn how to mount project trees, manage dependencies, and extract verified diffs.
+- **[Interactive Shells & Terminal Sessions](/how-to/interactive-shells-and-terminal)**: Learn how to attach interactive TTY sessions for live debugging.

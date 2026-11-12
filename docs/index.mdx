@@ -1,0 +1,86 @@
+---
+title: "MicroVM Documentation"
+description: "A fast, local Linux microVM runtime for AI agents and developers on macOS."
+sidebar_position: 1
+---
+
+# MicroVM Documentation
+
+**MicroVM** provides fast, local Linux sandboxes for AI coding agents and developers on macOS. Powered by Apple's `Virtualization.framework`, MicroVM boots an isolated Linux guest in under 300ms, streams commands over a high-speed virtio-vsock binary channel, and enforces an offline-by-default boundary with no host directory sharing.
+
+Whether you run agents through the command-line interface, embed sandboxes in TypeScript applications, or connect coding agents via the Model Context Protocol (MCP), MicroVM ensures untrusted code runs safely, deterministically, and with verified diff extraction.
+
+---
+
+## Documentation by Diátaxis Framework
+
+This documentation is structured according to the **Diátaxis documentation framework**, organizing material into four distinct quadrants based on your immediate goal:
+
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-6">
+
+<div className="p-4 rounded-lg border border-neutral-200 dark:border-neutral-800">
+  ### 🚀 [Tutorials](/tutorials/getting-started) **Learning-oriented lessons**
+  that guide you step-by-step through core workflows. - [Getting Started with
+  MicroVM](/tutorials/getting-started): Install requirements, build the signed
+  CLI, and boot your first microVM. - [End-to-End Agent Task
+  Workflow](/tutorials/agent-task-workflow): Clone a Node 22 project, run
+  commands, verify diffs, and extract host patches.
+</div>
+
+<div className="p-4 rounded-lg border border-neutral-200 dark:border-neutral-800">
+  ### 🛠️ [How-To Guides](/how-to/manage-dependencies-and-caching)
+  **Problem-oriented recipes** solving specific practical challenges. - [Manage
+  Dependencies & Caching](/how-to/manage-dependencies-and-caching): Pre-warm npm
+  cache using filtered egress for completely offline execution. - [Network
+  Isolation & Egress Policy](/how-to/network-isolation-and-egress): Configure
+  offline (`none`), allowlisted (`filtered`), and NAT modes. - [Interactive
+  Shells & Terminal Sessions](/how-to/interactive-shells-and-terminal): Attach
+  TTY sessions, forward signals, and debug live sandboxes. - [Integrate the
+  TypeScript SDK](/how-to/integrate-typescript-sdk): Programmatically spawn and
+  manage tasks from your agent applications. - [Configure the MCP
+  Server](/how-to/configure-mcp-server): Connect MicroVM tools to Claude
+  Desktop, Cursor, and Cline. - [Troubleshoot with
+  Doctor](/how-to/troubleshoot-with-doctor): Validate entitlements, companions,
+  socket paths, and system health.
+</div>
+
+<div className="p-4 rounded-lg border border-neutral-200 dark:border-neutral-800">
+  ### 📖 [Reference](/reference/cli/overview) **Information-oriented
+  specifications**, schemas, and API contracts. - [CLI Overview & Exit
+  Codes](/reference/cli/overview): Global flags, environment variables, exit
+  statuses, and signals. - [CLI Command Matrix](/reference/cli/commands):
+  Complete options and behaviors for all primary and advanced commands. - [CLI
+  JSON Schemas](/reference/cli/json-schemas): Exact JSON contracts for scripting
+  and automated parsing. - [CLI Error Contracts](/reference/cli/errors):
+  Structured stderr error reporting and recovery codes. - [TypeScript SDK
+  API](/reference/sdk-api): Types, classes, and methods for `@microvm/sdk`. -
+  [MCP Tools Reference](/reference/mcp-tools): Tool declarations, parameter
+  schemas, and security flags for `@microvm/mcp`. - [Guest Wire
+  Protocol](/reference/guest-wire-protocol): Vsock big-endian packet framing,
+  message codes, and stream multiplexing.
+</div>
+
+<div className="p-4 rounded-lg border border-neutral-200 dark:border-neutral-800">
+  ### 💡 [Explanation](/explanation/architecture-overview)
+  **Understanding-oriented discussions** explaining architectural concepts and
+  design decisions. - [Architecture
+  Overview](/explanation/architecture-overview): Daemon model, Apple
+  Virtualization backend, guest agent, and vsock transport. - [Security &
+  Isolation Boundary](/explanation/security-and-isolation): Why hypervisors
+  outperform containers for local agent safety. - [Task Lifecycle & Finite
+  TTL](/explanation/task-lifecycle-and-ttl): The rationale behind disposable
+  workspaces and non-renewable deadlines. - [Git Workspaces & Patch
+  Extraction](/explanation/git-workspaces-and-patches): Sanitized Git imports,
+  borrowed object resolution, and clean diff retention.
+</div>
+
+</div>
+
+---
+
+## Core Guarantees
+
+- **Hardware Isolation:** Each guest runs inside an independent lightweight Linux virtual machine. No shared kernel, no Docker socket leak, and no host volume mount.
+- **Offline-by-Default:** Sandboxes spawn with zero network devices attached. Outbound traffic to npm registries or Git origins must be explicitly opted into.
+- **Finite Lifetime (TTL):** Every sandbox has an immutable maximum lifetime (default 30 minutes, max 24 hours). Activity never renews TTL, protecting against runaway agent loops.
+- **Non-Destructive Diffs:** Sandbox file changes never touch your host workspace. You export verified Git patches with `finish` and review them before applying.

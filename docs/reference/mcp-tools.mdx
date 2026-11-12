@@ -1,0 +1,135 @@
+---
+title: "MCP Tools Reference"
+description: "Tool definitions, parameter schemas, and security controls for the MicroVM Model Context Protocol server."
+sidebar_position: 6
+---
+
+# MCP Tools Reference
+
+The `@microvm/mcp` package implements the Model Context Protocol (MCP) over `stdio`, allowing coding agents (Claude Desktop, Cursor, Cline) to interact with local sandboxes.
+
+---
+
+## Security Environment Flags
+
+When launching the MCP server, host security flags control network capabilities:
+
+| Environment Variable         | Default   | Meaning                                                                                  |
+| :--------------------------- | :-------- | :--------------------------------------------------------------------------------------- |
+| `MICROVM_MCP_ALLOW_FILTERED` | `0` (off) | Set to `1` to allow LLMs to specify `--network filtered` (HTTPS to npm and Git origins). |
+| `MICROVM_MCP_ALLOW_NAT`      | `0` (off) | Set to `1` to allow LLMs to specify `--network nat` (unrestricted Internet access).      |
+
+---
+
+## Project Task Tools
+
+### `microvm_task_start`
+
+Imports a project tree or Git repository into an isolated task sandbox.
+
+**Parameters:**
+
+- `projectPath` _(string, optional)_: Absolute path to local project directory.
+- `repositoryUrl` _(string, optional)_: HTTPS or SSH Git URL.
+- `name` _(string, optional)_: Friendly name for the task.
+- `network` _(string, optional)_: `"none"`, `"filtered"`, or `"nat"`. Defaults to `"none"`.
+- `ttlSeconds` _(number, optional)_: Sandbox lifetime (30–86400s). Default: 1800.
+- `cpus` _(number, optional)_: Number of vCPUs. Default: 2.
+- `memoryMB` _(number, optional)_: RAM in MB. Default: 1024.
+
+---
+
+### `microvm_task_exec`
+
+Runs a command inside the task's `/workspace` directory.
+
+**Parameters:**
+
+- `name` _(string, required)_: Task name or immutable ID (`task-…`).
+- `command` _(string, required)_: Shell command to run (`sh -c`).
+- `cwd` _(string, optional)_: Working directory (defaults to `/workspace`).
+- `env` _(object, optional)_: Key-value environment variables.
+- `timeoutSeconds` _(number, optional)_: Execution deadline (default 30s).
+- `terminal` _(boolean, optional)_: Allocate a 24x80 pseudo-terminal and return combined transcript.
+
+---
+
+### `microvm_diff`
+
+Previews unified Git diffs of modifications made by the agent in `/workspace`.
+
+**Parameters:**
+
+- `target` _(string, required)_: Task name or immutable ID.
+
+---
+
+### `microvm_task_finish`
+
+Finalizes the task, destroys the guest VM, and exports verified patches and logs.
+
+**Parameters:**
+
+- `id` _(string, required)_: Task name or immutable ID.
+
+---
+
+### `microvm_ls`
+
+Lists all active sandboxes and retained task records.
+
+**Parameters:** None.
+
+---
+
+### `microvm_rm`
+
+Releases a task name or purges retained results.
+
+**Parameters:**
+
+- `target` _(string, required)_: Task name or immutable ID.
+- `force` _(boolean, optional)_: Force removal of an actively running sandbox. Default: `false`.
+- `purge` _(boolean, optional)_: Delete retained logs and result directories. Default: `false`.
+
+---
+
+## Raw Sandbox Tools
+
+### `microvm_run`
+
+Boots an ephemeral minimal Linux sandbox.
+
+**Parameters:**
+
+- `name` _(string, required)_: Name of the sandbox.
+- `network` _(string, optional)_: `"none"`, `"filtered"`, or `"nat"`. Default: `"none"`.
+- `ttlSeconds` _(number, optional)_: Lifetime in seconds. Default: 1800.
+- `cpus` _(number, optional)_: vCPUs. Default: 1.
+- `memoryMB` _(number, optional)_: RAM in MB. Default: 1024.
+
+---
+
+### `microvm_exec`
+
+Runs a shell command inside a raw sandbox.
+
+**Parameters:** Same as `microvm_task_exec` (default working directory is `/`).
+
+---
+
+### `microvm_ps`
+
+Lists active raw sandboxes.
+
+**Parameters:** None.
+
+---
+
+### `microvm_destroy`
+
+Destroys a raw sandbox and releases its runtime record.
+
+**Parameters:**
+
+- `name` _(string, required)_: Sandbox name.

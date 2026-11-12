@@ -4,10 +4,13 @@ A local Linux microVM runtime for AI agents on macOS. One CLI boots an
 isolated Linux guest with Apple's Virtualization.framework, runs a command
 inside it, and tears it down.
 
-For project work, start with the **[Git-style workflow guide](docs/git-style-workflow.md)**:
+For project work, start with the **[Agent task workflow tutorial](docs/tutorials/agent-task-workflow.mdx)**:
 clone a local directory or repository into a named Node 22 task, run commands,
 review a verified diff, and retain results after teardown. It includes CLI,
 TypeScript SDK, and MCP setup. Project tasks currently require Apple Silicon.
+
+See the complete **[Documentation Portal](docs/index.mdx)** for tutorials,
+how-to guides, reference schemas, and architectural explanations.
 
 The tool is local-first: one user and one machine, with no hosted account,
 cluster, or host filesystem share. Tasks have finite lifetimes; persistent
@@ -65,7 +68,7 @@ microvm rm deps
   `rm NAME --force`; deleting a kept result needs `rm NAME --purge`.
 
 Every command, its output, and its JSON support are in the
-[command matrix](docs/cli-commands.md). [The CLI reference](docs/cli-reference.md)
+[command matrix](docs/reference/cli/commands.mdx). [The CLI reference](docs/reference/cli/overview.mdx)
 collects error codes, deadlines, retention, destructive flags, terminal
 transcripts, and interface changes. Raw sandboxes without a project
 (`run`, `ps`, `destroy`) are described under [Build and run](#build-and-run).
@@ -247,7 +250,7 @@ microvm shell demo
 
 `shell` opens the guest's shell on a terminal, in `/workspace` for project
 sandboxes, with no command deadline; leaving it keeps the sandbox running until
-`finish`, `rm --force`, or its TTL. See [docs/cli-shell.md](docs/cli-shell.md).
+`finish`, `rm --force`, or its TTL. See [interactive shells guide](docs/how-to/interactive-shells-and-terminal.mdx).
 
 `microvm help run` and `microvm run --help` show the same command help. Top-level help
 teaches the repository workflow; `microvm help advanced` lists raw sandboxes, task
@@ -261,7 +264,7 @@ offending argument. Help and invalid usage do not start the daemon.
 The limit includes boot time and exec never renews it. `ps` lists raw sandboxes
 with the same columns as `ls`, including the effective `NETWORK` and remaining
 `TTL`; `unknown` identifies absent historical metadata. Every command's output and
-`--json` support is in [docs/cli-commands.md](docs/cli-commands.md).
+`--json` support is in [CLI command reference](docs/reference/cli/commands.mdx).
 `--timeout` kills the guest process group and the command exits 124. With an
 empty `--env` list the agent still sets `PATH`, `HOME`, `TERM`, and `LANG`.
 
@@ -328,7 +331,7 @@ rejection, expiry during boot/exec, late callbacks, and teardown failure/retry.
 
 ## Boot time
 
-A measured cold start on this Mac is in [docs/boot-time.md](docs/boot-time.md).
+A measured cold start on this Mac is in [docs/research/boot-time.md](docs/research/boot-time.md).
 `run` returns when the guest agent answers. The unit tests still do not boot
 a VM. If `run` times out, read `~/.microvm/vms/<name>/console.log` and
 `~/.microvm/daemon.log`.
@@ -357,6 +360,6 @@ Apache 2.0. See [LICENSE](LICENSE).
 ## Agent task loop
 
 The Node 22 project/task/result path, runtime preparation, SDK/MCP usage and
-retention limits are documented in [Task loop](docs/task-loop.md). Runtime tools
+retention limits are documented in the [Agent task workflow tutorial](docs/tutorials/agent-task-workflow.mdx). Runtime tools
 are read-only, workspaces are copied, and finalization exports results before
 sandbox destruction.

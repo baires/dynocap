@@ -1,0 +1,133 @@
+---
+title: "Troubleshoot with microvm doctor"
+description: "How to use microvm doctor to verify host readiness, diagnose code-signing and entitlement issues, and resolve daemon socket problems."
+sidebar_position: 6
+---
+
+# Troubleshoot with microvm doctor
+
+The `microvm doctor` command is a read-only diagnostic tool that verifies your host environment, security entitlements, companion binaries, and kernel images before you run sandboxes.
+
+Unlike other commands, `doctor`:
+
+- Never starts a daemon or boots a virtual machine.
+- Never downloads artifacts or modifies files.
+- Writes diagnostic reports directly to `stdout` even on failure (with exit code 1 if required checks fail).
+
+---
+
+## Running Diagnostics
+
+Run `doctor` directly from your terminal:
+
+```sh
+microvm doctor
+```
+
+For programmatic checks or integration scripts, request JSON output:
+
+```sh
+microvm doctor --json
+```
+
+To verify a specific runtime or custom home directory:
+
+```sh
+microvm doctor --runtime node:22 --home /tmp/custom-microvm
+```
+
+---
+
+## Diagnostic Checks Reference
+
+`doctor` runs nine core checks:
+
+| Check ID                | Description                   | What Causes Failure                                      | How to Resolve                                             |
+| :---------------------- | :---------------------------- | :------------------------------------------------------- | :--------------------------------------------------------- |
+| **`platform`**          | OS & CPU architecture         | Non-macOS or unsupported hardware.                       | Run on Apple Silicon with macOS 13+.                       |
+| **`backend`**           | Virtualization support        | Hypervisor framework disabled or unavailable.            | Ensure your Mac model supports `Virtualization.framework`. |
+| **`signing`**           | Code signature & entitlements | Missing `com.apple.security.virtualization` entitlement. | Run `./scripts/build-macos.sh` to compile and sign.        |
+| **`home`**              | Home directory & socket path  | Non-writable directory or path too long.                 | Socket path must be < 104 chars. Choose shorter `--home`.  |
+| **`microvm-workspace`** | Workspace companion           | Missing Go companion binary beside CLI.                  | Run `./scripts/build-macos.sh` to build companions.        |
+| **`microvm-mkruntime`** | Runtime maker companion       | Missing Go companion binary beside CLI.                  | Run `./scripts/build-macos.sh` to build companions.        |
+| **`images`**            | Kernel & initramfs integrity  | Hash mismatch or missing guest boot files.               | Run `./scripts/fetch-image.sh` to refresh images.          |
+| **`runtime`**           | Project task runtime disk     | Node 22 runtime disk missing or corrupt.                 | Run `microvm runtime prepare . --runtime node:22`.         |
+| **`daemon`**            | Daemon ping & capabilities    | Stale socket or daemon process unresponsive.             | Kill stale daemon (`pkill -f microvm`) or check logs.      |
+
+---
+
+## Common Issues and Solutions
+
+### 1. `signing` Check Failed: Code Signature Invalid
+
+**Symptom:**
+
+```text
+[FAIL] signing: CLI is not signed with com.apple.security.virtualization
+```
+
+**Cause:** On macOS, binaries that call `Virtualization.framework` require Apple's virtualization entitlement. Swift compiler outputs (`swift build`) are not entitled by default.  
+**Fix:** Always build via the repository script:
+
+```sh
+./scripts/build-macos.sh
+```
+
+---
+
+### 2. `home` Check Failed: Socket Path Length Exceeded
+
+**Symptom:**
+
+```text
+[FAIL] home: socket path ~/.microvm/daemon.sock exceeds maximum length (104 bytes)
+```
+
+**Cause:** macOS UNIX domain sockets have a strict 104-byte path limit. If your user home directory or custom `--home` path is very deep, the socket cannot be bound.  
+**Fix:** Specify a shorter path using the `MICROVM_HOME` environment variable or `--home` flag:
+
+```sh
+export MICROVM_HOME="/tmp/mvm"
+microvm doctor
+```
+
+---
+
+### 3. `runtime` Check Failed: Catalog or Disk Missing
+
+**Symptom:**
+
+```text
+[FAIL] runtime: runtime node:22 is not prepared in /Users/username/.microvm
+```
+
+**Cause:** Project tasks (`microvm clone`) require pre-built runtime artifacts that have not been prepared yet.  
+**Fix:** Run explicit preparation from the `microvm` source checkout:
+
+```sh
+microvm runtime prepare . --runtime node:22
+```
+
+---
+
+### 4. Stale or Unresponsive Daemon
+
+**Symptom:**
+
+```text
+[WARN] daemon: daemon ping timed out
+```
+
+**Cause:** An old daemon process is hanging or its UNIX domain socket `daemon.sock` is orphaned.  
+**Fix:**
+
+1. Check daemon logs:
+   ```sh
+   cat ~/.microvm/daemon.log
+   ```
+2. Terminate any running daemon:
+   ```sh
+   pkill -f "microvm daemon"
+   rm -f ~/.microvm/daemon.sock
+   ```
+   The next `microvm` command will automatically spawn a fresh, healthy daemon.

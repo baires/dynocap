@@ -1,0 +1,158 @@
+---
+title: "TypeScript SDK API Reference"
+description: "Complete class, method, and type definitions for @microvm/sdk."
+sidebar_position: 5
+---
+
+# TypeScript SDK API Reference
+
+The `@microvm/sdk` package provides native TypeScript bindings to the local MicroVM daemon over `~/.microvm/daemon.sock`.
+
+---
+
+## Class: `Task`
+
+Manages project workspaces with automatic Git tracking, command journaling, and patch generation.
+
+### Static Methods
+
+#### `Task.start(options: TaskOptions): Promise<Task>`
+
+Clones a local directory or remote Git URL into an isolated sandbox and boots the guest.
+
+```ts
+const task = await Task.start({
+  name: "worker-1",
+  projectPath: "./my-app",
+  runtimes: [{ name: "node", version: "22" }],
+  network: "none",
+  ttlSeconds: 1800,
+  cpus: 2,
+  memoryMB: 1024,
+});
+```
+
+#### `Task.open(target: string, options?: TaskAccessOptions): Promise<Task>`
+
+Connects to an existing task by friendly name or immutable ID (`task-…`).
+
+```ts
+const task = await Task.open("worker-1", {
+  requireOffline: true,
+});
+```
+
+#### `Task.list(options?: ClientOptions): Promise<TaskInfo[]>`
+
+Lists all registered tasks from the daemon.
+
+### Instance Methods
+
+#### `task.exec(command: string, options?: ExecOptions): Promise<ExecResult>`
+
+Runs a shell command inside `/workspace`.
+
+- `command`: Command string executed via `sh -c`.
+- `options`:
+  - `timeoutSeconds?: number`: Execution deadline (default 60s).
+  - `cwd?: string`: Working directory (defaults to `/workspace`).
+  - `env?: Record<string, string>`: Environment variables.
+  - `stdin?: Uint8Array`: Raw bytes to stream to process standard input.
+  - `terminal?: { rows: number; cols: number }`: Runs inside a pseudo-terminal of the given size.
+
+**Returns:**
+
+```ts
+type ExecResult = {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  logDirectory: string;
+};
+```
+
+#### `task.diff(): Promise<TaskPreview>`
+
+Calculates and previews the unified Git diff of changes in `/workspace` without finishing the task.
+
+**Returns:**
+
+```ts
+type TaskPreview = {
+  directory: string;
+  patchPath: string;
+  reviewPath: string;
+  changesPath: string;
+};
+```
+
+#### `task.finish(): Promise<FinishResult>`
+
+Closes command execution, destroys the guest virtual machine, and writes the verified patch and files to the host result directory.
+
+#### `task.remove(options?: { force?: boolean; purge?: boolean }): Promise<void>`
+
+Removes the task registration. Requires `force: true` if the task is actively running.
+
+---
+
+## Class: `Sandbox`
+
+Manages raw, ephemeral Linux microVMs without workspace tracking or diff generation.
+
+### Static Methods
+
+#### `Sandbox.create(options: CreateOptions): Promise<Sandbox>`
+
+Boots a raw Alpine Linux sandbox.
+
+```ts
+const sandbox = await Sandbox.create({
+  name: "eval-sandbox",
+  network: "none",
+  cpus: 1,
+  memoryMB: 1024,
+  ttlSeconds: 600,
+});
+```
+
+#### `Sandbox.connect(name: string, options?: ClientOptions): Promise<Sandbox>`
+
+Connects to a running raw sandbox.
+
+#### `Sandbox.list(options?: ClientOptions): Promise<SandboxInfo[]>`
+
+Lists running raw sandboxes.
+
+### Instance Methods
+
+#### `sandbox.exec(command: string, options?: ExecOptions): Promise<ExecResult>`
+
+Executes a command inside the raw sandbox (default working directory: `/`).
+
+#### `sandbox.destroy(): Promise<void>`
+
+Stops the virtual machine and deletes its runtime records.
+
+---
+
+## Top-Level Utility Functions
+
+### `listManaged(options?: ClientOptions): Promise<ManagedEntry[]>`
+
+Lists all active sandboxes and retained task records.
+
+### `removeManaged(target: string, options?: { force?: boolean; purge?: boolean }): Promise<void>`
+
+Releases a named sandbox or purges retained task results.
+
+---
+
+## Errors
+
+### `class SandboxError extends Error`
+
+Thrown for daemon, hypervisor, or validation errors.
+
+- `error.kind`: `"daemon"`, `"not_found"`, `"timeout"`, `"policy"`, `"invalid_state"`.
+- `error.message`: Detailed human-readable explanation.

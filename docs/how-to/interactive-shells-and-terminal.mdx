@@ -1,0 +1,107 @@
+---
+title: "Interactive Shells and Terminal Sessions"
+description: "How to open interactive terminals, handle terminal resizing and signals, and run full-screen console programs in MicroVM."
+sidebar_position: 3
+---
+
+# Interactive Shells and Terminal Sessions
+
+While AI agents frequently run automated non-interactive commands, human developers often need to inspect a running sandbox, run text editors, inspect processes with `top` or `ps`, or test commands manually.
+
+This guide covers:
+
+1. Opening an interactive shell using `microvm shell`.
+2. Running single terminal-aware commands using `microvm exec -t`.
+3. Signal handling (Ctrl-C, window resize, signals).
+4. Terminal session lifecycle vs. Sandbox TTL.
+
+---
+
+## Interactive Shell: `microvm shell`
+
+To open an interactive session in any running sandbox:
+
+```sh
+microvm shell my-sandbox
+```
+
+Output:
+
+```text
+/workspace # whoami
+root
+/workspace # node -v
+v22.x.x
+/workspace # exit
+microvm: left the shell; my-sandbox is still running until its TTL. Export with `microvm finish my-sandbox` or discard with `microvm rm my-sandbox --force`.
+```
+
+### Characteristics of `microvm shell`:
+
+- **Shell executable:** The guest automatically selects `/bin/sh` (BusyBox `ash` with tab completion and arrow key history) or the user's defined shell in `/etc/passwd`.
+- **Working directory:** Starts in `/workspace` for project tasks or `/` for raw sandboxes.
+- **Environment:** Sets `TERM=xterm-256color`, `PATH`, `HOME=/root`, and the runtime's environment variables.
+- **No Command Deadline:** Unlike `microvm exec` (which defaults to a 60-second command deadline), `shell` has no command timeout. The session remains open until you exit or the sandbox reaches its overall TTL.
+- **Sandbox survives exit:** When you type `exit` or press `Ctrl-D`, only your interactive shell session ends. The guest virtual machine continues running in the background.
+
+---
+
+## Single Terminal Commands: `microvm exec -t`
+
+When you want to run a single command that requires a pseudo-terminal (PTY)—such as an interactive test runner, a progress bar, or a cursor-positioned tool—use `microvm exec -t`:
+
+```sh
+microvm exec my-sandbox -t -- npm test -- --watch
+```
+
+### Differences: `exec -t` vs `shell`
+
+| Property              | `microvm exec -t NAME -- COMMAND`       | `microvm shell NAME`                          |
+| :-------------------- | :-------------------------------------- | :-------------------------------------------- |
+| **Command**           | Explicit argument (e.g. `htop`, `vi`)   | Guest `/bin/sh`                               |
+| **Command Timeout**   | Defaults to 60s (`--timeout` overrides) | None (bounded only by sandbox TTL)            |
+| **Host Output**       | May be piped or redirected              | Must be attached to an interactive terminal   |
+| **Post-exit message** | None                                    | Prints reminder that sandbox is still running |
+
+---
+
+## Signal Handling and Keystrokes
+
+When attached to a terminal session in MicroVM:
+
+### 1. Interrupting a Process (Ctrl-C)
+
+- When running `microvm exec` without `-t`, pressing `Ctrl-C` forwards `SIGINT` over vsock to the guest process group. If the guest exits from the signal, the CLI exits with status `130`.
+- In a terminal session (`shell` or `exec -t`), `Ctrl-C` is passed as a standard ASCII byte (`0x03`) to the guest PTY driver, triggering standard terminal interrupt behavior.
+
+### 2. Window Resizing (SIGWINCH)
+
+When you resize your macOS terminal window (e.g. Terminal.app, iTerm2, Alacritty, Ghostty), the MicroVM CLI intercepts `SIGWINCH` on the host, reads the new row and column dimensions, and transmits a control packet over vsock. The guest agent issues an `ioctl(TIOCSWINSZ)` on the guest PTY, allowing full-screen tools (such as `nano`, `less`, or `htop`) to resize seamlessly.
+
+### 3. Terminating from the Host
+
+If the host CLI receives `SIGTERM`, `SIGHUP`, or `SIGQUIT`, it cleanly restores your host terminal's original termios state before exiting (`128 + signal`), ensuring your macOS shell does not remain in raw mode or echo-disabled.
+
+---
+
+## Standard Input Modes for `microvm exec`
+
+For automated scripting, `microvm exec` supports several stdin modes:
+
+```sh
+# 1. Pipe a local file or script into the guest
+cat script.sh | microvm exec my-sandbox -- sh
+
+# 2. Interactive non-PTY streaming (read host stdin until EOF)
+microvm exec my-sandbox -i -- python3
+
+# 3. Explicitly disable stdin (immediate EOF to guest)
+microvm exec my-sandbox --no-input -- my-command
+```
+
+| Flag                  | Host Stdin Behavior      | Guest Stdin Behavior                   |
+| :-------------------- | :----------------------- | :------------------------------------- |
+| _(Default, pipe)_     | Read from host until EOF | Streams bytes to guest, then sends EOF |
+| _(Default, terminal)_ | Not read                 | Sends immediate EOF to guest           |
+| `-i`, `--interactive` | Read from host until EOF | Keeps stdin open for interactive input |
+| `--no-input`          | Not read                 | Immediate EOF                          |

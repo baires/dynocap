@@ -82,7 +82,7 @@ final class ExecTerminalTests: XCTestCase {
         XCTAssertEqual(try parseCommand(["microvm", "help", "shell"]).command, .help(topic: ["shell"]))
         let help = commandHelp(["shell"])
         for text in ["microvm shell NAME_OR_ID", "/workspace", "Bash is not required", "no command deadline", "TTL",
-                     "does not finish or remove", "restored", "--json is unsupported", "docs/cli-shell.md",
+                     "does not finish or remove", "restored", "--json is unsupported", "docs/how-to/interactive-shells-and-terminal.mdx",
                      "5 minutes and 1 minute before expiry"] {
             XCTAssertTrue(help.contains(text), text)
         }

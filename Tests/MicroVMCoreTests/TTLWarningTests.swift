@@ -50,7 +50,7 @@ final class TTLWarningTests: XCTestCase {
         XCTAssertNil(schedule.due(now: 80))
         XCTAssertEqual(schedule.due(now: 92), 8)
         XCTAssertNil(schedule.due(now: 95))
-        XCTAssertEqual(ttlWarningThresholds, [300, 60], "documented in docs/cli-shell.md")
+        XCTAssertEqual(ttlWarningThresholds, [300, 60], "documented in docs/how-to/interactive-shells-and-terminal.mdx")
     }
 
     func testWarningTextIsAHostDiagnosticLine() {

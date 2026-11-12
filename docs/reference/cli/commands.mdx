@@ -1,0 +1,269 @@
+---
+title: "CLI Command Reference"
+description: "Comprehensive syntax, parameters, flags, and behaviors for every microvm command."
+sidebar_position: 2
+---
+
+# CLI Command Reference
+
+Every exposed command, its output, and whether it accepts `--json`.
+
+| Command                   | Group    | Stdout on success                          | `--json` | Contract                                         |
+| ------------------------- | -------- | ------------------------------------------ | -------- | ------------------------------------------------ |
+| `microvm runtime prepare` | primary  | Preparation result                         | yes      | [JSON Schemas](json-schemas.mdx)                 |
+| `microvm clone`           | primary  | Creation result                            | yes      | [JSON Schemas](json-schemas.mdx)                 |
+| `microvm ls`              | primary  | Sandbox and result listing                 | yes      | [JSON Schemas](json-schemas.mdx)                 |
+| `microvm doctor`          | primary  | Diagnostic report                          | yes      | [Troubleshoot](/how-to/troubleshoot-with-doctor) |
+| `microvm logs`            | primary  | Replayed streams, or `--list` discovery    | no       | Content stream                                   |
+| `microvm inspect`         | primary  | Inspection                                 | yes      | [JSON Schemas](json-schemas.mdx)                 |
+| `microvm exec`            | primary  | Guest stdout                               | no       | Content stream                                   |
+| `microvm shell`           | primary  | Guest terminal                             | no       | Interactive terminal                             |
+| `microvm diff`            | primary  | Patch bytes                                | no       | Content stream                                   |
+| `microvm finish`          | primary  | Finish result                              | yes      | [JSON Schemas](json-schemas.mdx)                 |
+| `microvm rm`              | primary  | Removal result                             | yes      | [JSON Schemas](json-schemas.mdx)                 |
+| `microvm run`             | advanced | Raw sandbox creation result                | yes      | [JSON Schemas](json-schemas.mdx)                 |
+| `microvm ps`              | advanced | `ls` listing limited to raw sandboxes      | yes      | [JSON Schemas](json-schemas.mdx)                 |
+| `microvm destroy`         | advanced | `rm` removal result                        | yes      | [JSON Schemas](json-schemas.mdx)                 |
+| `microvm daemon`          | advanced | None; runs in the foreground until stopped | no       | Foreground process                               |
+| `microvm task start`      | advanced | `clone` creation result                    | yes      | [JSON Schemas](json-schemas.mdx)                 |
+| `microvm task exec`       | advanced | Guest stdout, as `exec`                    | no       | Content stream                                   |
+| `microvm task finish`     | advanced | `finish` result                            | yes      | [JSON Schemas](json-schemas.mdx)                 |
+| `microvm version`         | advanced | Version and virtualization support         | yes      | CLI version string / JSON                        |
+| `microvm help`            | advanced | Help text                                  | no       | Text only                                        |
+
+---
+
+## Primary Workflow Commands
+
+### `microvm clone`
+
+Import a local project directory or Git URL into an isolated sandbox.
+
+```sh
+microvm clone SOURCE NAME [options]
+```
+
+- **Arguments:**
+  - `SOURCE`: Path to a local directory / Git checkout, or an HTTPS/SSH Git repository URL.
+  - `NAME`: Friendly name for the sandbox (e.g. `agent-fix`, `demo`).
+- **Options:**
+  - `--network <none|filtered|nat>`: Outbound network policy. Default: `none`.
+  - `--ttl <seconds>`: Maximum lifetime from creation (30s to 86400s). Default: `1800` (30m).
+  - `--cpus <count>`: Number of virtual CPUs. Default: `2`.
+  - `--memory <MB>`: RAM in megabytes. Default: `1024`.
+  - `--json`: Output creation object to stdout as JSON.
+
+---
+
+### `microvm exec`
+
+Execute a command inside a running sandbox.
+
+```sh
+microvm exec NAME [options] -- COMMAND [args...]
+```
+
+- **Arguments:**
+  - `NAME`: Friendly name or immutable task ID (`task-…`).
+  - `-- COMMAND`: Command and arguments to execute inside the guest.
+- **Options:**
+  - `--timeout <seconds>`: Execution deadline. Default: `60`. Exceeding exits with `124`.
+  - `-t`, `--tty`: Allocate a guest pseudo-terminal (PTY) combining stdout and stderr.
+  - `--cwd <path>`: Working directory inside guest. Default: `/workspace` (project) or `/` (raw).
+  - `--env <KEY=VAL>`: Set guest environment variable (repeatable).
+  - `-i`, `--interactive`: Keep standard input open for interactive input until EOF.
+  - `--no-input`: Send immediate EOF to guest stdin.
+
+---
+
+### `microvm shell`
+
+Open an interactive `/bin/sh` shell in a running sandbox.
+
+```sh
+microvm shell NAME
+```
+
+- **Behavior:**
+  - Requires an interactive terminal on the host.
+  - Inherits terminal window dimensions and forwards `SIGWINCH` resize events.
+  - Has no command timeout; session stays open until `exit` or sandbox TTL expires.
+  - Exiting the shell leaves the sandbox running.
+
+---
+
+### `microvm diff`
+
+Output a unified Git diff of all changes made in `/workspace` since creation.
+
+```sh
+microvm diff NAME
+```
+
+- **Output:** Streams clean, standard unified diff bytes (`diff --git ...`) directly to `stdout`.
+- **Note:** Does not alter, stop, or finish the running sandbox.
+
+---
+
+### `microvm finish`
+
+Export verified patch and command logs to the host, and destroy the guest microVM.
+
+```sh
+microvm finish NAME [options]
+```
+
+- **Options:**
+  - `--json`: Output finish result object as JSON.
+- **Behavior:**
+  - Closes command admission immediately.
+  - Exports `changes.patch`, full changed files, and execution journals into the host result directory.
+  - Destroys the virtual machine and its disposable disk.
+  - Prints shell-quoted `git apply` instructions.
+  - Retains exported results on the host for 7 days from creation.
+
+---
+
+### `microvm logs`
+
+Inspect or replay recorded execution output from project tasks.
+
+```sh
+microvm logs NAME [options]
+```
+
+- **Options:**
+  - `--list`: Print a table of all recorded command executions for this task.
+  - `--exec <ID>`: Replay stdout and stderr of a specific zero-based execution index.
+- **Default:** Replays stdout and stderr of the most recent execution.
+
+---
+
+### `microvm ls`
+
+List active sandboxes and retained task results.
+
+```sh
+microvm ls [options]
+```
+
+- **Options:**
+  - `--json`: Output listing array as JSON.
+- **Output Columns:**
+  - `NAME/ID`: Friendly name or immutable ID.
+  - `KIND`: `task` (project task) or `sandbox` (raw).
+  - `PHASE`: `booting`, `running`, `stopping`, `stopped`, `completed`, or `failed`.
+  - `RUNTIME`: Runtime identifier (e.g. `node:22` or `minimal`).
+  - `NETWORK`: `none`, `filtered`, or `nat`.
+  - `TTL`: Remaining time until sandbox expiration.
+  - `RETENTION`: Remaining time until retained host results expire (7 days from creation).
+
+---
+
+### `microvm inspect`
+
+Display full metadata for an active or retained task.
+
+```sh
+microvm inspect NAME_OR_ID [options]
+```
+
+- **Options:**
+  - `--json`: Output complete inspection object as JSON.
+
+---
+
+### `microvm rm`
+
+Release a sandbox name or purge retained results.
+
+```sh
+microvm rm NAME_OR_ID [options]
+```
+
+- **Options:**
+  - `--force`, `-f`: Required to remove a sandbox that is still running or finalizing.
+  - `--purge`: Deletes the managed task record, execution logs, and published result directory.
+  - `--json`: Output removal result object as JSON.
+
+---
+
+### `microvm doctor`
+
+Verify host requirements, permissions, and runtime images without starting the daemon.
+
+```sh
+microvm doctor [options]
+```
+
+- **Options:**
+  - `--runtime <name:version>`: Check specific runtime (default: `node:22`).
+  - `--json`: Output diagnostic report as JSON.
+
+---
+
+### `microvm runtime prepare`
+
+Download, build, and verify a runtime rootfs disk.
+
+```sh
+microvm runtime prepare [REPO_PATH] [options]
+```
+
+- **Arguments:**
+  - `REPO_PATH`: Path to the `microvm` source tree (defaults to `.`).
+- **Options:**
+  - `--runtime <name:version>`: Runtime to prepare (currently `node:22`).
+  - `--json`: Output preparation result object as JSON.
+
+---
+
+## Advanced & Raw Sandbox Commands
+
+### `microvm run`
+
+Boot an ephemeral raw Linux microVM without a project workspace.
+
+```sh
+microvm run [options]
+```
+
+- **Options:**
+  - `--name <name>`: Assign a friendly name.
+  - `--network <none|filtered|nat>`: Network mode. Default: `none`.
+  - `--ttl <seconds>`: Lifetime in seconds. Default: `1800`.
+  - `--cpus <count>`: Number of vCPUs. Default: `1`.
+  - `--memory <MB>`: Memory in megabytes. Default: `1024`.
+  - `--json`: Output JSON creation result.
+
+---
+
+### `microvm ps`
+
+List only raw sandboxes (`kind == sandbox`). Supports `--json`.
+
+```sh
+microvm ps [options]
+```
+
+---
+
+### `microvm destroy`
+
+Alias for `microvm rm` without `--purge`. Requires `--force` for running sandboxes.
+
+```sh
+microvm destroy NAME_OR_ID [--force]
+```
+
+---
+
+### `microvm daemon`
+
+Run the MicroVM background daemon in the foreground.
+
+```sh
+microvm daemon [options]
+```
+
+- Emits daemon logs directly to stdout/stderr. Used primarily for debugging daemon lifecycle.

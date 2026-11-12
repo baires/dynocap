@@ -141,7 +141,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
         Preparation is explicit. Creating a sandbox does not download or substitute a runtime. \
         The default selection is node:22 when --runtime is omitted. REPO is the microvm source tree, defaulting to the current directory.
         Progress goes to human stderr; companion output is saved in a build log. JSON suppresses progress.
-        See docs/cli-creation.md for result schemas.
+        See docs/reference/cli/json-schemas.mdx for result schemas.
         """,
         allowsJSON: true
     ),
@@ -174,7 +174,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
             + " Creation reports runtime, network, and remaining TTL; expiration discards unexported edits."
             + " Interrupting creation removes that attempt or reports `microvm rm NAME --force` if cleanup fails."
             + " Other sandboxes and retained results stay."
-            + " Human progress uses stderr; JSON suppresses it. See docs/cli-creation.md for result schemas.",
+            + " Human progress uses stderr; JSON suppresses it. See docs/reference/cli/json-schemas.mdx for result schemas.",
         allowsJSON: true
     ),
     CLICommandSpec(
@@ -194,7 +194,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
         Human-readable columns are the default, including when redirected. Narrow terminals use wrapped labeled entries.
         TTL is the sandbox deadline; RETENTION is the independent retained-record/result deadline, measured from creation.
         A dash means unavailable or not applicable. JSON is an array with explicit nulls and Unix-second deadlines;
-        see docs/cli-json.md. JSON failures use stderr; see docs/cli-errors.md.
+        see docs/reference/cli/json-schemas.mdx. JSON failures use stderr; see docs/reference/cli/errors.mdx.
         Human output is plain text without color or paging.
         """,
         allowsJSON: true
@@ -213,7 +213,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
         Check platform/backend support, signed CLI entitlement, companions, image hashes, selected runtime, home access, and daemon connectivity.
         A stopped daemon is normal; a broken listener or held daemon lock without a socket is an error.
         Findings use stdout in both modes. Required check failures exit 1; valid setup with a stopped daemon exits 0.
-        Does not create the home, start a daemon or guest, download, prepare, or repair artifacts. See docs/cli-doctor.md.
+        Does not create the home, start a daemon or guest, download, prepare, or repair artifacts. See docs/how-to/troubleshoot-with-doctor.mdx.
         """,
         allowsJSON: true
     ),
@@ -231,7 +231,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
         Replay sends stored stdout to stdout and stored stderr to stderr, without labels or a reconstructed chronology.
         Active, missing, or detectably truncated logs are refused before output. Legacy lengths may be unknown; --list reports that.
         Successful replay exits 0 regardless of the original guest status. --json is unsupported, including with --list.
-        Logs are retained with the task after shutdown until its original retention deadline. See docs/cli-logs.md.
+        Logs are retained with the task after shutdown until its original retention deadline. See docs/tutorials/agent-task-workflow.mdx.
         """
     ),
     CLICommandSpec(
@@ -245,7 +245,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
         Show identity, source, phase, runtime, network, independent sandbox/retention deadlines, and available result artifacts.
         Retention expires seven days after task creation, not seven days after finish. Missing information is reported as unavailable.
         Interrupted work cannot be resumed; unexported edits are discarded when the sandbox is lost.
-        Inspection does not run guest commands, export, renew TTL, or extend retention. See docs/cli-inspect.md for JSON fields.
+        Inspection does not run guest commands, export, renew TTL, or extend retention. See docs/reference/cli/json-schemas.mdx for JSON fields.
         """,
         allowsJSON: true
     ),
@@ -276,7 +276,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
         that the guest terminal turns into SIGINT for its foreground job. A second Ctrl-C does not stop waiting \
         in this mode. stdout and stderr arrive combined on stdout, and logs replays that transcript. -t needs a \
         terminal on stdin and cannot be combined with --no-input. TERM defaults to xterm-256color. With -t, a stderr \
-        warning comes 5 minutes and 1 minute before the sandbox TTL ends. See docs/cli-exec.md.
+        warning comes 5 minutes and 1 minute before the sandbox TTL ends. See docs/how-to/interactive-shells-and-terminal.mdx.
         """
     ),
     CLICommandSpec(
@@ -296,7 +296,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
         5 minutes and 1 minute before expiry; expiry discards unexported edits. Leaving the shell does \
         not finish or remove the sandbox; run finish or rm --force explicitly. The CLI exits with the shell's \
         status. Stdin and stdout must be terminals; use exec to script commands. --json is unsupported. \
-        The session is retained as a terminal transcript for logs. See docs/cli-shell.md.
+        The session is retained as a terminal transcript for logs. See docs/how-to/interactive-shells-and-terminal.mdx.
         """
     ),
     CLICommandSpec(
@@ -321,7 +321,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
         git apply command. The patch matches the imported baseline, including imported uncommitted changes. \
         Finish does not modify the host checkout. A guest command failure stays visible as phase failed after \
         a successful export. Export and teardown failures are separate errors; retry finish while the sandbox \
-        TTL permits. Repeating finish returns the existing result. See docs/cli-finish.md.
+        TTL permits. Repeating finish returns the existing result. See docs/tutorials/agent-task-workflow.mdx.
         """,
         allowsJSON: true
     ),
@@ -354,7 +354,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
         it mutates the record, so a stale lookup cannot bypass the check. Refusal names the sandbox and explains \
         finish versus discard. Finished, failed, and interrupted sandboxes can be removed without --force. \
         --purge separately deletes the retained result and does not imply --force. There is no confirmation prompt. \
-        A failed teardown keeps the record so removal can be retried. See docs/cli-removal.md.
+        A failed teardown keeps the record so removal can be retried. See docs/reference/cli/commands.mdx.
         """,
         allowsJSON: true
     ),
@@ -379,7 +379,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
         ],
         discussion: sandboxLifetime + " Output reports the phase, network, remaining TTL, and a next exec command, "
             + "like clone. A raw sandbox has no project result: expiry or removal discards everything in it. "
-            + "Human progress uses stderr; JSON suppresses it. See docs/cli-creation.md.",
+            + "Human progress uses stderr; JSON suppresses it. See docs/reference/cli/json-schemas.mdx.",
         allowsJSON: true
     ),
     CLICommandSpec(
@@ -392,7 +392,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
         discussion: """
         ps is ls limited to raw sandboxes (kind sandbox): the same columns, deadlines, and JSON schema. \
         Use ls for project sandboxes and retained results, and inspect NAME for a raw sandbox's failure message. \
-        See docs/cli-json.md.
+        See docs/reference/cli/json-schemas.mdx.
         """,
         allowsJSON: true
     ),
@@ -413,7 +413,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
         discussion: """
         destroy sends the same request as rm and follows the same removal intent: the daemon refuses a live sandbox, \
         raw or project, unless --force is given, and a stopped one is removed without it. Retained results are kept; \
-        use rm --purge to delete them. Output matches rm. See docs/cli-removal.md.
+        use rm --purge to delete them. Output matches rm. See docs/reference/cli/commands.mdx.
         """,
         allowsJSON: true
     ),
@@ -449,7 +449,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
                 + "--cpus 2 --memory 1024 --ref main --ssh-key /tmp/key --git-token-env MICROVM_EXAMPLE_TOKEN",
             "microvm task start /tmp/project --name demo --json",
         ],
-        discussion: networkChoice + " Creation, progress, output, and JSON are the same as clone; see docs/cli-creation.md."
+        discussion: networkChoice + " Creation, progress, output, and JSON are the same as clone; see docs/reference/cli/json-schemas.mdx."
             + " Prefer clone when choosing a name up front.",
         allowsJSON: true
     ),
@@ -471,7 +471,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
         discussion: """
         task exec takes exactly the flags of exec, with the same defaults: a 60-second --timeout, /workspace for \
         a project sandbox, piped stdin streamed, separate stdout and stderr unless -t, and the guest's exit status. \
-        Everything after -- is the guest command and is preserved unchanged. See docs/cli-exec.md.
+        Everything after -- is the guest command and is preserved unchanged. See docs/how-to/interactive-shells-and-terminal.mdx.
         """
     ),
     CLICommandSpec(
@@ -481,7 +481,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
         usage: "microvm task finish ID [--json]",
         flags: [CLIFlag(name: "--json", value: nil, summary: "Print the documented finish result on stdout.")],
         examples: ["microvm task finish demo", "microvm task finish demo --json"],
-        discussion: "Same export, destruction, and result handoff as finish. The argument is the task id. See docs/cli-finish.md.",
+        discussion: "Same export, destruction, and result handoff as finish. The argument is the task id. See docs/tutorials/agent-task-workflow.mdx.",
         allowsJSON: true
     ),
     CLICommandSpec(
@@ -492,7 +492,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
         flags: [CLIFlag(name: "--json", value: nil, summary: "Print version, guest architecture, and virtualization support as JSON.")],
         examples: ["microvm version", "microvm --version", "microvm version --json"],
         discussion: "The version flag is also accepted before or after another command and then exits without running it. "
-            + "With --json, either form prints the version object. See docs/cli-commands.md.",
+            + "With --json, either form prints the version object. See docs/reference/cli/commands.mdx.",
         allowsJSON: true
     ),
     CLICommandSpec(
@@ -503,7 +503,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
         flags: [],
         examples: ["microvm help", "microvm help clone", "microvm clone --help"],
         discussion: "microvm help COMMAND and microvm COMMAND --help show the same command help. Help is text only; "
-            + "--json is unsupported. See docs/cli-commands.md for every command's output and JSON support."
+            + "--json is unsupported. See docs/reference/cli/commands.mdx for every command's output and JSON support."
     ),
 ]
 

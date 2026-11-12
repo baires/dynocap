@@ -1,0 +1,139 @@
+---
+title: "Network Isolation and Egress Policy"
+description: "How to configure network modes in MicroVM, enforce strict egress boundaries, and prevent data exfiltration."
+sidebar_position: 2
+---
+
+# Network Isolation and Egress Policy
+
+A core security premise of MicroVM is that code generated or executed by an AI agent must not have unrestricted access to the Internet by default.
+
+This guide explains how to configure network egress policies for both raw sandboxes and project tasks.
+
+---
+
+## Network Modes Overview
+
+MicroVM supports three explicit network modes:
+
+| Mode               | Virtual Network Device    | Outbound Permitted                                | Use Case                                                  |
+| :----------------- | :------------------------ | :------------------------------------------------ | :-------------------------------------------------------- |
+| `none` _(default)_ | None (no `virtio-net`)    | **Zero network traffic**                          | Running untrusted code, tests, and agent modifications.   |
+| `filtered`         | `virtio-net` + Host proxy | **HTTPS (443) only** to npm registry and Git host | Dependency warming (`npm ci`) and public Git cloning.     |
+| `nat`              | `virtio-net` + macOS NAT  | Unrestricted outbound                             | Tasks requiring external APIs or non-standard registries. |
+
+---
+
+## 1. Offline Mode (`--network none`)
+
+By default, any `microvm run` or `microvm clone` command boots without a network device:
+
+```sh
+# Explicitly or by default
+microvm clone ./my-project sandbox --network none
+```
+
+Inside the Linux guest:
+
+- The kernel exposes only the loopback interface (`lo`).
+- There is no `eth0` or `enp0s1` virtual network adapter.
+- Packet transmission is physically impossible at the hypervisor level.
+
+Even if an attacker inside the VM executes `curl`, `nc`, or attempts DNS lookups, the operations fail immediately with `Network is unreachable`.
+
+---
+
+## 2. Filtered Egress Mode (`--network filtered`)
+
+In filtered mode, MicroVM attaches a virtual network interface backed by a dedicated host-level user-space forwarder (`FilteredForwarder.swift`):
+
+```sh
+microvm clone ./my-project sandbox --network filtered
+```
+
+### Allowlist Rules
+
+The forwarder inspects initial TLS ClientHello packets and socket connections:
+
+1. **Port 443 Only:** Non-HTTPS ports (e.g. HTTP on port 80, SSH on port 22, raw TCP) are dropped.
+2. **Designated Hostnames:**
+   - `registry.npmjs.org`
+   - The remote Git origin host if the project was cloned from an HTTPS URL.
+
+Any attempt to contact another IP or domain (e.g., pastebins, command-and-control servers, webhooks) is terminated immediately at the host boundary.
+
+### Inspecting Active Network Configuration
+
+You can verify the network policy of any running sandbox:
+
+```sh
+microvm inspect sandbox --json
+```
+
+The output will clearly state:
+
+```json
+{
+  "network": "filtered",
+  "phase": "running"
+}
+```
+
+---
+
+## 3. Unrestricted NAT Mode (`--network nat`)
+
+For tasks that legitimately require general Internet access—such as downloading datasets, interacting with external web APIs, or installing system-level packages via `apk`:
+
+```sh
+microvm clone ./my-project sandbox --network nat
+```
+
+Under NAT mode:
+
+- Apple's `VZNATNetworkDeviceAttachment` provides NAT routing through your Mac's active network interfaces.
+- The guest obtains an IP via DHCP from macOS.
+- Outbound traffic is unrestricted; inbound traffic from external networks remains unreachable.
+
+> **Caution:** Do not use `nat` for untrusted agent evaluations when secrets or sensitive files are in scope, as the agent can send arbitrary payloads over the Internet.
+
+---
+
+## Network Restrictions in TypeScript SDK & MCP
+
+When automating tasks programmatically or via LLM tool-calling (MCP):
+
+### TypeScript SDK
+
+The SDK defaults to `none`:
+
+```ts
+import { Sandbox, Task } from "@microvm/sdk";
+
+// Offline task
+const task = await Task.start({
+  source: "./my-project",
+  network: "none",
+});
+
+// Require offline enforcement (throws if sandbox has network)
+const task = await Task.open("my-task", { requireOffline: true });
+```
+
+### Model Context Protocol (MCP) Server
+
+To protect developers, the `@microvm/mcp` server rejects `nat` and `filtered` commands by default. You must explicitly start the MCP server with environment variables enabling them:
+
+```sh
+# Enable filtered network mode for agents
+MICROVM_MCP_ALLOW_FILTERED=1 npx @microvm/mcp
+
+# Enable unrestricted NAT mode
+MICROVM_MCP_ALLOW_NAT=1 npx @microvm/mcp
+```
+
+If an LLM requests a sandbox with `network: "nat"` and the flag is not set, the tool returns:
+
+```text
+NAT is disabled by this MCP host; start the server with MICROVM_MCP_ALLOW_NAT=1 to permit it
+```
