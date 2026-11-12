@@ -13,6 +13,63 @@ The tool is local-first: one user and one machine, with no hosted account,
 cluster, or host filesystem share. Tasks have finite lifetimes; persistent
 workspaces and resume are not implemented.
 
+## Quick start
+
+Install the [requirements](#requirements), then build the signed CLI and the
+guest image from this checkout:
+
+```sh
+./scripts/build-macos.sh
+./scripts/fetch-image.sh
+export PATH="$PWD/.build/release:$PATH"
+```
+
+The repository workflow below is the same one `microvm help` prints. `./project`
+is your project, with a `package-lock.json` and `node_modules/` in `.gitignore`.
+
+<!-- quick start: kept identical to `microvm help` by CLIQuickStartTests -->
+
+```sh
+microvm doctor
+microvm runtime prepare . --runtime node:22        # in the microvm checkout; downloads verified inputs
+microvm clone ./project deps --network filtered    # explicit network: HTTPS to the npm registry only
+microvm exec deps --timeout 300 -- npm ci
+microvm finish deps                                # exports the result and saves the npm cache
+microvm clone ./project demo                       # offline by default: no network device
+microvm exec demo -- npm ci --offline              # installs from the saved npm cache
+microvm exec demo -- npm test
+microvm shell demo
+microvm ls
+microvm inspect demo
+microvm logs demo
+microvm diff demo
+microvm finish demo                                # exports the patch, then destroys the sandbox
+microvm rm demo
+microvm rm deps
+```
+
+- `doctor` checks prerequisites without downloading or repairing anything.
+  Runtime preparation is explicit: it is the only step that downloads, and it
+  verifies every input. `clone` never prepares a runtime for you.
+- Sandboxes are offline unless you choose a network. `deps` uses
+  `--network filtered` (HTTPS to `registry.npmjs.org` only) to install packages.
+  Finishing it saves the npm cache, which later sandboxes with the same lockfile
+  restore, so `demo` installs with no network device at all.
+- Each sandbox has a finite TTL (30 minutes by default, `--ttl` up to 24 hours)
+  that activity never renews. `shell` and `exec -t` warn before it ends. Expiry
+  discards unexported edits.
+- `finish` exports a verified patch and logs, destroys the sandbox, and prints
+  a `git apply` command; it never modifies your checkout. Results are kept for
+  seven days from creation.
+- `rm` releases a finished sandbox. Discarding live work needs
+  `rm NAME --force`; deleting a kept result needs `rm NAME --purge`.
+
+Every command, its output, and its JSON support are in the
+[command matrix](docs/cli-commands.md). [The CLI reference](docs/cli-reference.md)
+collects error codes, deadlines, retention, destructive flags, terminal
+transcripts, and interface changes. Raw sandboxes without a project
+(`run`, `ps`, `destroy`) are described under [Build and run](#build-and-run).
+
 ## Architecture
 
 ```
@@ -247,7 +304,18 @@ To exercise real guests on a virtualization-capable Mac with an existing image:
 ./scripts/build-macos.sh
 npm run typecheck
 python3 scripts/test-isolation-macos.py
+python3 scripts/test-terminal-macos.py
+python3 scripts/test-journey-macos.py
 ```
+
+`test-terminal-macos.py` drives `exec -t` and `shell` from a host PTY: input,
+resizing, Ctrl-C, TTL warnings and expiry, and host terminal restoration after
+every exit path. `test-journey-macos.py` follows the [quick start](#quick-start)
+with `testdata/journey-project`: doctor, preparation, a networked install, an
+offline sandbox, exec, shell, logs, diff, finish, applying the patch, and
+cleanup, checking that the source checkout is unchanged. Both prepare a node:22
+runtime (seeded from `~/.microvm/cache`) and need internet for verified inputs
+and the npm registry.
 
 The smoke test uses a temporary home and its own daemon. It checks no NIC/routes
 by default, outbound TCP denial, NAT DHCP and public HTTP reachability, real SDK

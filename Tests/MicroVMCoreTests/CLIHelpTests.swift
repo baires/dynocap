@@ -29,7 +29,7 @@ final class CLIHelpTests: XCTestCase {
         XCTAssertEqual(try parseCommand(["microvm", "help", "advanced"]).command, .help(topic: ["advanced"]))
         let top = helpText
         XCTAssertTrue(top.contains("microvm exec"))
-        XCTAssertTrue(top.contains("uname -a"))
+        XCTAssertTrue(top.contains("npm ci --offline"))
         XCTAssertTrue(top.contains("microvm help advanced"))
         let clone = try XCTUnwrap(top.range(of: "microvm clone"))
         let advanced = try XCTUnwrap(top.range(of: "microvm help advanced"))

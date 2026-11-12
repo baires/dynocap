@@ -127,7 +127,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
     CLICommandSpec(
         path: ["runtime", "prepare"],
         group: .primary,
-        summary: "Prepare a runtime disk for a repository.",
+        summary: "Build and verify a runtime disk from the microvm source checkout.",
         usage: "microvm runtime prepare [REPO] [--runtime NAME:VERSION] [--json]",
         flags: [
             CLIFlag(name: "--json", value: nil, summary: "Print a documented success or error object; suppress human progress."),
@@ -507,6 +507,26 @@ let cliCommandSpecs: [CLICommandSpec] = [
     ),
 ]
 
+/// The repository workflow, shared word for word with the README quick start (checked by a test).
+let quickStart = """
+microvm doctor
+microvm runtime prepare . --runtime node:22        # in the microvm checkout; downloads verified inputs
+microvm clone ./project deps --network filtered    # explicit network: HTTPS to the npm registry only
+microvm exec deps --timeout 300 -- npm ci
+microvm finish deps                                # exports the result and saves the npm cache
+microvm clone ./project demo                       # offline by default: no network device
+microvm exec demo -- npm ci --offline              # installs from the saved npm cache
+microvm exec demo -- npm test
+microvm shell demo
+microvm ls
+microvm inspect demo
+microvm logs demo
+microvm diff demo
+microvm finish demo                                # exports the patch, then destroys the sandbox
+microvm rm demo
+microvm rm deps
+"""
+
 private func topLevelHelp() -> String {
     let commands = cliCommandSpecs.filter { $0.group == .primary }.map { spec in
         "  \(spec.usage)\n        \(spec.summary)"
@@ -518,16 +538,7 @@ private func topLevelHelp() -> String {
     Names are explicit targets. \(networkChoice)
 
     WORKFLOW
-      microvm runtime prepare ./project --runtime node:22
-      microvm clone ./project demo
-      microvm ls
-      microvm inspect demo
-      microvm shell demo
-      microvm exec demo -- npm test
-      microvm exec demo -- uname -a
-      microvm diff demo
-      microvm finish demo
-      microvm rm demo
+    \(quickStart.split(separator: "\n").map { "  " + $0 }.joined(separator: "\n"))
 
     COMMANDS
     \(commands)

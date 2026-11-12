@@ -192,6 +192,15 @@ enum POSIX {
     static func connectUnix(_ path: String) throws -> Int32 {
         let fd = socket(AF_UNIX, socketStream, 0)
         guard fd >= 0 else { throw MicroVMError("socket: \(errnoString())") }
+        #if os(macOS)
+        // The daemon may close an exec as soon as the guest exits, while stdin or EOF is still being
+        // sent. That write must fail with EPIPE rather than kill the CLI (Linux uses MSG_NOSIGNAL).
+        var noSigPipe: Int32 = 1
+        guard setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size)) == 0 else {
+            close(fd)
+            throw MicroVMError("socket: \(errnoString())")
+        }
+        #endif
         var addr = try unixAddress(path)
         let rc = withUnsafePointer(to: &addr) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
