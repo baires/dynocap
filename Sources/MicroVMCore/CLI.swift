@@ -15,7 +15,8 @@ public struct RunRequest: Codable, Equatable {
     public var ttlSeconds: Int?
     public var bootTimeoutSeconds: Int
     public var network: NetworkMode?
-    public var filteredRepositoryHost: String?
+    /// Set only by the daemon from a runtime manifest; nil means a plain sandbox.
+    public var filteredHosts: [String]?
 
     public init(name: String, cpus: Int, memoryMB: Int, ttlSeconds: Int?, bootTimeoutSeconds: Int, network: NetworkMode? = nil) {
         self.name = name

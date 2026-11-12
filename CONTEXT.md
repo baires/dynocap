@@ -40,6 +40,14 @@ _Avoid_: workspace, config, state dir
 The computer whose daemon owns the sandboxes.
 _Avoid_: node, server, box
 
+**Runtime**:
+A prepared, read-only language toolchain disk a task boots with, selected as NAME:VERSION, such as node:24 or shell:1. It declares its package registry and dependency cache.
+_Avoid_: image, language, stack
+
+**Dependency seed**:
+A host copy of a runtime's package-manager cache, keyed by the project's lockfile, restored into later sandboxes.
+_Avoid_: npm cache, artifact
+
 **Image**:
 The kernel and initramfs a sandbox boots, one per host architecture.
 _Avoid_: rootfs, template, snapshot

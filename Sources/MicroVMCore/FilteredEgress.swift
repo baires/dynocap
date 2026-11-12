@@ -33,7 +33,8 @@ public enum FilteredEgress {
     public static let guest = IPv4Address(10, 0, 2, 15)
     public static let gateway = IPv4Address(10, 0, 2, 2)
     public static let dns = IPv4Address(10, 0, 2, 3)
-    public static let registryHost = "registry.npmjs.org"
+    /// Plain sandboxes have no runtime manifest; they keep the npm registry allowance they always had.
+    public static let legacyPlainHosts = ["registry.npmjs.org"]
     public static let answerTTL: UInt32 = 60
 
     public static func denies(_ address: UInt32, hostAddresses: Set<UInt32> = []) -> Bool {
@@ -59,12 +60,17 @@ public enum FilteredEgress {
         return value
     }
 
-    /// The whole DNS allowlist: the npm registry, plus the task URL hostname when there is one.
-    public static func allows(name: String, repositoryHost: String?) -> Bool {
+    /// The whole DNS allowlist: exact names only, never subdomains.
+    public static func allows(name: String, allowedHosts: [String]) -> Bool {
         let normalized = normalize(name)
-        if normalized == registryHost { return true }
-        guard let repositoryHost else { return false }
-        return normalized == normalize(repositoryHost)
+        return allowedHosts.contains { normalize($0) == normalized }
+    }
+
+    /// The runtime's declared registry hosts, plus the task URL hostname when there is one.
+    public static func allowedHosts(runtime: [String], repositoryURL: String?) -> [String] {
+        var hosts = runtime.map(normalize)
+        if let repositoryURL, let host = repositoryHost(repositoryURL), !hosts.contains(host) { hosts.append(host) }
+        return hosts
     }
 
     public static func repositoryHost(_ url: String) -> String? {
@@ -129,7 +135,7 @@ public enum NetworkAdmission {
 public enum FilteredDNS {
     public static func reply(
         query: [UInt8],
-        repositoryHost: String?,
+        allowedHosts: [String],
         hostAddresses: Set<UInt32>,
         resolve: (String) -> [UInt32]
     ) -> [UInt8]? {
@@ -143,7 +149,7 @@ public enum FilteredDNS {
         let qclass = read16(query, offset + 2)
         guard qclass == 1 || qclass == 255 else { return nil }
         let question = Array(query[12..<(offset + 4)])
-        let allowed = FilteredEgress.allows(name: name, repositoryHost: repositoryHost)
+        let allowed = FilteredEgress.allows(name: name, allowedHosts: allowedHosts)
         var rcode: UInt16 = 0
         var answers: [UInt8] = []
         if !allowed {

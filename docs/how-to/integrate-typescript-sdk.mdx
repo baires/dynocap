@@ -43,7 +43,7 @@ async function runAgent() {
     const task = await Task.start({
       name: "pr-fixer",
       projectPath: "./my-project",
-      runtimes: [{ name: "node", version: "22" }],
+      runtimes: [{ name: "node", version: "24" }],
       network: "none", // offline by default
       ttlSeconds: 1800, // 30-minute sandbox lifetime
     });

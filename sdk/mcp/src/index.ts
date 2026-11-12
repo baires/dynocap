@@ -108,7 +108,7 @@ export function createServer(options: ToolOptions = {}): McpServer {
     "microvm_task_start",
     {
       description:
-        "Start a Node task from a local directory or a repository URL. A URL is cloned in the guest and requires nat or filtered. A token or SSH key is held for that guest fetch and is not imported. An ssh URL requires nat. Results require finish before TTL.",
+        "Start a task from a local directory or a repository URL on a prepared runtime (default node:24). filtered allows only that runtime's package registry and the task Git host. A URL is cloned in the guest and requires nat or filtered. A token or SSH key is held for that guest fetch and is not imported. An ssh URL requires nat. Results require finish before TTL.",
       inputSchema: {
         name: z.string().optional(),
         projectPath: z.string().optional(),
@@ -123,7 +123,10 @@ export function createServer(options: ToolOptions = {}): McpServer {
         sshKeyPath: z.string().optional(),
         runtimes: z
           .array(z.object({ name: z.string(), version: z.string() }))
-          .optional(),
+          .optional()
+          .describe(
+            "Exactly one prepared runtime, such as [{name:'node',version:'24'}]. Defaults to node:24."
+          ),
         network: z.enum(["none", "nat", "filtered"]).optional(),
         ttlSeconds: z.number().int().min(1).max(86400).optional(),
         cpus: z.number().int().positive().optional(),

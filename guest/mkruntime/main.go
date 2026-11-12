@@ -17,7 +17,7 @@ func main() {
 		err = rt.Mkfs(os.Args[2], "", 8<<30)
 	} else {
 		var m rt.Manifest
-		requests := []rt.Request{{Name: "node", Version: "22"}}
+		requests := []rt.Request{{Name: "node", Version: "24"}}
 		if len(os.Args) > 4 {
 			err = json.Unmarshal([]byte(os.Args[4]), &requests)
 		}

@@ -7,7 +7,7 @@ SIGKILL, guest connection loss, and daemon death), and that the sandbox stays us
 an ordinary (non-terminal) foreground command. `shell` is checked for line editing and history, resizing,
 Ctrl-C of a child, outliving the ordinary 60-second command deadline, exit status, the sandbox staying
 alive, connection loss, and TTL expiry. A 75-second sandbox checks TTL warning timing against the
-deadline the CLI reports. Unless --skip-project is given, it prepares a node:22 runtime
+deadline the CLI reports. Unless --skip-project is given, it prepares a node:24 runtime
 (seeded from --cache; missing verified inputs are downloaded), checks that `shell` opens in /workspace,
 and checks terminal transcripts in a project task's logs, before and after finish.
 """
@@ -339,7 +339,7 @@ def main():
                         shutil.copytree(args.cache, home / "cache", dirs_exist_ok=True)
                     (home / "cache").mkdir(exist_ok=True)
                     seeded = set(os.listdir(home / "cache"))
-                    cli("runtime", "prepare", str(repo), "--runtime", "node:22", timeout=900)
+                    cli("runtime", "prepare", str(repo), "--runtime", "node:24", timeout=900)
                     fetched = sorted(set(os.listdir(home / "cache")) - seeded)
                     print(f"PASS: runtime prepared ({len(fetched)} inputs downloaded beyond the seed)", flush=True)
                     project = home / "project"

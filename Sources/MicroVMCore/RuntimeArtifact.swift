@@ -18,9 +18,21 @@ public struct RuntimeSelection: Codable, Equatable {
     }
 }
 
+/// How a runtime's package manager cache is keyed, restored, verified and published.
+/// The runtime manifest declares it; the host knows no package manager by name.
+public struct DependencyCacheSpec: Codable, Equatable {
+    public var lockfiles: [String]
+    public var configFiles: [String]?
+    public var directory: String
+    public var registry: String
+    public var verifyCommand: [String]?
+    public var incompatibleEnvPrefixes: [String]?
+    public var incompatibleArgSubstrings: [String]?
+}
+
 /// Resolves supported selections; task execution treats the result as an opaque disk artifact.
 public struct RuntimeArtifact: Codable {
-    public static let currentFormatVersion = 2
+    public static let currentFormatVersion = 3
     public var runtimes: [RuntimeSelection]
     public var arch: String
     public var baseImageDigest: String
@@ -29,6 +41,9 @@ public struct RuntimeArtifact: Codable {
     public var environment: [String: String]
     public var formatVersion: Int
     public var verificationCommand: [String]
+    /// Registry hosts filtered egress may reach, besides a task repository host.
+    public var egressHosts: [String]?
+    public var dependencyCache: DependencyCacheSpec?
 
     public static func selectionKey(_ requested: [RuntimeSelection], arch: String) -> String {
         arch + "/" + requested.map { $0.name + "@" + $0.version }.sorted().joined(separator: "+")
@@ -87,7 +102,7 @@ public struct RuntimeArtifact: Codable {
         }
     }
 
-    public static let defaultRuntimes = [RuntimeSelection(name: "node", version: "22")]
+    public static let defaultRuntimes = [RuntimeSelection(name: "node", version: "24")]
 }
 
 func fileDigest(_ url: URL) throws -> String {

@@ -53,6 +53,7 @@ def tree_digest(root):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--runtime", default="node:24", help="Node runtime selection to prepare and use")
     parser.add_argument("--binary", type=pathlib.Path, default=REPO / ".build/release/microvm")
     parser.add_argument("--images", type=pathlib.Path, default=pathlib.Path.home() / ".microvm/images")
     parser.add_argument("--cache", type=pathlib.Path, default=pathlib.Path.home() / ".microvm/cache",
@@ -100,7 +101,7 @@ def main():
         before = tree_digest(project)
 
         try:
-            doctor = cli("doctor", "--json", check=False)
+            doctor = cli("doctor", "--runtime", args.runtime, "--json", check=False)
             report = json.loads(doctor.stdout)
             assert doctor.returncode == 1 and report["ok"] is False and doctor.stderr == "", doctor
             errors = {check["id"]: check for check in report["checks"] if check["status"] == "error"}
@@ -109,22 +110,22 @@ def main():
             print("PASS: doctor exits 1 before preparation, with only the runtime check failing and "
                   "`runtime prepare` as the recovery", flush=True)
 
-            prepared = cli("runtime", "prepare", ".", "--runtime", "node:22", timeout=1200, cwd=REPO)
+            prepared = cli("runtime", "prepare", ".", "--runtime", args.runtime, timeout=1200, cwd=REPO)
             assert "Preparing the runtime" in prepared.stderr, prepared.stderr
-            assert json.loads(cli("doctor", "--json").stdout)["ok"] is True
+            assert json.loads(cli("doctor", "--runtime", args.runtime, "--json").stdout)["ok"] is True
             print(f"PASS: runtime prepare ({prepared.seconds:.0f}s) verifies the runtime; doctor then exits 0", flush=True)
 
-            deps = cli("clone", "./project", "deps", "--network", "filtered", timeout=300)
+            deps = cli("clone", "./project", "deps", "--runtime", args.runtime, "--network", "filtered", timeout=300)
             assert "Network: filtered" in deps.stdout and "Booting the sandbox" in deps.stderr, deps
             install = cli("exec", "deps", "--timeout", "300", "--", "npm", "ci", timeout=330)
             assert "added 1 package" in install.stdout, install.stdout
             cli("finish", "deps", timeout=300)
-            caches = list((home / "npm-cache").glob("*.tar"))
+            caches = list((home / "dependency-cache").glob("*.tar"))
             assert len(caches) == 1, caches
             print(f"PASS: --network filtered sandbox installs with npm ci ({install.seconds:.0f}s); "
                   "finish saves the npm cache", flush=True)
 
-            demo = cli("clone", "./project", "demo", timeout=300)
+            demo = cli("clone", "./project", "demo", "--runtime", args.runtime, timeout=300)
             assert "Network: none" in demo.stdout, demo.stdout
             interfaces = cli("exec", "demo", "--", "sh", "-c",
                              'for i in /sys/class/net/*; do [ -e "$i/device" ] && echo nic; done; true')
@@ -136,7 +137,8 @@ def main():
             offline = cli("exec", "demo", "--", "npm", "ci", "--offline", timeout=120)
             assert "added 1 package" in offline.stdout, offline.stdout
             tests = cli("exec", "demo", "--", "npm", "test", timeout=120)
-            assert "# pass 2" in tests.stdout and "# fail 0" in tests.stdout, tests.stdout
+            # Node 22 prints TAP summaries (# pass); Node 24's default reporter prints ℹ pass.
+            assert any(f"{mark} pass 2" in tests.stdout and f"{mark} fail 0" in tests.stdout for mark in ("#", "ℹ")), tests.stdout
             print("PASS: default sandbox has no NIC and cannot reach the registry; npm ci --offline uses the "
                   "saved cache; npm test passes", flush=True)
 

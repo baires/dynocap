@@ -11,7 +11,7 @@ import (
 )
 
 func TestExplicitResolution(t *testing.T) {
-	for _, requests := range [][]Request{nil, {{"node", "24"}}, {{"python", "3.13"}}, {{"node", "22"}, {"node", "22"}}} {
+	for _, requests := range [][]Request{nil, {{"node", "20"}}, {{"python", "3.13"}}, {{"python", "3"}}, {{"node", "22"}, {"node", "22"}}} {
 		if _, err := Resolve(requests, "aarch64"); err == nil {
 			t.Fatalf("accepted %+v", requests)
 		}
@@ -40,6 +40,94 @@ func TestExplicitResolution(t *testing.T) {
 	}
 	if nodePins != 1 {
 		t.Fatalf("node tarball pins: %d", nodePins)
+	}
+}
+
+func TestNode24Resolution(t *testing.T) {
+	recipe, err := Resolve([]Request{{"node", "24"}}, "aarch64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	verify := strings.Join(recipe.VerificationCommand, " ")
+	if recipe.Tools["node"] != "v24.22.3" || recipe.Tools["npm"] != "11.19.1" || !strings.Contains(verify, "v24.22.3") || !strings.Contains(verify, "11.19.1") {
+		t.Fatal(recipe.Tools, verify)
+	}
+	pinned := false
+	for _, in := range recipe.Inputs {
+		if in.URL == "https://unofficial-builds.nodejs.org/download/release/v24.22.3/node-v24.22.3-linux-arm64-musl.tar.xz" {
+			pinned = in.SHA256 == "8f4a3003252ea38c48465ebffd61432f7e4f34e4574c4edd6d07fe4293ae00b0" && in.Install != nil
+		}
+	}
+	if !pinned {
+		t.Fatal("node 24 tarball is not pinned")
+	}
+	if selectionKey("aarch64", recipe.Requests) == selectionKey("aarch64", []Request{{"node", "22"}}) {
+		t.Fatal("node 22 and 24 share a catalog entry")
+	}
+}
+
+func TestShellHasNoLanguageCacheOrRegistry(t *testing.T) {
+	recipe, err := Resolve([]Request{{"shell", "1"}}, "aarch64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recipe.DependencyCache != nil || len(recipe.EgressHosts) != 0 || recipe.EgressHosts == nil {
+		t.Fatalf("shell declares an ecosystem: %+v %+v", recipe.DependencyCache, recipe.EgressHosts)
+	}
+	if len(recipe.Tools) != 1 || recipe.Tools["ssh"] == "" {
+		t.Fatalf("shell tools: %+v", recipe.Tools)
+	}
+	for _, in := range recipe.Inputs {
+		if in.Install != nil || strings.Contains(in.URL, "nodejs") || strings.Contains(in.URL, "/libstdc++-") {
+			t.Fatalf("shell includes a language input: %s", in.URL)
+		}
+	}
+}
+
+func TestPythonUsesUVAndNeverDownloadsInterpreters(t *testing.T) {
+	recipe, err := Resolve([]Request{{"python", "3.14"}}, "aarch64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recipe.Tools["python"] != "3.14.10" || recipe.Tools["uv"] != "0.13.8" {
+		t.Fatal(recipe.Tools)
+	}
+	if recipe.Environment["UV_PYTHON_DOWNLOADS"] != "never" || recipe.Environment["UV_CACHE_DIR"] != recipe.DependencyCache.Directory {
+		t.Fatal(recipe.Environment)
+	}
+	if strings.Join(recipe.DependencyCache.Lockfiles, ",") != "uv.lock" || strings.Join(recipe.EgressHosts, ",") != "pypi.org,files.pythonhosted.org" {
+		t.Fatalf("%+v %+v", recipe.DependencyCache, recipe.EgressHosts)
+	}
+	python, uv := false, false
+	for _, in := range recipe.Inputs {
+		python = python || strings.HasSuffix(in.URL, "/python3-3.14.10-r1.apk")
+		uv = uv || (strings.HasSuffix(in.URL, "/0.13.8/uv-aarch64-unknown-linux-musl.tar.gz") && in.Install != nil)
+	}
+	if !python || !uv {
+		t.Fatal("python or uv is not pinned")
+	}
+}
+
+func TestGoUsesModulesWithALocalToolchain(t *testing.T) {
+	recipe, err := Resolve([]Request{{"go", "1.27"}}, "aarch64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recipe.Tools["go"] != "1.27.4" || recipe.Environment["GOTOOLCHAIN"] != "local" || recipe.DiskBytes < 1<<30 {
+		t.Fatalf("%+v %+v %d", recipe.Tools, recipe.Environment, recipe.DiskBytes)
+	}
+	if !strings.HasPrefix(recipe.DependencyCache.Directory, recipe.Environment["GOMODCACHE"]+"/") || strings.Join(recipe.DependencyCache.Lockfiles, ",") != "go.sum" {
+		t.Fatalf("%+v", recipe.DependencyCache)
+	}
+	if strings.Join(recipe.EgressHosts, ",") != "proxy.golang.org,sum.golang.org" {
+		t.Fatal(recipe.EgressHosts)
+	}
+	pinned := false
+	for _, in := range recipe.Inputs {
+		pinned = pinned || (in.URL == "https://go.dev/dl/go1.27.4.linux-arm64.tar.gz" && in.Install != nil && len(in.SHA256) == 64)
+	}
+	if !pinned {
+		t.Fatal("go toolchain is not pinned")
 	}
 }
 
@@ -126,5 +214,52 @@ func TestRuntimeIncludesVerifiedSSHClient(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("SSH client is not pinned")
+	}
+}
+
+func TestUnsupportedSelectionListsCatalog(t *testing.T) {
+	_, err := Resolve([]Request{{"cobol", "85"}}, "aarch64")
+	if err == nil || !strings.Contains(err.Error(), "node:22") {
+		t.Fatalf("error does not list supported runtimes: %v", err)
+	}
+}
+
+// Every catalog entry carries the base toolchain and declares its ecosystem for the host.
+func TestCatalogRecipesDeclareEcosystem(t *testing.T) {
+	for _, selection := range Supported() {
+		name, version, _ := strings.Cut(selection, ":")
+		recipe, err := Resolve([]Request{{name, version}}, "aarch64")
+		if err != nil {
+			t.Fatalf("%s: %v", selection, err)
+		}
+		verify := strings.Join(recipe.VerificationCommand, " ")
+		for _, check := range []string{"bash --version", "git --version", "ssh -V", "cert.pem"} {
+			if !strings.Contains(verify, check) {
+				t.Fatalf("%s does not verify %q", selection, check)
+			}
+		}
+		for _, pkg := range []string{"/bash-", "/git-", "/openssh-client-default-", "/ca-certificates-bundle-"} {
+			found := false
+			for _, in := range recipe.Inputs {
+				if len(in.SHA256) != 64 {
+					t.Fatalf("%s: unpinned input %+v", selection, in)
+				}
+				found = found || strings.Contains(in.URL, pkg)
+			}
+			if !found {
+				t.Fatalf("%s is missing base package %s", selection, pkg)
+			}
+		}
+		if recipe.Environment["HOME"] != "/work/home" || recipe.Environment["PATH"] == "" || recipe.EgressHosts == nil {
+			t.Fatalf("%s: incomplete recipe %+v", selection, recipe)
+		}
+		if spec := recipe.DependencyCache; spec != nil {
+			if len(spec.Lockfiles) == 0 || !strings.HasPrefix(spec.Directory, "/work/") || spec.Registry == "" || len(recipe.EgressHosts) == 0 {
+				t.Fatalf("%s: incomplete dependency cache %+v", selection, spec)
+			}
+		}
+	}
+	if _, err := Resolve([]Request{{"node", "22"}}, "x86_64"); err == nil {
+		t.Fatal("resolved an unpinned architecture")
 	}
 }

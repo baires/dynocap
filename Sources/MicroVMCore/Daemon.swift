@@ -208,7 +208,9 @@ public final class Daemon {
             case .ps:
                 let records = try store.list()
                 try ControlCodec.write(fd, .result(try JSONEncoder().encode(PSResult(vms: records))))
-            case .run(let request):
+            case .run(var request):
+                // Clients cannot widen filtered egress; only the task path derives hosts from a runtime.
+                request.filteredHosts = nil
                 let record = try boot(request)
                 var status = StatusResult(
                     name: record.name, phase: record.phase.rawValue,
@@ -378,7 +380,7 @@ public final class Daemon {
             generation: live.generation,
             runtimeDirectory: request.runtimeDirectory.map { URL(fileURLWithPath: $0) },
             workspaceDisk: request.workspaceDisk.map { URL(fileURLWithPath: $0) },
-            filteredRepositoryHost: request.filteredRepositoryHost
+            filteredHosts: request.filteredHosts ?? FilteredEgress.legacyPlainHosts
         )
         backend.boot(boot) { live.boot.complete($0) }
         lifecycle.lock.unlock()

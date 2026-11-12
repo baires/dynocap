@@ -1,6 +1,6 @@
 ---
 title: "End-to-End Agent Task Workflow"
-description: "Learn how to import a repository into an isolated Node 22 sandbox, run coding tasks, preview diffs, and safely export patches."
+description: "Learn how to import a repository into an isolated Node 24 sandbox, run coding tasks, preview diffs, and safely export patches."
 sidebar_position: 2
 ---
 
@@ -10,7 +10,7 @@ This tutorial demonstrates the core developer workflow of MicroVM: importing a p
 
 By the end of this lesson, you will:
 
-1. Prepare the verified Node 22 task runtime.
+1. Prepare the verified Node 24 task runtime.
 2. Clone a project into an isolated sandbox with filtered egress.
 3. Install dependencies and run test suites.
 4. Preview changes in real time with `microvm diff`.
@@ -31,17 +31,19 @@ Your host repository is **never mounted or shared**. Changes made inside the san
 
 ---
 
-## Step 1: Prepare the Node 22 Runtime
+## Step 1: Prepare the Node 24 Runtime
 
 Project tasks require a prepared runtime disk. MicroVM uses explicit runtime preparation: it downloads verified packages and verifies hashes before publishing the artifact.
 
 In your `microvm` source checkout, run:
 
 ```sh
-microvm runtime prepare . --runtime node:22
+microvm runtime prepare . --runtime node:24
 ```
 
-This builds and validates the Node 22 runtime disk (including Node, npm, and sanitized git utilities) and saves it to your `~/.microvm` cache.
+This builds and validates the Node 24 runtime disk (including Node, npm, bash, git and an SSH client) and saves it to your `~/.microvm` cache.
+
+This tutorial uses Node. For other projects, prepare `python:3.14` (uv), `go:1.27` (Go modules) or `shell:1` (bash, git and ssh only), and pass the same `--runtime` to `clone`. See [Manage Dependencies and Caching](../how-to/manage-dependencies-and-caching.mdx) for each runtime's install commands.
 
 ---
 
@@ -96,7 +98,7 @@ Output:
 ```text
 cloned /tmp/demo-project into agent-task (task-8f92b7c1)
 phase: running
-runtime: node:22
+runtime: node:24
 network: none
 ttl: 30m
 Next: microvm exec agent-task -- npm test
@@ -105,7 +107,7 @@ Next: microvm exec agent-task -- npm test
 Let's understand what happened:
 
 - MicroVM created a disposable ext4 disk containing a copy of your Git checkout.
-- It booted a Linux guest with Node 22.
+- It booted a Linux guest with Node 24.
 - The working directory defaults to `/workspace`.
 - The network is set to `none`: the guest has no outbound Internet connectivity.
 

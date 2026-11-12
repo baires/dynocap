@@ -33,7 +33,7 @@ microvm doctor --json
 To verify a specific runtime or custom home directory:
 
 ```sh
-microvm doctor --runtime node:22 --home /tmp/custom-microvm
+microvm doctor --runtime node:24 --home /tmp/custom-microvm
 ```
 
 ---
@@ -51,7 +51,7 @@ microvm doctor --runtime node:22 --home /tmp/custom-microvm
 | **`microvm-workspace`** | Workspace companion           | Missing Go companion binary beside CLI.                  | Run `./scripts/build-macos.sh` to build companions.        |
 | **`microvm-mkruntime`** | Runtime maker companion       | Missing Go companion binary beside CLI.                  | Run `./scripts/build-macos.sh` to build companions.        |
 | **`images`**            | Kernel & initramfs integrity  | Hash mismatch or missing guest boot files.               | Run `./scripts/fetch-image.sh` to refresh images.          |
-| **`runtime`**           | Project task runtime disk     | Node 22 runtime disk missing or corrupt.                 | Run `microvm runtime prepare . --runtime node:22`.         |
+| **`runtime`**           | Project task runtime disk     | Node 24 runtime disk missing or corrupt.                 | Run `microvm runtime prepare . --runtime node:24`.         |
 | **`daemon`**            | Daemon ping & capabilities    | Stale socket or daemon process unresponsive.             | Kill stale daemon (`pkill -f microvm`) or check logs.      |
 
 ---
@@ -98,14 +98,14 @@ microvm doctor
 **Symptom:**
 
 ```text
-[FAIL] runtime: runtime node:22 is not prepared in /Users/username/.microvm
+[FAIL] runtime: runtime node:24 is not prepared in /Users/username/.microvm
 ```
 
 **Cause:** Project tasks (`microvm clone`) require pre-built runtime artifacts that have not been prepared yet.  
 **Fix:** Run explicit preparation from the `microvm` source checkout:
 
 ```sh
-microvm runtime prepare . --runtime node:22
+microvm runtime prepare . --runtime node:24
 ```
 
 ---

@@ -14,7 +14,7 @@ final class NetworkConfigurationTests: XCTestCase {
     }
 
     func testFilteredAttachmentAnswersDHCPAndDropsMetadata() throws {
-        let forwarder = try FilteredForwarder.testing(repositoryHost: "github.com")
+        let forwarder = try FilteredForwarder.testing(allowedHosts: ["registry.npmjs.org", "github.com"])
         defer { forwarder.stop() }
         XCTAssertTrue(forwarder.device.attachment is VZFileHandleNetworkDeviceAttachment)
         let guest = [UInt8](repeating: 0x02, count: 5) + [0x15]
@@ -31,7 +31,7 @@ final class NetworkConfigurationTests: XCTestCase {
     }
 
     func testLookupQueriesTheAbsoluteNameAndGrantsOnlyPublishedAddresses() throws {
-        let forwarder = try FilteredForwarder.testing(repositoryHost: "github.com")
+        let forwarder = try FilteredForwarder.testing(allowedHosts: ["registry.npmjs.org", "github.com"])
         defer { forwarder.stop() }
         var queried: [String] = []
         let addresses = (1...9).map { IPv4Address(1, 2, 3, UInt8($0)).value }
@@ -53,7 +53,7 @@ final class NetworkConfigurationTests: XCTestCase {
         XCTAssertEqual(forwarder.names(for: first), ["registry.npmjs.org", "github.com"])
     }
     func testFilteredDownloadBackpressureAndWindowRecovery() throws {
-        let forwarder = try FilteredForwarder.testing(repositoryHost: nil)
+        let forwarder = try FilteredForwarder.testing(allowedHosts: ["registry.npmjs.org"])
         defer { forwarder.stop() }
         var pair: [Int32] = [-1, -1]
         XCTAssertEqual(socketpair(AF_UNIX, SOCK_STREAM, 0, &pair), 0)

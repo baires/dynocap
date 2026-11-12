@@ -11,31 +11,40 @@ import (
 
 // Node-specific pins and layout stay outside task/storage/daemon code.
 //
-//go:embed node22-aarch64.json
+//go:embed node-aarch64.json
 var nodePackages []byte
 
-func resolveNode(requests []Request, arch string) (Recipe, error) {
-	if len(requests) != 1 || requests[0].Name != "node" || requests[0].Version != "22" {
-		return Recipe{}, fmt.Errorf("unsupported runtimes: supported selection is [{name:node,version:22}]")
+// nodeRecipe pins one linux-arm64-musl build and the npm it bundles. One pin per version, no fallback.
+func nodeRecipe(nodeVersion, npmVersion, sha256 string) recipeFunc {
+	return func(arch string) (Recipe, error) {
+		var inputs []Input
+		if err := json.Unmarshal(nodePackages, &inputs); err != nil {
+			return Recipe{}, err
+		}
+		inputs = append(inputs, Input{
+			URL:     "https://unofficial-builds.nodejs.org/download/release/" + nodeVersion + "/node-" + nodeVersion + "-linux-arm64-musl.tar.xz",
+			SHA256:  sha256,
+			Install: installNodeArchive,
+		})
+		verify := fmt.Sprintf("test \"$(node --version)\" = %s && test \"$(npm --version)\" = %s", nodeVersion, npmVersion)
+		return withBase(arch, Recipe{
+			Inputs:      inputs,
+			Environment: map[string]string{"npm_config_cache": "/work/npm-cache"},
+			Tools:       map[string]string{"node": nodeVersion, "npm": npmVersion},
+			EgressHosts: []string{"registry.npmjs.org"},
+			DependencyCache: &CacheSpec{
+				Lockfiles:                 []string{"package-lock.json"},
+				ConfigFiles:               []string{".npmrc"},
+				Directory:                 "/work/npm-cache/_cacache",
+				Registry:                  "https://registry.npmjs.org/",
+				VerifyCommand:             []string{"npm", "cache", "verify", "--cache", "/work/npm-cache"},
+				IncompatibleEnvPrefixes:   []string{"npm_config_"},
+				IncompatibleArgSubstrings: []string{"registry"},
+			},
+		}, verify)
 	}
-	if arch != "aarch64" {
-		return Recipe{}, fmt.Errorf("Node 22 runtime is currently pinned for aarch64 only")
-	}
-	var inputs []Input
-	if err := json.Unmarshal(nodePackages, &inputs); err != nil {
-		return Recipe{}, err
-	}
-	// Newest linux-arm64-musl build that satisfies lint-staged's >=22.22.1 engine range. One pin, no fallback.
-	const nodeVersion = "v22.23.4"
-	const npmVersion = "10.9.9"
-	const sshVersion = "OpenSSH_10.3p1"
-	inputs = append(inputs, Input{
-		URL:    "https://unofficial-builds.nodejs.org/download/release/" + nodeVersion + "/node-" + nodeVersion + "-linux-arm64-musl.tar.xz",
-		SHA256: "ed505d3b41e7674fd20b864c544b6bcd177fd88cb00124a23d5ecd4874041b3a",
-	})
-	verify := fmt.Sprintf("test \"$(node --version)\" = %s && test \"$(npm --version)\" = %s && git --version && test \"$(ssh -V 2>&1 | cut -d, -f1)\" = %s && test -s /etc/ssl/cert.pem", nodeVersion, npmVersion, sshVersion)
-	return Recipe{InstallArchive: installNodeArchive, VerificationCommand: []string{"sh", "-c", verify}, Requests: requests, Inputs: inputs, Environment: map[string]string{"PATH": "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin", "HOME": "/work/home", "npm_config_cache": "/work/npm-cache"}, Tools: map[string]string{"node": nodeVersion, "npm": npmVersion, "ssh": sshVersion}}, nil
 }
+
 func installNodeArchive(archive, root string) error {
 	dest := filepath.Join(root, "usr/local")
 	if err := os.MkdirAll(dest, 0755); err != nil {

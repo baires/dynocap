@@ -311,7 +311,7 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
         case .nat:
             config.networkDevices = networkDevices(for: .nat)
         case .filtered:
-            let forwarder = try FilteredForwarder.start(repositoryHost: request.filteredRepositoryHost)
+            let forwarder = try FilteredForwarder.start(allowedHosts: request.filteredHosts)
             self.forwarder = forwarder
             config.networkDevices = [forwarder.device]
         case .none:

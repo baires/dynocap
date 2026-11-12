@@ -19,23 +19,41 @@ import (
 	"time"
 )
 
-const ArtifactFormatVersion = 2
+const ArtifactFormatVersion = 3
 
 type Request struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
 }
+
+// Input is one pinned download. A nil Install means a signed Alpine apk.
 type Input struct {
-	URL    string `json:"url"`
-	SHA256 string `json:"sha256"`
+	URL     string                     `json:"url"`
+	SHA256  string                     `json:"sha256"`
+	Install func(string, string) error `json:"-"`
 }
+
+// CacheSpec tells the host how to key, restore, verify and publish a runtime's dependency cache.
+type CacheSpec struct {
+	Lockfiles                 []string `json:"lockfiles"`
+	ConfigFiles               []string `json:"configFiles"`
+	Directory                 string   `json:"directory"`
+	Registry                  string   `json:"registry"`
+	VerifyCommand             []string `json:"verifyCommand"`
+	IncompatibleEnvPrefixes   []string `json:"incompatibleEnvPrefixes"`
+	IncompatibleArgSubstrings []string `json:"incompatibleArgSubstrings"`
+}
+
+// Recipe is everything language-specific; the manifest carries it to the language-agnostic host.
 type Recipe struct {
-	InstallArchive      func(string, string) error `json:"-"`
-	VerificationCommand []string                   `json:"verificationCommand"`
-	Requests            []Request                  `json:"runtimes"`
-	Inputs              []Input                    `json:"inputs"`
-	Environment         map[string]string          `json:"environment"`
-	Tools               map[string]string          `json:"tools"`
+	VerificationCommand []string          `json:"verificationCommand"`
+	Requests            []Request         `json:"runtimes"`
+	Inputs              []Input           `json:"inputs"`
+	Environment         map[string]string `json:"environment"`
+	Tools               map[string]string `json:"tools"`
+	EgressHosts         []string          `json:"egressHosts"`
+	DependencyCache     *CacheSpec        `json:"dependencyCache,omitempty"`
+	DiskBytes           int64             `json:"diskBytes,omitempty"`
 }
 type Manifest struct {
 	BuildKey string `json:"buildKey"`
@@ -50,7 +68,6 @@ type Manifest struct {
 //go:embed init.sh
 var taskInit []byte
 
-func Resolve(requests []Request, arch string) (Recipe, error) { return resolveNode(requests, arch) }
 func hashFile(p string) (string, error) {
 	f, e := os.Open(p)
 	if e != nil {
@@ -259,13 +276,13 @@ func Build(repo, home, arch string, requests []Request) (Manifest, error) {
 		if e != nil {
 			return Manifest{}, e
 		}
-		if strings.HasSuffix(in.URL, ".apk") {
+		switch {
+		case in.Install != nil:
+			e = in.Install(p, root)
+		case strings.HasSuffix(in.URL, ".apk"):
 			e = image.InstallVerifiedAPK(p, root)
-		} else {
-			if recipe.InstallArchive == nil {
-				return Manifest{}, fmt.Errorf("runtime has no archive installer")
-			}
-			e = recipe.InstallArchive(p, root)
+		default:
+			return Manifest{}, fmt.Errorf("runtime input has no installer: %s", in.URL)
 		}
 		if e != nil {
 			return Manifest{}, e
@@ -297,7 +314,11 @@ func Build(repo, home, arch string, requests []Request) (Manifest, error) {
 	if e = os.WriteFile(filepath.Join(root, "sbin/microvm-task-init"), taskInit, 0755); e != nil {
 		return Manifest{}, e
 	}
-	if e = Mkfs(filepath.Join(boot, "runtime.ext4"), root, 512<<20); e != nil {
+	size := recipe.DiskBytes
+	if size == 0 {
+		size = 512 << 20
+	}
+	if e = Mkfs(filepath.Join(boot, "runtime.ext4"), root, size); e != nil {
 		return Manifest{}, e
 	}
 	digest, e := hashFile(filepath.Join(boot, "runtime.ext4"))

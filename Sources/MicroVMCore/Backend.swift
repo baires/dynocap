@@ -11,7 +11,7 @@ public struct BootRequest: Equatable {
     public var consoleLogURL: URL
     public var generation: UUID
     public var network: NetworkMode
-    public var filteredRepositoryHost: String?
+    public var filteredHosts: [String]
     public var bootTimeoutSeconds: Int
 
     public init(
@@ -25,7 +25,7 @@ public struct BootRequest: Equatable {
         network: NetworkMode = .none,
         generation: UUID = UUID(),
         runtimeDirectory: URL? = nil, workspaceDisk: URL? = nil,
-        filteredRepositoryHost: String? = nil
+        filteredHosts: [String] = []
     ) {
         self.runtimeDirectory = runtimeDirectory
         self.workspaceDisk = workspaceDisk
@@ -37,7 +37,7 @@ public struct BootRequest: Equatable {
         self.consoleLogURL = consoleLogURL
         self.generation = generation
         self.network = network
-        self.filteredRepositoryHost = filteredRepositoryHost
+        self.filteredHosts = filteredHosts
         self.bootTimeoutSeconds = bootTimeoutSeconds
     }
 }

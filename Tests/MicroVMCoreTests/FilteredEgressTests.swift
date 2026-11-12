@@ -41,12 +41,24 @@ final class FilteredEgressTests: XCTestCase {
     }
 
     func testAllowlistIsTheRegistryAndTheRepositoryHostOnly() {
-        XCTAssertTrue(FilteredEgress.allows(name: "registry.npmjs.org", repositoryHost: nil))
-        XCTAssertTrue(FilteredEgress.allows(name: "Registry.NPMJS.org.", repositoryHost: nil))
-        XCTAssertFalse(FilteredEgress.allows(name: "registry.npmjs.org.evil.com", repositoryHost: nil))
-        XCTAssertFalse(FilteredEgress.allows(name: "github.com", repositoryHost: nil))
-        XCTAssertTrue(FilteredEgress.allows(name: "GitHub.com.", repositoryHost: "github.com"))
-        XCTAssertFalse(FilteredEgress.allows(name: "example.com", repositoryHost: "github.com"))
+        let npm = ["registry.npmjs.org"]
+        XCTAssertTrue(FilteredEgress.allows(name: "registry.npmjs.org", allowedHosts: npm))
+        XCTAssertTrue(FilteredEgress.allows(name: "Registry.NPMJS.org.", allowedHosts: npm))
+        XCTAssertFalse(FilteredEgress.allows(name: "registry.npmjs.org.evil.com", allowedHosts: npm))
+        XCTAssertFalse(FilteredEgress.allows(name: "github.com", allowedHosts: npm))
+        let withRepository = FilteredEgress.allowedHosts(runtime: npm, repositoryURL: "https://GitHub.com/org/repo.git")
+        XCTAssertEqual(withRepository, ["registry.npmjs.org", "github.com"])
+        XCTAssertTrue(FilteredEgress.allows(name: "GitHub.com.", allowedHosts: withRepository))
+        XCTAssertFalse(FilteredEgress.allows(name: "example.com", allowedHosts: withRepository))
+        XCTAssertEqual(FilteredEgress.allowedHosts(runtime: [], repositoryURL: "git@github.com:org/repo.git"), [])
+        XCTAssertEqual(FilteredEgress.legacyPlainHosts, npm)
+    }
+
+    func testAllowlistFollowsTheRuntimeRegistry() {
+        let python = FilteredEgress.allowedHosts(runtime: ["pypi.org", "files.pythonhosted.org"], repositoryURL: nil)
+        XCTAssertTrue(FilteredEgress.allows(name: "files.pythonhosted.org", allowedHosts: python))
+        XCTAssertFalse(FilteredEgress.allows(name: "registry.npmjs.org", allowedHosts: python))
+        XCTAssertFalse(FilteredEgress.allows(name: "registry.npmjs.org", allowedHosts: []))
         XCTAssertEqual(
             FilteredEgress.repositoryHost("https://github.com/baires/shouldideploy.git"),
             "github.com"
@@ -90,7 +102,7 @@ final class FilteredEgressTests: XCTestCase {
 
     func testDNSAnswersOnlyAllowedNamesAndOmitsPrivateAddresses() throws {
         let registry = dnsQuery("registry.npmjs.org")
-        let reply = FilteredDNS.reply(query: registry, repositoryHost: "github.com", hostAddresses: []) { _ in
+        let reply = FilteredDNS.reply(query: registry, allowedHosts: ["registry.npmjs.org", "github.com"], hostAddresses: []) { _ in
             [IPv4Address(1, 2, 3, 4).value, IPv4Address(10, 1, 2, 3).value, IPv4Address(169, 254, 169, 254).value]
         }
         let answers = try XCTUnwrap(reply)
@@ -98,17 +110,17 @@ final class FilteredEgressTests: XCTestCase {
         XCTAssertEqual(answers[7], 1)
         XCTAssertEqual(Array(answers.suffix(4)), [1, 2, 3, 4])
         let other = try XCTUnwrap(FilteredDNS.reply(
-            query: dnsQuery("example.com"), repositoryHost: "github.com", hostAddresses: [], resolve: { _ in [IPv4Address(1, 1, 1, 1).value] }
+            query: dnsQuery("example.com"), allowedHosts: ["registry.npmjs.org", "github.com"], hostAddresses: [], resolve: { _ in [IPv4Address(1, 1, 1, 1).value] }
         ))
         XCTAssertEqual(other[3] & 0x0F, 3)
         XCTAssertEqual(other[7], 0)
         let aaaa = try XCTUnwrap(FilteredDNS.reply(
-            query: dnsQuery("registry.npmjs.org", type: 28), repositoryHost: nil, hostAddresses: [], resolve: { _ in [] }
+            query: dnsQuery("registry.npmjs.org", type: 28), allowedHosts: ["registry.npmjs.org"], hostAddresses: [], resolve: { _ in [] }
         ))
         XCTAssertEqual(aaaa[3] & 0x0F, 0)
         XCTAssertEqual(aaaa[7], 0)
         let git = try XCTUnwrap(FilteredDNS.reply(
-            query: dnsQuery("github.com"), repositoryHost: nil, hostAddresses: [], resolve: { _ in [IPv4Address(1, 1, 1, 1).value] }
+            query: dnsQuery("github.com"), allowedHosts: ["registry.npmjs.org"], hostAddresses: [], resolve: { _ in [IPv4Address(1, 1, 1, 1).value] }
         ))
         XCTAssertEqual(git[3] & 0x0F, 3)
     }
@@ -202,7 +214,7 @@ final class FilteredEgressTests: XCTestCase {
         XCTAssertFalse(published.contains(IPv4Address(1, 2, 3, 9).value))
         XCTAssertFalse(published.contains(IPv4Address(10, 1, 2, 3).value))
         let reply = try XCTUnwrap(FilteredDNS.reply(
-            query: dnsQuery("registry.npmjs.org"), repositoryHost: nil, hostAddresses: [], resolve: { _ in addresses }
+            query: dnsQuery("registry.npmjs.org"), allowedHosts: ["registry.npmjs.org"], hostAddresses: [], resolve: { _ in addresses }
         ))
         XCTAssertEqual(reply[7], 8)
     }

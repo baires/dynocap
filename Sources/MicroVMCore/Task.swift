@@ -154,7 +154,9 @@ final class TaskManager {
             }
         }
         try? fm.removeItem(at: paths.home.appendingPathComponent("runtime-candidate"))
-        let seeds = paths.home.appendingPathComponent("npm-cache")
+        // Seeds predating runtime-declared caches lived in npm-cache and are keyed by retired artifacts.
+        try? fm.removeItem(at: paths.home.appendingPathComponent("npm-cache"))
+        let seeds = paths.home.appendingPathComponent(DependencyCache.directoryName)
         if let entries = try? fm.contentsOfDirectory(at: seeds, includingPropertiesForKeys: nil) {
             for entry in entries where entry.pathExtension == "partial" { try? fm.removeItem(at: entry) }
         }
@@ -278,8 +280,10 @@ final class TaskManager {
             network: command.network ?? NetworkMode.none)
         request.runtimeDirectory = runtime.path
         request.workspaceDisk = disk.path
-        if request.network == .filtered, case .guestClone(let repo) = resolved {
-            request.filteredRepositoryHost = FilteredEgress.repositoryHost(repo.url)
+        if request.network == .filtered {
+            var repositoryURL: String?
+            if case .guestClone(let repo) = resolved { repositoryURL = repo.url }
+            request.filteredHosts = FilteredEgress.allowedHosts(runtime: artifact.egressHosts ?? [], repositoryURL: repositoryURL)
         }
         progress(.booting)
         try rejectCreationCancellation(cancellation, stage: "boot", name: command.name, id: id)
@@ -325,7 +329,9 @@ final class TaskManager {
         record.phase = "running"
         progress(.restoringCache)
         record.dependencyCacheKey = try DependencyCache.key(baseline: baseline, runtime: artifact)
-        if let key = record.dependencyCacheKey { try DependencyCache.restore(key: key, home: paths.home, id: id, execute: execute) }
+        if let key = record.dependencyCacheKey, let spec = artifact.dependencyCache {
+            try DependencyCache.restore(key: key, spec: spec, home: paths.home, id: id, execute: execute)
+        }
         measured("cacheRestore")
         timings["startTotal"] = (ProcessInfo.processInfo.systemUptime - started) * 1000
         record.timingsMS = timings
@@ -359,7 +365,10 @@ final class TaskManager {
         guard !reviewing, record.phase == "running", record.logBytes < 32 << 20 else {
             throw MicroVMError("task is finalizing or its log quota is exhausted")
         }
-        if !DependencyCache.compatibleCommand(argv: argv, env: env) { record.dependencyCacheKey = nil }
+        if record.dependencyCacheKey != nil {
+            let spec = DependencyCache.spec(home: paths.home, runtimeDigest: record.runtimeDigest)
+            if spec.map({ !DependencyCache.compatibleCommand(argv: argv, env: env, spec: $0) }) ?? true { record.dependencyCacheKey = nil }
+        }
         let index = record.commands.count
         record.commands.append(
             TaskCommandRecord(

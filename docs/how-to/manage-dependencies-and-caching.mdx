@@ -1,75 +1,88 @@
 ---
 title: "Manage Dependencies and Caching"
-description: "How to safely pre-warm npm caches using filtered network egress and restore them in completely offline sandboxes."
+description: "How to warm a runtime's package cache under filtered network egress and install from it in completely offline sandboxes, for npm, uv and Go modules."
 sidebar_position: 1
 ---
 
 # Manage Dependencies and Caching
 
-When running automated agent tasks or CI checks locally, executing `npm install` inside an untrusted sandbox creates a dilemma: packages need to be downloaded, but giving an agent full Internet access risks data exfiltration or credential theft.
+Running a package install inside an untrusted sandbox creates a dilemma. The packages have to be downloaded, but giving an agent full Internet access risks data exfiltration or credential theft.
 
-MicroVM solves this by pairing **filtered network egress** with **automatic lockfile-keyed dependency caching**.
+MicroVM solves this by pairing **filtered network egress** with **lockfile-keyed dependency seeds**. Each runtime has exactly one package manager. The runtime declares which registry hosts filtered egress may reach and how its package cache is keyed.
 
 This guide shows you how to:
 
-1. Warm an npm cache using a one-time sandbox with restricted egress to `registry.npmjs.org`.
-2. Reuse the cached dependencies in subsequent sandboxes with zero network devices.
-3. Invalidate or refresh the dependency cache when lockfiles change.
+1. Warm a dependency seed in a one-time sandbox whose egress is restricted to your runtime's registry.
+2. Reuse that seed in later sandboxes that have no network device.
+3. Invalidate or refresh the seed when your lockfile changes.
 
 ---
 
-## The Workflow Pattern: "Deps" Sandbox vs. "Worker" Sandbox
+## Runtimes at a glance
 
-The standard pattern consists of two steps:
+| Runtime       | Package manager | Seed key (lockfile) | Filtered egress allows               | Online install     | Offline install              |
+| ------------- | --------------- | ------------------- | ------------------------------------ | ------------------ | ---------------------------- |
+| `node:24`     | npm             | `package-lock.json` | `registry.npmjs.org`                 | `npm ci`           | `npm ci --offline`           |
+| `node:22`     | npm             | `package-lock.json` | `registry.npmjs.org`                 | `npm ci`           | `npm ci --offline`           |
+| `python:3.14` | uv              | `uv.lock`           | `pypi.org`, `files.pythonhosted.org` | `uv sync --frozen` | `uv sync --offline --frozen` |
+| `go:1.27`     | Go modules      | `go.sum`            | `proxy.golang.org`, `sum.golang.org` | `go mod download`  | `go mod download`            |
+| `shell:1`     | none            | no seed             | only a task repository URL's host    | n/a                | n/a                          |
 
-1. **Preparation step:** Boot a sandbox named `deps` with `--network filtered`. Run `npm ci`. Finish it to persist the cache to `~/.microvm/cache/npm/<lockfile-hash>`.
-2. **Execution step:** Boot sandboxes with `--network none`. Run `npm ci --offline`. Packages install from the host cache without any network interface.
+`node:24` is the default when `--runtime` is omitted. Prepare a runtime once per home before you use it, for example `microvm runtime prepare . --runtime python:3.14`.
+
+Some files change the seed key besides the lockfile: `.npmrc` for npm and `uv.toml` for uv. The prepared runtime's digest is also part of the key, so a seed is never restored into a different runtime or version. uv uses the runtime's Python and never downloads an interpreter. Go runs with `GOTOOLCHAIN=local` and never switches to another toolchain.
+
+---
+
+## The workflow pattern: "deps" sandbox vs. "worker" sandbox
+
+1. **Warm step:** Clone into a sandbox named `deps` with `--network filtered`, run the online install, and `finish`. Finishing publishes the package cache as a seed.
+2. **Offline step:** Clone again with the default `--network none`. MicroVM restores the matching seed before your first command, and the offline install needs no network.
 
 ```
 +-------------------------------------------------------------+
-| 1. WARM CACHE (deps)                                        |
-| microvm clone ./project deps --network filtered             |
-| microvm exec deps -- npm ci                                 |
-| microvm finish deps   ---> Saves cache keyed by lockfile    |
+| 1. WARM SEED (deps)                                         |
+| microvm clone ./project deps --runtime python:3.14 \        |
+|   --network filtered                                        |
+| microvm exec deps -- uv sync --frozen                       |
+| microvm finish deps   ---> Saves a seed keyed by uv.lock    |
 +-------------------------------------------------------------+
                               |
                               v
 +-------------------------------------------------------------+
 | 2. OFFLINE TASKS (worker)                                   |
-| microvm clone ./project worker --network none               |
-| microvm exec worker -- npm ci --offline                     |
-| (Installs directly from restored host cache, zero network)  |
+| microvm clone ./project worker --runtime python:3.14        |
+| microvm exec worker -- uv sync --offline --frozen           |
+| (Installs from the restored seed, zero network)             |
 +-------------------------------------------------------------+
 ```
 
 ---
 
-## Step 1: Pre-warm the Dependency Cache
+## Step 1: Warm the dependency seed
 
-Ensure your project contains a valid `package.json` and `package-lock.json`.
-
-Clone your project into a sandbox named `deps`, specifying `--network filtered`:
+Make sure your project contains its runtime's lockfile, such as `package-lock.json`, `uv.lock` or `go.sum`. Then clone it with filtered networking:
 
 ```sh
-microvm clone ./my-project deps --network filtered
+microvm clone ./my-project deps --runtime node:24 --network filtered
 ```
 
-> **Why `--network filtered`?**  
-> Under filtered mode, MicroVM connects a virtio-net interface that forwards HTTPS traffic _only_ to `registry.npmjs.org` and (if applicable) the Git origin. All other IP addresses and ports are dropped at the host forwarder.
+> **Why `--network filtered`?**
+> Under filtered mode, MicroVM connects a virtio-net interface whose host forwarder answers DNS only for the runtime's registry hosts and, for a repository URL, that URL's host. It forwards only HTTPS to those names. Every other address and port is dropped.
 
-Now run clean install inside the sandbox:
+Run the online install:
 
 ```sh
 microvm exec deps --timeout 300 -- npm ci
 ```
 
-Once the install completes, finish the sandbox:
+Finish the sandbox:
 
 ```sh
 microvm finish deps
 ```
 
-When finishing a sandbox that performed package installations, MicroVM automatically archives the guest's `~/.npm` cache into the host cache directory (`~/.microvm/cache/npm/`). The cache key is computed from the SHA-256 hash of `package-lock.json`.
+Finishing archives the runtime's package cache (for example `/work/npm-cache/_cacache`, `/work/uv-cache` or `/work/go/pkg/mod/cache/download`) into `~/.microvm/dependency-cache/<key>.tar` on the host. A seed is only published if the lockfile is unchanged at finish. It is also skipped if any command pointed the package manager at another registry or cache, for example through `npm_config_*`, `UV_INDEX*`, `GOPROXY` or `GOFLAGS`, or a `--registry` or `--index` argument.
 
 Clean up the finished record:
 
@@ -79,25 +92,21 @@ microvm rm deps
 
 ---
 
-## Step 2: Run Worker Tasks Completely Offline
+## Step 2: Run worker tasks completely offline
 
-Now clone your project again for your agent or test runner, leaving the network at its default (`none`):
+Clone your project again for your agent or test runner, leaving the network at its default (`none`):
 
 ```sh
-microvm clone ./my-project worker
+microvm clone ./my-project worker --runtime node:24
 ```
 
-Notice that `microvm clone` detects that the project's `package-lock.json` matches a known cache entry. Before starting the VM, MicroVM automatically provisions the cached npm tarballs into the guest.
-
-Now run `npm ci` with the `--offline` flag:
+If the lockfile matches a seed, MicroVM unpacks it into the guest before `clone` returns. Run the offline install:
 
 ```sh
 microvm exec worker -- npm ci --offline
 ```
 
-Installation finishes in seconds without sending a single network packet.
-
-Run your tests or let your coding agent work:
+Then run your tests or let your coding agent work:
 
 ```sh
 microvm exec worker -- npm test
@@ -105,25 +114,23 @@ microvm exec worker -- npm test
 
 ---
 
-## Cache Invalidation and Updates
+## Cache invalidation and updates
 
-The cache is strictly keyed by the exact bytes of `package-lock.json`.
-
-- **If you change dependencies:** When you update `package.json` or `package-lock.json`, the SHA-256 hash changes. Subsequent offline `clone` calls will not find a cache match.
-- **To update the cache:** Re-run Step 1 with `--network filtered` to download the new packages and generate a new cache entry.
-- **Cache Location:** The cache lives on the host under `~/.microvm/cache/npm/<hash>/`. You can inspect or clear old cache entries safely using standard host tools:
+- **If you change dependencies:** a lockfile change produces a different key, so later clones find no matching seed.
+- **To update the seed:** re-run Step 1 with `--network filtered`.
+- **Location and size:** seeds live in `~/.microvm/dependency-cache/`. They are capped at 2 GiB in total, and the least recently restored seeds are evicted first. You can inspect or delete them safely:
   ```sh
-  ls -lh ~/.microvm/cache/npm
+  ls -lh ~/.microvm/dependency-cache
   ```
 
 ---
 
 ## Troubleshooting
 
-### `ENOTFOUND registry.npmjs.org` in offline mode
+### A registry name does not resolve in a `--network none` sandbox
 
-You ran `npm ci` without `--offline` in a sandbox booted with `--network none`. Always pass `npm ci --offline` when operating without a network device.
+The sandbox has no network device. Use the offline form of the install: `npm ci --offline`, `uv sync --offline --frozen`, or `go mod download` after a seed was restored.
 
-### Download blocked during `npm ci` in filtered mode
+### Download blocked during an install in filtered mode
 
-Filtered egress allows HTTPS traffic only to port 443 of `registry.npmjs.org`. If your dependencies reference private Git repositories or custom registries (e.g. Artifactory, GitHub Packages), filtered mode will block them. In those specific enterprise scenarios, you must use `--network nat`.
+Filtered egress allows HTTPS only to the hosts in the table above. Dependencies from private Git repositories, a custom registry (Artifactory, GitHub Packages, a private PyPI index) or a Go `GOPROXY` other than `proxy.golang.org` are blocked. In those cases use `--network nat`, which is unrestricted. A seed is still not published when a command overrides the registry.

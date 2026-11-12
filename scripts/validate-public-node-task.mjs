@@ -122,7 +122,7 @@ try {
     Task.start({
       repositoryUrl,
       ref: revision,
-      runtimes: [{ name: "node", version: "22" }],
+      runtimes: [{ name: "node", version: "24" }],
       network: "filtered",
       ttlSeconds: 600,
     })
@@ -258,7 +258,7 @@ try {
     projectPath: probeDir,
     network: "nat",
     ttlSeconds: 180,
-    runtimes: [{ name: "node", version: "22" }],
+    runtimes: [{ name: "node", version: "24" }],
   });
   try {
     natProbe = await natTask.exec(["node", "-e", natScript]);

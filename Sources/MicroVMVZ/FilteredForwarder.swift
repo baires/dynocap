@@ -27,7 +27,7 @@ public final class FilteredForwarder {
     public let device: VZVirtioNetworkDeviceConfiguration
     let guestFD: Int32
     private let hostFD: Int32
-    private let repositoryHost: String?
+    private let allowedHosts: [String]
     private let condition = NSCondition()
     private var stopped = false
     private var loopStarted = false
@@ -43,24 +43,24 @@ public final class FilteredForwarder {
     private var loggedDrops: Set<UInt32> = []
     private let ourMAC: [UInt8] = [0x02, 0x00, 0x00, 0x00, 0x00, 0x02]
 
-    public static func start(repositoryHost: String?) throws -> FilteredForwarder {
-        let forwarder = try FilteredForwarder(repositoryHost: repositoryHost)
+    public static func start(allowedHosts: [String]) throws -> FilteredForwarder {
+        let forwarder = try FilteredForwarder(allowedHosts: allowedHosts)
         forwarder.begin()
         return forwarder
     }
 
-    static func testing(repositoryHost: String?) throws -> FilteredForwarder {
-        try FilteredForwarder(repositoryHost: repositoryHost)
+    static func testing(allowedHosts: [String]) throws -> FilteredForwarder {
+        try FilteredForwarder(allowedHosts: allowedHosts)
     }
 
-    private init(repositoryHost: String?) throws {
+    private init(allowedHosts: [String]) throws {
         var fds = [Int32](repeating: -1, count: 2)
         guard socketpair(AF_UNIX, SOCK_DGRAM, 0, &fds) == 0 else {
             throw MicroVMError("filtered network socket failed: \(String(cString: strerror(errno)))")
         }
         guestFD = fds[0]
         hostFD = fds[1]
-        self.repositoryHost = repositoryHost
+        self.allowedHosts = allowedHosts
         for fd in fds {
             var snd: Int32 = 1 << 20
             var rcv: Int32 = 4 << 20
@@ -242,7 +242,7 @@ public final class FilteredForwarder {
         guard destination == FilteredEgress.dns.value, dstPort == 53 else { return [] }
         let hosts = hostAddresses()
         guard let reply = FilteredDNS.reply(
-            query: payload, repositoryHost: repositoryHost, hostAddresses: hosts,
+            query: payload, allowedHosts: allowedHosts, hostAddresses: hosts,
             resolve: { [self] name in
                 let selected = FilteredEgress.publishable(lookup(name), hostAddresses: hosts)
                 remember(selected, name: name)

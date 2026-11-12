@@ -5,7 +5,8 @@ isolated Linux guest with Apple's Virtualization.framework, runs a command
 inside it, and tears it down.
 
 For project work, start with the **[Agent task workflow tutorial](docs/tutorials/agent-task-workflow.mdx)**:
-clone a local directory or repository into a named Node 22 task, run commands,
+clone a local directory or repository into a named task on a Node, Python, Go or
+plain shell runtime, run commands,
 review a verified diff, and retain results after teardown. It includes CLI,
 TypeScript SDK, and MCP setup. Project tasks currently require Apple Silicon.
 
@@ -34,7 +35,7 @@ is your project, with a `package-lock.json` and `node_modules/` in `.gitignore`.
 
 ```sh
 microvm doctor
-microvm runtime prepare . --runtime node:22        # in the microvm checkout; downloads verified inputs
+microvm runtime prepare . --runtime node:24        # in the microvm checkout; downloads verified inputs
 microvm clone ./project deps --network filtered    # explicit network: HTTPS to the npm registry only
 microvm exec deps --timeout 300 -- npm ci
 microvm finish deps                                # exports the result and saves the npm cache
@@ -66,6 +67,12 @@ microvm rm deps
   seven days from creation.
 - `rm` releases a finished sandbox. Discarding live work needs
   `rm NAME --force`; deleting a kept result needs `rm NAME --purge`.
+- The quick start uses the default `node:24` runtime. Pass `--runtime` to
+  `runtime prepare` and `clone` for `node:22`, `python:3.14` (uv), `go:1.27`
+  (Go modules), or `shell:1` (bash, git and ssh only). Each runtime has one
+  package manager, and filtered egress reaches only that runtime's registry. See
+  [Manage Dependencies and Caching](docs/how-to/manage-dependencies-and-caching.mdx)
+  for each runtime's lockfile and offline install command.
 
 Every command, its output, and its JSON support are in the
 [command matrix](docs/reference/cli/commands.mdx). [The CLI reference](docs/reference/cli/overview.mdx)
@@ -173,8 +180,8 @@ the `ARM\x64` magic. Intel Macs boot the bzImage as published.
 The default guest has **no virtual network device**. Exec still works over
 vsock. `--network nat` explicitly attaches `VZNATNetworkDeviceAttachment` for
 unrestricted outbound access with DHCP. `--network filtered` attaches a virtio
-NIC whose host forwarder allows HTTPS only to `registry.npmjs.org` and the
-task's Git host. No host filesystem is mounted.
+NIC whose host forwarder allows HTTPS only to the task runtime's package
+registry (`registry.npmjs.org` for a plain sandbox) and the task's Git host. No host filesystem is mounted.
 
 ## Isolation promise
 
@@ -187,8 +194,10 @@ still works; vsock is the daemon-to-agent control channel.
 allowed by the host network, potentially including host services, private
 networks, link-local services, and cloud metadata endpoints. NAT does **not**
 filter destinations or prevent data exfiltration. `--network filtered` is a
-separate explicit mode. The host forwarder allows TCP port 443 only to
-`registry.npmjs.org` and, for a repository URL, that URL's hostname, and
+separate explicit mode. The host forwarder allows TCP port 443 only to the
+registry hosts the task runtime declares (`registry.npmjs.org` for node and plain
+sandboxes, PyPI for python, the Go proxy and checksum database for go, none for
+shell) and, for a repository URL, that URL's hostname, and
 denies the host, private networks, link-local, CGNAT, multicast, and metadata
 addresses. The runtime does not publish inbound ports. There is no general
 allowlist language.
@@ -309,6 +318,7 @@ npm run typecheck
 python3 scripts/test-isolation-macos.py
 python3 scripts/test-terminal-macos.py
 python3 scripts/test-journey-macos.py
+python3 scripts/validate-runtime-task.py --all
 ```
 
 `test-terminal-macos.py` drives `exec -t` and `shell` from a host PTY: input,
@@ -316,9 +326,12 @@ resizing, Ctrl-C, TTL warnings and expiry, and host terminal restoration after
 every exit path. `test-journey-macos.py` follows the [quick start](#quick-start)
 with `testdata/journey-project`: doctor, preparation, a networked install, an
 offline sandbox, exec, shell, logs, diff, finish, applying the patch, and
-cleanup, checking that the source checkout is unchanged. Both prepare a node:22
+cleanup, checking that the source checkout is unchanged. Both prepare a node:24
 runtime (seeded from `~/.microvm/cache`) and need internet for verified inputs
-and the npm registry.
+and the npm registry. `validate-runtime-task.py` prepares each runtime, warms
+its dependency seed under filtered egress, checks that only that runtime's
+registry resolves, installs and tests offline from the seed, and clones a
+repository URL under filtered egress.
 
 The smoke test uses a temporary home and its own daemon. It checks no NIC/routes
 by default, outbound TCP denial, NAT DHCP and public HTTP reachability, real SDK
@@ -359,7 +372,7 @@ Apache 2.0. See [LICENSE](LICENSE).
 
 ## Agent task loop
 
-The Node 22 project/task/result path, runtime preparation, SDK/MCP usage and
+The Node 24 project/task/result path, runtime preparation, SDK/MCP usage and
 retention limits are documented in the [Agent task workflow tutorial](docs/tutorials/agent-task-workflow.mdx). Runtime tools
 are read-only, workspaces are copied, and finalization exports results before
 sandbox destruction.

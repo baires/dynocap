@@ -15,7 +15,7 @@ final class CLICreationTests: XCTestCase {
         var command = TaskCommand(op: "start")
         command.projectPath = "/tmp/project"
         let human = try formatCreationResult(descriptor, command: command, home: home, output: .human, now: now)
-        for expected in ["Created sandbox: demo", "Phase: running", "node:22", "Network: none", "TTL: 50s remaining",
+        for expected in ["Created sandbox: demo", "Phase: running", "node:24", "Network: none", "TTL: 50s remaining",
                          "discards unexported", "Source (directory): /tmp/project", "exec 'demo' -- pwd", "'\\''"] {
             XCTAssertTrue(human.contains(expected), expected)
         }

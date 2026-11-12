@@ -28,10 +28,6 @@
     "sha256": "99144fe0b1bb9316a3bc30c38707996767806661f4a0456fcf4565ac92e79b0f"
   },
   {
-    "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libgcc-15.2.0-r5.apk",
-    "sha256": "369aaa6e9d099a737bad6dd3e6c2fe7bb1547ca26d22b94ee0411228f709b403"
-  },
-  {
     "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libidn2-2.3.8-r0.apk",
     "sha256": "d02ffda4510652f89c5fb89cd2e7ff721afb0c74e7d75476ad60bebe7ac0ae20"
   },
@@ -42,10 +38,6 @@
   {
     "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libssl3-3.5.9-r0.apk",
     "sha256": "20ac252b276d73f2c69c1d25f84537c7fba81caefc026c6be1094b394af2082e"
-  },
-  {
-    "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libstdc++-15.2.0-r5.apk",
-    "sha256": "2302e766d4e4926038ec166ecb85837ee884576115236ddb565e3a5fca4a11d7"
   },
   {
     "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libunistring-1.4.2-r0.apk",
@@ -94,5 +86,13 @@
   {
     "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/openssh-keygen-10.3_p1-r2.apk",
     "sha256": "c7ba694e102891f34cc53f143356ec28f961d5e98ac58e6333bec352bffed452"
+  },
+  {
+    "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/readline-8.3.3-r1.apk",
+    "sha256": "9f0ae0923c02b0d6aba62e9173542b65396ba3f0efefcbf087ea32f1120e7b34"
+  },
+  {
+    "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/bash-5.3.9-r1.apk",
+    "sha256": "95f4f976bdf2f4ca18ff41c32916eb6d7b12a0dae12504d55d04427460d6542f"
   }
 ]

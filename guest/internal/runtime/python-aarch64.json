@@ -1,0 +1,42 @@
+[
+  {
+    "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libgcc-15.2.0-r5.apk",
+    "sha256": "369aaa6e9d099a737bad6dd3e6c2fe7bb1547ca26d22b94ee0411228f709b403"
+  },
+  {
+    "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libstdc++-15.2.0-r5.apk",
+    "sha256": "2302e766d4e4926038ec166ecb85837ee884576115236ddb565e3a5fca4a11d7"
+  },
+  {
+    "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/gdbm-1.26-r0.apk",
+    "sha256": "bad50eb26533e2f58e014fbcd3c1744f2fdb79954af6e3c188ccd059251c7790"
+  },
+  {
+    "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libbz2-1.0.8-r6.apk",
+    "sha256": "28cb76bb6d11d2a55c3061b5fcb2ab84996412a248b2c9fe52bb710d0a2a84e7"
+  },
+  {
+    "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libffi-3.5.2-r1.apk",
+    "sha256": "9a67280b0c7c62db658c2d4d32ed1199903bef859c32dd4245e1a7e35c89ab4b"
+  },
+  {
+    "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libpanelw-6.6_p20260516-r0.apk",
+    "sha256": "a6912c654c821db4f8a801321709205bd482b0e515b862f2d02045e21b73d97d"
+  },
+  {
+    "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/mpdecimal-4.0.1-r0.apk",
+    "sha256": "358959600f99f58deee30ca9089c7f6f0f1bd73cc0021e321a7dbf6f735935c6"
+  },
+  {
+    "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/sqlite-libs-3.53.4-r0.apk",
+    "sha256": "b39d8d73c1208838a436f2d481ba605b52a095f8d6ff781556eafc81cd1a13e9"
+  },
+  {
+    "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/xz-libs-5.8.4-r0.apk",
+    "sha256": "9be375832e747afe14f98e400e8b55d8f6fde25e41663090c81600628daab093"
+  },
+  {
+    "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/python3-3.14.10-r1.apk",
+    "sha256": "980b5108e756f1aae298c041ef6bb229b655b7a5393b8c001f6bac8a03825429"
+  }
+]

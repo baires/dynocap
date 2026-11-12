@@ -15,7 +15,7 @@ MicroVM includes a first-party MCP server package (`@microvm/mcp`) that exposes 
 ## Prerequisites
 
 1. MicroVM CLI built and signed (`./scripts/build-macos.sh`).
-2. Node 22 runtime prepared (`microvm runtime prepare . --runtime node:22`).
+2. A runtime prepared, such as the default `node:24` (`microvm runtime prepare . --runtime node:24`). Tasks may select any prepared runtime with `runtimes`.
 3. Build the TypeScript packages:
    ```sh
    npm run typecheck
@@ -30,7 +30,7 @@ By default, `@microvm/mcp` enforces strict security boundaries:
 
 - **Offline Only by Default:** The LLM cannot allocate network interfaces or connect to external hosts.
 - **Opt-in Network Modes:** You must explicitly enable network flags via environment variables when launching the server:
-  - `MICROVM_MCP_ALLOW_FILTERED=1`: Permits HTTPS access to `registry.npmjs.org` and Git origins.
+  - `MICROVM_MCP_ALLOW_FILTERED=1`: Permits HTTPS access to the task runtime's package registry (`registry.npmjs.org` for node and plain sandboxes) and Git origins.
   - `MICROVM_MCP_ALLOW_NAT=1`: Permits unrestricted outbound NAT connectivity.
 
 ---

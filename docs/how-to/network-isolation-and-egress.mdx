@@ -56,9 +56,14 @@ microvm clone ./my-project sandbox --network filtered
 The forwarder inspects initial TLS ClientHello packets and socket connections:
 
 1. **Port 443 Only:** Non-HTTPS ports (e.g. HTTP on port 80, SSH on port 22, raw TCP) are dropped.
-2. **Designated Hostnames:**
-   - `registry.npmjs.org`
+2. **Designated Hostnames:** exact names only, never their subdomains.
+   - The task runtime's package registry, as declared in the prepared runtime manifest:
+     - `node:24`, `node:22`: `registry.npmjs.org`
+     - `python:3.14`: `pypi.org`, `files.pythonhosted.org`
+     - `go:1.27`: `proxy.golang.org`, `sum.golang.org`
+     - `shell:1`: none
    - The remote Git origin host if the project was cloned from an HTTPS URL.
+   - A plain `microvm run` sandbox has no runtime and keeps `registry.npmjs.org`.
 
 Any attempt to contact another IP or domain (e.g., pastebins, command-and-control servers, webhooks) is terminated immediately at the host boundary.
 

@@ -153,7 +153,7 @@ microvm ls [options]
   - `NAME/ID`: Friendly name or immutable ID.
   - `KIND`: `task` (project task) or `sandbox` (raw).
   - `PHASE`: `booting`, `running`, `stopping`, `stopped`, `completed`, or `failed`.
-  - `RUNTIME`: Runtime identifier (e.g. `node:22` or `minimal`).
+  - `RUNTIME`: Runtime identifier (e.g. `node:24` or `minimal`).
   - `NETWORK`: `none`, `filtered`, or `nat`.
   - `TTL`: Remaining time until sandbox expiration.
   - `RETENTION`: Remaining time until retained host results expire (7 days from creation).
@@ -197,7 +197,7 @@ microvm doctor [options]
 ```
 
 - **Options:**
-  - `--runtime <name:version>`: Check specific runtime (default: `node:22`).
+  - `--runtime <name:version>`: Check specific runtime (default: `node:24`).
   - `--json`: Output diagnostic report as JSON.
 
 ---
@@ -213,7 +213,7 @@ microvm runtime prepare [REPO_PATH] [options]
 - **Arguments:**
   - `REPO_PATH`: Path to the `microvm` source tree (defaults to `.`).
 - **Options:**
-  - `--runtime <name:version>`: Runtime to prepare (currently `node:22`).
+  - `--runtime <name:version>`: Runtime to prepare. Default `node:24`. Supported: `node:24` and `node:22` (npm), `python:3.14` (uv), `go:1.27` (Go modules), and `shell:1` (bash, git and ssh; no language). An unsupported selection fails and lists the supported ones; no version is substituted.
   - `--json`: Output preparation result object as JSON.
 
 ---

@@ -18,7 +18,7 @@ fs.mkdirSync(path.dirname(reportPath), { recursive: true });
 const task = await Task.start({
   repositoryUrl,
   ref: "master",
-  runtimes: [{ name: "node", version: "22" }],
+  runtimes: [{ name: "node", version: "24" }],
   network: "nat",
 });
 const head = await task.exec(["git", "rev-parse", "HEAD"]);

@@ -124,7 +124,7 @@ def main():
                     assert not (home / "vms/noisy").exists(), "unread output prevented TTL teardown: " + (home / "vms/noisy/state.json").read_text()
                 print("PASS: unread noisy output cannot prevent TTL teardown", flush=True)
 
-                cli("runtime", "prepare", str(repo), "--runtime", "node:22", timeout=180)
+                cli("runtime", "prepare", str(repo), "--runtime", "node:24", timeout=180)
                 print("PASS: runtime prepared for interruption check", flush=True)
                 kept = home / "tasks" / "task-kept" / "result"
                 kept.mkdir(parents=True)

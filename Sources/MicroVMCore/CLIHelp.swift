@@ -96,9 +96,9 @@ func helpTopic(from positionals: [String], strict: Bool) throws -> [String] {
 
 private let networkChoice = """
 Network defaults to none, which attaches no virtual NIC. nat enables unrestricted \
-outbound access. filtered allows HTTPS only to registry.npmjs.org and, for a repository \
-URL, that URL's host. A repository URL is cloned inside the guest and requires nat or \
-filtered. An ssh URL requires nat. --git-token-env and --ssh-key are used only for that \
+outbound access. filtered allows HTTPS only to the runtime's package registry \
+(registry.npmjs.org for node) and, for a repository URL, that URL's host. A repository \
+URL is cloned inside the guest and requires nat or filtered. An ssh URL requires nat. --git-token-env and --ssh-key are used only for that \
 guest fetch and are not imported. TTL defaults to 1800 seconds, including boot, and must \
 be an integer from 1 to 86400. There is no unlimited lifetime or automatic renewal.
 """
@@ -131,15 +131,16 @@ let cliCommandSpecs: [CLICommandSpec] = [
         usage: "microvm runtime prepare [REPO] [--runtime NAME:VERSION] [--json]",
         flags: [
             CLIFlag(name: "--json", value: nil, summary: "Print a documented success or error object; suppress human progress."),
-            CLIFlag(name: "--runtime", value: "NAME:VERSION", summary: "Runtime to build. The default is node:22."),
+            CLIFlag(name: "--runtime", value: "NAME:VERSION", summary: "Runtime to build. The default is node:24."),
         ],
         examples: [
-            "microvm runtime prepare . --runtime node:22",
-            "microvm runtime prepare . --runtime=node:22 --json",
+            "microvm runtime prepare . --runtime node:24",
+            "microvm runtime prepare . --runtime=node:24 --json",
         ],
         discussion: """
         Preparation is explicit. Creating a sandbox does not download or substitute a runtime. \
-        The default selection is node:22 when --runtime is omitted. REPO is the microvm source tree, defaulting to the current directory.
+        Supported selections: node:24 and node:22 with npm; python:3.14 with uv; go:1.27 with Go modules; shell:1 with bash, git and ssh only. \
+        The default selection is node:24 when --runtime is omitted. REPO is the microvm source tree, defaulting to the current directory.
         Progress goes to human stderr; companion output is saved in a build log. JSON suppresses progress.
         See docs/reference/cli/json-schemas.mdx for result schemas.
         """,
@@ -152,7 +153,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
         usage: "microvm clone SOURCE NAME [OPTIONS]",
         flags: [
             CLIFlag(name: "--json", value: nil, summary: "Print a documented success or error object; suppress human progress."),
-            CLIFlag(name: "--runtime", value: "NAME:VERSION", summary: "Runtime the sandbox must use, such as node:22."),
+            CLIFlag(name: "--runtime", value: "NAME:VERSION", summary: "Runtime the sandbox must use, such as node:24."),
             CLIFlag(name: "--network", value: "none|nat|filtered", summary: "Sandbox network. The default is none."),
             CLIFlag(name: "--ttl", value: "SEC", summary: "Sandbox lifetime in seconds, from 1 to 86400. The default is 1800."),
             CLIFlag(name: "--cpus", value: "N", summary: "Guest CPUs. The default is 2 for a project sandbox."),
@@ -166,7 +167,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
             CLIFlag(name: "--ssh-key", value: "PATH", summary: "Private key used only for an ssh guest fetch."),
         ],
         examples: [
-            "microvm clone ./project demo --runtime node:22 --network none --ttl 1800 --cpus 2 --memory 1024 --ref main --json",
+            "microvm clone ./project demo --runtime node:24 --network none --ttl 1800 --cpus 2 --memory 1024 --ref main --json",
             "microvm clone git@github.com:org/repo.git demo --network nat --git-token-env MICROVM_EXAMPLE_TOKEN --ssh-key /tmp/key",
         ],
         discussion: networkChoice
@@ -205,10 +206,10 @@ let cliCommandSpecs: [CLICommandSpec] = [
         summary: "Diagnose host prerequisites without starting or repairing anything.",
         usage: "microvm doctor [--runtime NAME:VERSION] [--json]",
         flags: [
-            CLIFlag(name: "--runtime", value: "NAME:VERSION", summary: "Check this runtime selection; defaults to node:22."),
+            CLIFlag(name: "--runtime", value: "NAME:VERSION", summary: "Check this runtime selection; defaults to node:24."),
             CLIFlag(name: "--json", value: nil, summary: "Print the diagnostic report as JSON on stdout."),
         ],
-        examples: ["microvm doctor", "microvm doctor --runtime node:22 --json"],
+        examples: ["microvm doctor", "microvm doctor --runtime node:24 --json"],
         discussion: """
         Check platform/backend support, signed CLI entitlement, companions, image hashes, selected runtime, home access, and daemon connectivity.
         A stopped daemon is normal; a broken listener or held daemon lock without a socket is an error.
@@ -435,7 +436,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
         flags: [
             CLIFlag(name: "--json", value: nil, summary: "Print the clone result object; suppress human progress."),
             CLIFlag(name: "--name", value: "NAME", summary: "Friendly name. task- and runtime- prefixes are reserved."),
-            CLIFlag(name: "--runtime", value: "NAME:VERSION", summary: "Runtime the sandbox must use, such as node:22."),
+            CLIFlag(name: "--runtime", value: "NAME:VERSION", summary: "Runtime the sandbox must use, such as node:24."),
             CLIFlag(name: "--network", value: "none|nat|filtered", summary: "Sandbox network. The default is none."),
             CLIFlag(name: "--ttl", value: "SEC", summary: "Sandbox lifetime in seconds, from 1 to 86400. The default is 1800."),
             CLIFlag(name: "--cpus", value: "N", summary: "Guest CPUs, at least 1."),
@@ -445,7 +446,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
             CLIFlag(name: "--ssh-key", value: "PATH", summary: "Private key used only for an ssh guest fetch."),
         ],
         examples: [
-            "microvm task start /tmp/project --name demo --runtime node:22 --network none --ttl 1800 "
+            "microvm task start /tmp/project --name demo --runtime node:24 --network none --ttl 1800 "
                 + "--cpus 2 --memory 1024 --ref main --ssh-key /tmp/key --git-token-env MICROVM_EXAMPLE_TOKEN",
             "microvm task start /tmp/project --name demo --json",
         ],
@@ -510,7 +511,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
 /// The repository workflow, shared word for word with the README quick start (checked by a test).
 let quickStart = """
 microvm doctor
-microvm runtime prepare . --runtime node:22        # in the microvm checkout; downloads verified inputs
+microvm runtime prepare . --runtime node:24        # in the microvm checkout; downloads verified inputs
 microvm clone ./project deps --network filtered    # explicit network: HTTPS to the npm registry only
 microvm exec deps --timeout 300 -- npm ci
 microvm finish deps                                # exports the result and saves the npm cache

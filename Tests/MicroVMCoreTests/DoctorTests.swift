@@ -53,13 +53,14 @@ final class DoctorTests: XCTestCase {
         let fixture = try DoctorFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         let before = try snapshot(fixture.root)
-        let request = [RuntimeSelection(name: "node", version: "24")]
+        // The fixture prepares only the default node:24, so node:22 is a requested but unprepared runtime.
+        let request = [RuntimeSelection(name: "node", version: "22")]
         let report = diagnoseHost(paths: fixture.paths, executable: fixture.binary, runtimes: request,
                                   host: fixture.host, daemon: { _ in DoctorCheck("daemon", "warning", "stopped") })
         XCTAssertFalse(report.ok)
         let check = try XCTUnwrap(report.checks.first { $0.id == "runtime" })
         XCTAssertEqual(check.status, "error")
-        XCTAssertTrue(check.recovery?.contains("node:24") == true)
+        XCTAssertTrue(check.recovery?.contains("node:22") == true)
         XCTAssertEqual(try snapshot(fixture.root), before)
         let missing = fixture.root.appendingPathComponent("absent/nested/home")
         let fresh = diagnoseHost(paths: MicroVMPaths(home: missing), executable: fixture.binary, runtimes: request,
@@ -229,6 +230,6 @@ private struct DoctorFixture {
             runtimes: RuntimeArtifact.defaultRuntimes, arch: "aarch64", baseImageDigest: "base", artifactDigest: digest,
             tools: [:], environment: [:], formatVersion: RuntimeArtifact.currentFormatVersion, verificationCommand: ["true"])
         try JSONEncoder().encode(artifact).write(to: runtime.appendingPathComponent("runtime.json"))
-        try JSONEncoder().encode(["aarch64/node@22": digest]).write(to: paths.home.appendingPathComponent("runtime-catalog.json"))
+        try JSONEncoder().encode(["aarch64/node@24": digest]).write(to: paths.home.appendingPathComponent("runtime-catalog.json"))
     }
 }

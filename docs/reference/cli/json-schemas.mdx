@@ -21,7 +21,7 @@ Returns an array of sandbox and task records:
     "name": "demo",
     "kind": "task",
     "phase": "running",
-    "runtime": "node:22",
+    "runtime": "node:24",
     "network": "none",
     "sandboxExpiresAtUnix": 1794958200,
     "resultExpiresAtUnix": 1795563000,
@@ -38,7 +38,7 @@ Returns an array of sandbox and task records:
 | `name`                 | `string \| null`  | Friendly name assigned at creation, or `null`.                                                   |
 | `kind`                 | `string`          | `"task"` (project sandbox) or `"sandbox"` (raw).                                                 |
 | `phase`                | `string`          | Lifecycle phase: `"booting"`, `"running"`, `"stopping"`, `"stopped"`, `"completed"`, `"failed"`. |
-| `runtime`              | `string`          | Runtime identifier (e.g. `"node:22"`, `"minimal"`).                                              |
+| `runtime`              | `string`          | Runtime identifier (e.g. `"node:24"`, `"minimal"`).                                              |
 | `network`              | `string \| null`  | `"none"`, `"filtered"`, `"nat"`, or `null`.                                                      |
 | `sandboxExpiresAtUnix` | `integer \| null` | Absolute TTL deadline in seconds. `null` if VM is stopped.                                       |
 | `resultExpiresAtUnix`  | `integer \| null` | Absolute retention deadline for logs and diffs (7 days from creation).                           |
@@ -93,7 +93,7 @@ Returned by `microvm inspect NAME`:
   "kind": "task",
   "taskPhase": "completed",
   "sandboxPhase": "stopped",
-  "runtime": "node:22",
+  "runtime": "node:24",
   "network": "none",
   "createdAtUnix": 1794956400,
   "sandboxExpiresAtUnix": 1794958200,
@@ -129,7 +129,7 @@ Diagnostic report of host readiness:
 {
   "ok": true,
   "home": "/Users/user/.microvm",
-  "runtime": "node:22",
+  "runtime": "node:24",
   "checks": [
     {
       "id": "platform",
