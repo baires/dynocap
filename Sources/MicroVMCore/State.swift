@@ -103,30 +103,6 @@ public func vmIsExpired(_ record: VMRecord, now: Int64) -> Bool {
     }
 }
 
-public func formatProcessTable(_ records: [VMRecord], now: Int64) -> String {
-    let rows: [[String]] = [["NAME", "PHASE", "CPUS", "MEMORY_MB", "NETWORK", "TTL_SEC", "AGE", "MESSAGE"]] +
-        records.sorted { $0.name < $1.name }.map { record in
-            [
-                record.name,
-                record.phase.rawValue,
-                String(record.cpus),
-                String(record.memoryMB),
-                record.network?.rawValue ?? "unknown",
-                record.ttlSeconds.map(String.init) ?? "unknown",
-                formatAge(max(0, now - record.createdAtUnix)),
-                record.message ?? "",
-            ]
-        }
-    let widths = (0..<8).map { col in
-        rows.map { $0[col].count }.max() ?? 0
-    }
-    return rows.map { row in
-        row.enumerated().map { idx, cell in
-            idx == row.count - 1 ? cell : cell.padding(toLength: widths[idx], withPad: " ", startingAt: 0)
-        }.joined(separator: "  ")
-    }.joined(separator: "\n") + "\n"
-}
-
 public final class StateStore {
     public let paths: MicroVMPaths
     private let lock = NSLock()

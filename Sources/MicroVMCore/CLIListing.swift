@@ -57,8 +57,10 @@ private func listingCell(_ value: String) -> String {
     String(value.map { $0.isWhitespace || $0.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) ? " " : $0 })
 }
 
-public func formatSandboxList(_ entries: [ManagedEntry], now: Int64, width: Int = 120) -> String {
-    guard !entries.isEmpty else { return "No sandboxes or retained results.\n" }
+public func formatSandboxList(
+    _ entries: [ManagedEntry], now: Int64, width: Int = 120, empty: String = "No sandboxes or retained results."
+) -> String {
+    guard !entries.isEmpty else { return empty + "\n" }
     let headers = ["NAME/ID", "PHASE", "RUNTIME", "NETWORK", "TTL", "RETENTION", "RESULT"]
     let rows = sortedListing(entries).map { entry in
         [

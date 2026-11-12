@@ -123,6 +123,7 @@ private func cliOperation(_ command: CLICommand) -> String {
     case .run: return "run"
     case .exec: return "exec"
     case .shell: return "shell"
+    case .taskExec: return "task exec"
     case .destroy: return "destroy"
     case .managed(let command): return ["start": "clone", "remove": "rm"][command.op] ?? command.op
     case .task(let command): return "task \(command.op)"

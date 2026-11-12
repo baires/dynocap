@@ -46,11 +46,19 @@ public func parseCommand(_ args: [String]) throws -> CLIInvocation {
         return try finishParse(prefix, runtimeHelpTopic(commandArgs), .runtimePrepare(preparation))
     case "task":
         let command = try parseTask(commandArgs, &prefix)
-        let path = prefix.help || prefix.version ? taskHelpTopic(commandArgs) : ["task", command.op]
-        return try finishParse(prefix, path, .task(command))
+        let path: [String]
+        if prefix.help || prefix.version {
+            path = taskHelpTopic(commandArgs)
+        } else if case .task(let task) = command {
+            path = ["task", task.op]
+        } else {
+            path = ["task", "exec"]
+        }
+        return try finishParse(prefix, path, command)
     case "help":
         let topic = try parseHelpCommand(commandArgs, &prefix)
         if prefix.version { return makeInvocation(prefix, .version) }
+        if prefix.json { throw usageError("help does not support --json") }
         if prefix.help && topic.isEmpty { return makeInvocation(prefix, .help(topic: ["help"])) }
         return makeInvocation(prefix, .help(topic: topic))
     case "version":
@@ -63,8 +71,8 @@ public func parseCommand(_ args: [String]) throws -> CLIInvocation {
         try parseEmpty("ps", commandArgs, &prefix)
         return try finishParse(prefix, ["ps"], .ps)
     case "destroy":
-        let name = try parseDestroy(commandArgs, &prefix)
-        return try finishParse(prefix, ["destroy"], .destroy(name))
+        let command = try parseNamed("destroy", commandArgs, &prefix)
+        return try finishParse(prefix, ["destroy"], .destroy(command))
     case "run":
         let request = try parseRun(commandArgs, &prefix)
         return try finishParse(prefix, ["run"], .run(request))
@@ -289,13 +297,14 @@ func parseNamed(_ sub: String, _ args: [String], _ prefix: inout InvocationPrefi
         }
     }
     if prefix.help || prefix.version { return TaskCommand(op: sub) }
+    let removal = sub == "rm" || sub == "destroy"
     guard let name else {
-        throw usageError("usage: microvm \(sub) NAME_OR_ID" + (sub == "rm" ? " [--force] [--purge]" : ""))
+        throw usageError("usage: microvm \(sub) NAME_OR_ID" + (sub == "rm" ? " [--force] [--purge]" : (removal ? " [--force]" : "")))
     }
     try rethrowUsage { try validateVMName(name) }
-    var command = TaskCommand(op: sub == "rm" ? "remove" : sub)
+    var command = TaskCommand(op: removal ? "remove" : sub)
     command.id = name
-    if sub == "rm" {
+    if removal {
         command.purge = purge
         command.force = force
     }
@@ -362,31 +371,6 @@ func parseEmpty(_ command: String, _ args: [String], _ prefix: inout InvocationP
             }
         }
     }
-}
-
-func parseDestroy(_ args: [String], _ prefix: inout InvocationPrefix) throws -> String {
-    var name: String?
-    var reader = OptionReader(args: args)
-    while let token = try reader.next() {
-        if prefix.help || prefix.version { return "" }
-        switch token {
-        case .separator:
-            throw usageError("unexpected argument --")
-        case .positional(let value):
-            if name == nil {
-                name = value
-            } else {
-                throw usageError("unexpected argument \(value)")
-            }
-        case .flag(let flag, let inline):
-            if try consumeGlobal(flag, inline, reader: &reader, prefix: &prefix) { continue }
-            throw usageError("unknown flag \(flag)")
-        }
-    }
-    if prefix.help || prefix.version { return "" }
-    guard let name else { throw usageError("usage: microvm destroy NAME") }
-    try rethrowUsage { try validateVMName(name) }
-    return name
 }
 
 func parseDoctor(_ args: [String], _ prefix: inout InvocationPrefix) throws -> [RuntimeSelection] {

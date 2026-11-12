@@ -13,7 +13,10 @@ final class CLITests: XCTestCase {
         XCTAssertEqual(shell.command, .exec(ExecCommand(name: "demo", argv: ["sh", "-c", "echo hello"], env: [], cwd: "", timeoutSeconds: 60)))
 
         XCTAssertEqual(try parseCommand(["microvm", "ps"]).command, .ps)
-        XCTAssertEqual(try parseCommand(["microvm", "destroy", "demo"]).command, .destroy("demo"))
+        guard case .destroy(let destroy) = try parseCommand(["microvm", "destroy", "demo"]).command else { return XCTFail("expected destroy") }
+        XCTAssertEqual(destroy.op, "remove", "destroy is rm's removal request")
+        XCTAssertEqual(destroy.id, "demo")
+        XCTAssertEqual(destroy.force, false)
     }
 
     func testExecWithoutSeparator() throws {
@@ -74,11 +77,6 @@ final class StateTests: XCTestCase {
             name: "demo", phase: .stopped, cpus: 1, memoryMB: 128,
             daemonToken: "t", createdAtUnix: 0, ttlSeconds: 1, message: nil
         ), now: 100))
-        let table = formatProcessTable([record], now: 112)
-        XCTAssertTrue(table.contains("demo"))
-        XCTAssertTrue(table.contains("running"))
-        XCTAssertTrue(table.contains("12s"))
-        XCTAssertTrue(table.hasPrefix("NAME"))
     }
 
     func testStoreReap() throws {

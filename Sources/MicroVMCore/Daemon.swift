@@ -210,9 +210,10 @@ public final class Daemon {
                 try ControlCodec.write(fd, .result(try JSONEncoder().encode(PSResult(vms: records))))
             case .run(let request):
                 let record = try boot(request)
-                let status = StatusResult(
+                var status = StatusResult(
                     name: record.name, phase: record.phase.rawValue,
                     network: record.network, ttlSeconds: record.ttlSeconds)
+                status.sandboxExpiresAtUnix = record.ttlSeconds.map { record.createdAtUnix + Int64($0) }
                 try ControlCodec.write(fd, .result(try JSONEncoder().encode(status)))
             case .exec(let command):
                 try performExec(fd, command)

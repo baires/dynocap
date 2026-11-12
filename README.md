@@ -67,7 +67,7 @@ cd microvm
 echo hello | .build/release/microvm exec demo -- cat
 .build/release/microvm exec demo -- sh -c 'echo hello'
 .build/release/microvm ps
-.build/release/microvm destroy demo
+.build/release/microvm destroy demo --force
 ```
 
 `build-macos.sh` runs `swift build -c release` and then:
@@ -201,8 +201,10 @@ even when they look like microvm flags. Invalid usage exits 2 and names the
 offending argument. Help and invalid usage do not start the daemon.
 
 `--memory` is megabytes. `--ttl` defaults to 1800 seconds and accepts 1–86400.
-The limit includes boot time and exec never renews it. `ps` shows the effective
-`NETWORK` and `TTL_SEC`; `unknown` identifies absent historical metadata.
+The limit includes boot time and exec never renews it. `ps` lists raw sandboxes
+with the same columns as `ls`, including the effective `NETWORK` and remaining
+`TTL`; `unknown` identifies absent historical metadata. Every command's output and
+`--json` support is in [docs/cli-commands.md](docs/cli-commands.md).
 `--timeout` kills the guest process group and the command exits 124. With an
 empty `--env` list the agent still sets `PATH`, `HOME`, `TERM`, and `LANG`.
 
@@ -210,7 +212,7 @@ If boot fails, the error includes the tail of `console.log`.
 
 ## Cleanup
 
-`microvm destroy demo` terminates active execs and calls
+`microvm destroy demo --force` (or `microvm rm demo --force`) terminates active execs and calls
 `VZVirtualMachine.stop` on the host. It deletes the sandbox directory only
 after confirmed teardown. Failures remain visible as `stopping` and are retried.
 

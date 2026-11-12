@@ -17,8 +17,6 @@ public struct TaskCommand: Codable, Equatable {
     public var cpus: Int?
     public var memoryMB: Int?
     public var argv: [String]?
-    /// `task exec -t`: run on a guest terminal. Local to the CLI; the exec itself uses `ExecCommand.terminal`.
-    public var terminal: Bool?
     public var requireOffline: Bool?
     public var permitFiltered: Bool?
     public var reportProgress: Bool?

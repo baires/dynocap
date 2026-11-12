@@ -105,7 +105,7 @@ final class CLIHelpTests: XCTestCase {
         XCTAssertNil(swallowed.home)
 
         let task = try parseCommand(["microvm", "task", "exec", "demo", "--"] + guest)
-        guard case .task(let taskCommand) = task.command else { return XCTFail("expected task") }
+        guard case .taskExec(let taskCommand) = task.command else { return XCTFail("expected task exec") }
         XCTAssertEqual(taskCommand.argv, guest)
     }
 

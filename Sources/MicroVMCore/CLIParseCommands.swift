@@ -30,14 +30,14 @@ func parseClone(_ args: [String], _ prefix: inout InvocationPrefix) throws -> Ta
     return command
 }
 
-func parseTask(_ args: [String], _ prefix: inout InvocationPrefix) throws -> TaskCommand {
+func parseTask(_ args: [String], _ prefix: inout InvocationPrefix) throws -> CLICommand {
     var index = 0
     while index < args.count {
         let token = args[index]
         if token == "--" || token == "-" { break }
         guard let (name, inline) = try flagParts(token), isGlobalFlag(name) else { break }
         index = try applyGlobal(name, inline, tokens: args, index: index, prefix: &prefix)
-        if prefix.help || prefix.version { return TaskCommand(op: "start") }
+        if prefix.help || prefix.version { return .task(TaskCommand(op: "start")) }
     }
     guard index < args.count else {
         throw usageError("usage: microvm task start PATH|URL | finish ID | exec ID -- COMMAND")
@@ -46,11 +46,11 @@ func parseTask(_ args: [String], _ prefix: inout InvocationPrefix) throws -> Tas
     let tail = Array(args[(index + 1)...])
     switch op {
     case "start":
-        return try parseTaskStart(tail, &prefix)
+        return .task(try parseTaskStart(tail, &prefix))
     case "finish":
-        return try parseTaskFinish(tail, &prefix)
+        return .task(try parseTaskFinish(tail, &prefix))
     case "exec":
-        return try parseTaskExec(tail, &prefix)
+        return .taskExec(try parseExec(tail, &prefix, path: ["task", "exec"]))
     default:
         if op.hasPrefix("-") { throw usageError("unknown flag \(op)") }
         throw usageError("unknown command task \(op)")
@@ -111,39 +111,6 @@ func parseTaskFinish(_ args: [String], _ prefix: inout InvocationPrefix) throws 
     return command
 }
 
-func parseTaskExec(_ args: [String], _ prefix: inout InvocationPrefix) throws -> TaskCommand {
-    var id: String?
-    var argv: [String]?
-    var terminal = false
-    var reader = OptionReader(args: args)
-    while let token = try reader.next() {
-        if prefix.help || prefix.version { return TaskCommand(op: "exec") }
-        switch token {
-        case .separator:
-            argv = reader.remaining()
-            reader.index = reader.args.count
-        case .positional(let value):
-            if id == nil {
-                id = value
-            } else {
-                throw usageError("usage: microvm task exec ID -- COMMAND")
-            }
-        case .flag(let name, let inline):
-            if try consumeGlobal(name, inline, reader: &reader, prefix: &prefix) { continue }
-            guard knownFlag(["task", "exec"], name) else { throw usageError("unknown flag \(name)") }
-            if inline != nil { throw usageError("\(name) does not take a value") }
-            terminal = true
-        }
-    }
-    if prefix.help || prefix.version { return TaskCommand(op: "exec") }
-    guard let id, let argv, !argv.isEmpty else { throw usageError("usage: microvm task exec ID -- COMMAND") }
-    var command = TaskCommand(op: "exec")
-    command.id = id
-    command.argv = argv
-    if terminal { command.terminal = true }
-    return command
-}
-
 func parseRun(_ args: [String], _ prefix: inout InvocationPrefix) throws -> RunRequest {
     var name: String?
     var cpus = 1
@@ -192,7 +159,8 @@ func parseRun(_ args: [String], _ prefix: inout InvocationPrefix) throws -> RunR
     )
 }
 
-func parseExec(_ args: [String], _ prefix: inout InvocationPrefix) throws -> ExecCommand {
+/// `exec` and `task exec` share this parser, so their flags, defaults, and errors cannot drift.
+func parseExec(_ args: [String], _ prefix: inout InvocationPrefix, path: [String] = ["exec"]) throws -> ExecCommand {
     var name: String?
     var timeout = 60
     var cwd = ""
@@ -224,7 +192,7 @@ func parseExec(_ args: [String], _ prefix: inout InvocationPrefix) throws -> Exe
                 terminal = true
                 continue
             }
-            guard knownFlag(["exec"], flag) else { throw usageError("unknown flag \(flag)") }
+            guard knownFlag(path, flag) else { throw usageError("unknown flag \(flag)") }
             switch flag {
             case "--timeout":
                 timeout = try integerFlag(flag, try reader.value(flag, inline), min: 1)
@@ -255,10 +223,11 @@ func parseExec(_ args: [String], _ prefix: inout InvocationPrefix) throws -> Exe
     if prefix.help || prefix.version {
         return ExecCommand(name: name ?? "help", argv: ["true"], env: env, cwd: cwd, timeoutSeconds: timeout, input: input)
     }
-    guard let name else { throw usageError("usage: microvm exec NAME_OR_ID -- COMMAND") }
+    let usage = path.joined(separator: " ")
+    guard let name else { throw usageError("usage: microvm \(usage) NAME_OR_ID -- COMMAND") }
     try rethrowUsage { try validateVMName(name) }
     guard !argv.isEmpty, !argv[0].isEmpty else {
-        throw usageError("exec requires a command. Example: microvm exec \(name) -- uname -a")
+        throw usageError("\(usage) requires a command. Example: microvm \(usage) \(name) -- uname -a")
     }
     var command = ExecCommand(name: name, argv: argv, env: env, cwd: cwd, timeoutSeconds: timeout, input: input)
     if terminal {

@@ -29,19 +29,20 @@ final class ExecTerminalTests: XCTestCase {
     }
 
     func testTaskExecTerminalFlag() throws {
-        for flag in ["-t", "--tty"] {
-            guard case .task(let command) = try parseCommand(["microvm", "task", "exec", flag, "demo", "--", "sh"]).command else {
+        for flag in ["-t", "--tty", "-it"] {
+            guard case .taskExec(let command) = try parseCommand(["microvm", "task", "exec", flag, "demo", "--", "sh"]).command else {
                 return XCTFail("expected task exec for \(flag)")
             }
-            XCTAssertEqual(command.terminal, true)
+            XCTAssertEqual(command.terminal, TerminalSize(rows: 0, cols: 0))
+            XCTAssertEqual(command.input, "interactive")
             XCTAssertEqual(command.argv, ["sh"])
         }
-        guard case .task(let plain) = try parseCommand(["microvm", "task", "exec", "demo", "--", "ls", "-t"]).command else {
+        guard case .taskExec(let plain) = try parseCommand(["microvm", "task", "exec", "demo", "--", "ls", "-t"]).command else {
             return XCTFail("expected task exec")
         }
         XCTAssertNil(plain.terminal)
         XCTAssertEqual(plain.argv, ["ls", "-t"])
-        for flags in [["--tty=1"], ["--no-input"], ["-i"]] {
+        for flags in [["--tty=1"], ["--no-input", "-t"], ["-i", "--no-input"]] {
             XCTAssertThrowsError(try parseCommand(["microvm", "task", "exec"] + flags + ["demo", "--", "sh"]), "\(flags)") {
                 XCTAssertEqual(($0 as? MicroVMError)?.exitCode, 2)
             }
@@ -415,7 +416,7 @@ final class ExecTerminalTests: XCTestCase {
         XCTAssertTrue(pty.waitFor("ready"), pty.text)
         let request = try XCTUnwrap(harness.backend.requests.last)
         XCTAssertEqual(request.terminal, TerminalSize(rows: 30, cols: 90))
-        XCTAssertEqual(request.cwd, "/workspace")
+        XCTAssertEqual(request.cwd, "/", "like exec, a raw sandbox starts in /; a project starts in /workspace")
         pty.type("q")
         XCTAssertEqual(pty.wait(), 0, pty.text)
         XCTAssertTrue(sameSettings(before, try pty.settings()))

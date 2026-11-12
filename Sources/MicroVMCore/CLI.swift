@@ -179,8 +179,11 @@ public enum CLICommand: Equatable {
     case run(RunRequest)
     case exec(ExecCommand)
     case shell(ExecCommand)
-    case destroy(String)
+    /// The same removal request as `rm`, without `--purge`.
+    case destroy(TaskCommand)
     case task(TaskCommand)
+    /// `task exec` parses exactly like `exec` and runs the same request.
+    case taskExec(ExecCommand)
     case runtimePrepare(RuntimePreparation)
 }
 

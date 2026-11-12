@@ -221,6 +221,31 @@ final class CLICreationTests: XCTestCase {
         try XCTUnwrap(JSONSerialization.jsonObject(with: Data(string.utf8)) as? [String: Any])
     }
 
+    func testTaskStartReportsCreationLikeClone() throws {
+        let fixture = try CreationFixture()
+        defer { fixture.stop() }
+        func deadlineFree(_ text: String) -> [String] {
+            text.split(separator: "\n").map(String.init).filter { !$0.hasPrefix("TTL:") }
+        }
+        let clone = try runCLI(fixture, ["clone", "/tmp/local project", "demo", "--ttl", "600"])
+        let start = try runCLI(fixture, ["task", "start", "/tmp/local project", "--name", "demo", "--ttl", "600"])
+        XCTAssertEqual(start.status, 0, start.errorText)
+        XCTAssertEqual(deadlineFree(start.outputText), deadlineFree(clone.outputText))
+        XCTAssertEqual(start.errorText, clone.errorText, "the same progress lines on stderr")
+        XCTAssertTrue(start.errorText.contains("Booting the sandbox"))
+
+        let cloneJSON = try object(try runCLI(fixture, ["clone", "/tmp/local project", "demo", "--json"]).outputText)
+        let startRun = try runCLI(fixture, ["task", "start", "/tmp/local project", "--name", "demo", "--json"])
+        XCTAssertEqual(startRun.stderr, Data(), "JSON suppresses progress")
+        var startJSON = try object(startRun.outputText)
+        var expected = cloneJSON
+        for key in ["sandboxExpiresAtUnix", "resultExpiresAtUnix"] {
+            XCTAssertNotNil(startJSON.removeValue(forKey: key))
+            XCTAssertNotNil(expected.removeValue(forKey: key))
+        }
+        XCTAssertEqual(NSDictionary(dictionary: startJSON), NSDictionary(dictionary: expected))
+    }
+
     private func runCLI(_ fixture: CreationFixture, _ args: [String], status: String = "0") throws -> CreationProcessResult {
         let process = Process()
         process.executableURL = fixture.binary

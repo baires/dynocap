@@ -72,10 +72,7 @@ public func formatCreationResult(
         return try managementJSON(CreationResult(descriptor: descriptor, source: source, nextCommand: next))
     }
     let runtime = descriptor.runtimes?.map { $0.name + ":" + $0.version }.joined(separator: ", ") ?? "unknown"
-    let lifetime = descriptor.sandboxExpiresAtUnix.map { deadline -> String in
-        let date = ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: TimeInterval(deadline)))
-        return (deadline > now ? formatAge(deadline - now) + " remaining" : "expired") + " (\(date))"
-    } ?? "unknown (daemon did not report a sandbox deadline)"
+    let lifetime = creationLifetime(descriptor.sandboxExpiresAtUnix, now: now)
     let lines = [
         "Created sandbox: \(descriptor.name ?? descriptor.id)",
         "ID: \(descriptor.id)", "Phase: \(descriptor.phase)",
@@ -85,6 +82,70 @@ public func formatCreationResult(
         "Next: \(next)",
     ]
     return lines.map(creationText).joined(separator: "\n") + "\n"
+}
+
+private func creationLifetime(_ deadline: Int64?, now: Int64) -> String {
+    deadline.map { deadline -> String in
+        let date = ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: TimeInterval(deadline)))
+        return (deadline > now ? formatAge(deadline - now) + " remaining" : "expired") + " (\(date))"
+    } ?? "unknown (daemon did not report a sandbox deadline)"
+}
+
+private struct RunResult: Encodable {
+    var status: StatusResult
+    var nextCommand: String
+    enum CodingKeys: String, CodingKey {
+        case name, kind, phase, network, ttlSeconds, sandboxExpiresAtUnix, onSandboxExpiration, nextCommand
+    }
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(status.name, forKey: .name)
+        try values.encode("sandbox", forKey: .kind)
+        try values.encode(status.phase, forKey: .phase)
+        try values.encode(status.network?.rawValue, forKey: .network)
+        try values.encode(status.ttlSeconds, forKey: .ttlSeconds)
+        try values.encode(status.sandboxExpiresAtUnix, forKey: .sandboxExpiresAtUnix)
+        try values.encode("discard_sandbox", forKey: .onSandboxExpiration)
+        try values.encode(nextCommand, forKey: .nextCommand)
+    }
+}
+
+/// `run` reports a raw sandbox the way clone reports a project sandbox.
+public func formatRunResult(_ status: StatusResult, home: URL, output: CLIOutput, now: Int64) throws -> String {
+    let next = "microvm --home \(shellQuote(home.path)) exec \(shellQuote(status.name)) -- uname -a"
+    if output == .json {
+        return try managementJSON(RunResult(status: status, nextCommand: next))
+    }
+    let lines = [
+        "Created raw sandbox: \(status.name)", "Phase: \(status.phase)",
+        "Network: \(status.network?.rawValue ?? "unknown")", "TTL: \(creationLifetime(status.sandboxExpiresAtUnix, now: now))",
+        "A raw sandbox has no project result to export; expiration or removal discards everything in it.",
+        "Next: \(next)",
+    ]
+    return lines.map(creationText).joined(separator: "\n") + "\n"
+}
+
+private struct RemovalResult: Encodable {
+    var target: String
+    var removed = true
+    var purged: Bool
+}
+
+/// `rm` and `destroy` send the same request and print the same result.
+public func formatRemovalResult(target: String, purged: Bool, output: CLIOutput) throws -> String {
+    if output == .json { return try managementJSON(RemovalResult(target: target, purged: purged)) }
+    let detail = purged ? "; deleted its retained record, logs, and result" : ""
+    return creationText("removed \(target)\(detail)") + "\n"
+}
+
+private struct VersionResult: Encodable {
+    var version = MicroVMInfo.version
+    var guestArch = HostArch.guest
+    var virtualizationAvailable = MicroVMInfo.virtualizationAvailable
+}
+
+public func formatVersion(output: CLIOutput) throws -> String {
+    output == .json ? try managementJSON(VersionResult()) : MicroVMInfo.describe()
 }
 
 private struct RuntimePreparationResult: Encodable {

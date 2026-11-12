@@ -30,6 +30,8 @@ export type FakeDaemon = {
   home: string;
   execs: FakeExec[];
   runs: Record<string, unknown>[];
+  /** Destroy request bodies, in order. */
+  destroys: Record<string, unknown>[];
   close: () => Promise<void>;
 };
 
@@ -48,6 +50,7 @@ export async function fakeDaemon(
   const sandboxes = new Map<string, Recorded>();
   const execs: FakeExec[] = [];
   const runs: Record<string, unknown>[] = [];
+  const destroys: Record<string, unknown>[] = [];
   const openExecs = new Map<net.Socket, Buffer[]>();
   const server = net.createServer((socket) => {
     const reader = new FrameReader();
@@ -64,7 +67,17 @@ export async function fakeDaemon(
         return;
       }
       for (const body of bodies)
-        handle(socket, body, sandboxes, execs, runs, behavior, home, openExecs);
+        handle(
+          socket,
+          body,
+          sandboxes,
+          execs,
+          runs,
+          destroys,
+          behavior,
+          home,
+          openExecs
+        );
     });
   });
   await new Promise<void>((resolve, reject) => {
@@ -75,6 +88,7 @@ export async function fakeDaemon(
     home,
     execs,
     runs,
+    destroys,
     close: () =>
       new Promise((resolve) => {
         server.close(() => {
@@ -104,6 +118,7 @@ function handle(
   sandboxes: Map<string, Recorded>,
   execs: FakeExec[],
   runs: Record<string, unknown>[],
+  destroys: Record<string, unknown>[],
   behavior: Partial<FakeBehavior>,
   home: string,
   openExecs: Map<net.Socket, Buffer[]>
@@ -339,6 +354,7 @@ function handle(
         return;
       }
       case 4: {
+        destroys.push(json());
         const name = String(json().name);
         if (!sandboxes.has(name)) {
           writeFrame(socket, 20, Buffer.from(`no VM named ${name}`));

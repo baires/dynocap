@@ -109,6 +109,20 @@ only to registry.npmjs.org and, for a repository URL, that URL's host. TTL defau
 1800 seconds, including boot, from 1 to 86400. There is no unlimited lifetime or automatic renewal.
 """
 
+/// `exec` and `task exec` accept exactly these flags, parsed by the same function.
+private let execFlags = [
+    CLIFlag(name: "--timeout", value: "SEC", summary: "Command deadline in seconds. The default is 60. Timeout exits 124."),
+    CLIFlag(name: "--cwd", value: "DIR", summary: "Guest working directory. Project sandboxes use /workspace; raw sandboxes use /."),
+    CLIFlag(name: "--env", value: "KEY=VAL", summary: "Environment entry for the guest command. Repeat for more than one."),
+    CLIFlag(name: "-i", value: nil, summary: "Forward host stdin until EOF, including when stdin is a terminal."),
+    CLIFlag(name: "--interactive", value: nil, summary: "Same as -i. This does not allocate a guest terminal; use -t for that."),
+    CLIFlag(name: "--no-input", value: nil, summary: "Do not read host stdin. The guest receives immediate EOF."),
+    CLIFlag(name: "-t", value: nil, summary: "Run on a guest terminal sized like this one. Stdin must be a terminal; implies -i."),
+    CLIFlag(name: "--tty", value: nil, summary: "Same as -t. Output is one combined terminal stream, not separate stdout and stderr."),
+]
+
+private let jsonFlag = CLIFlag(name: "--json", value: nil, summary: "Print the documented result object on stdout; errors use the JSON error object.")
+
 let cliCommandSpecs: [CLICommandSpec] = [
     CLICommandSpec(
         path: ["runtime", "prepare"],
@@ -240,16 +254,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
         group: .primary,
         summary: "Run a command in a sandbox.",
         usage: "microvm exec NAME_OR_ID [OPTIONS] [--] COMMAND [ARGS...]",
-        flags: [
-            CLIFlag(name: "--timeout", value: "SEC", summary: "Command deadline in seconds. The default is 60. Timeout exits 124."),
-            CLIFlag(name: "--cwd", value: "DIR", summary: "Guest working directory. Project sandboxes use /workspace; raw sandboxes use /."),
-            CLIFlag(name: "--env", value: "KEY=VAL", summary: "Environment entry for the guest command. Repeat for more than one."),
-            CLIFlag(name: "-i", value: nil, summary: "Forward host stdin until EOF, including when stdin is a terminal."),
-            CLIFlag(name: "--interactive", value: nil, summary: "Same as -i. This does not allocate a guest terminal; use -t for that."),
-            CLIFlag(name: "--no-input", value: nil, summary: "Do not read host stdin. The guest receives immediate EOF."),
-            CLIFlag(name: "-t", value: nil, summary: "Run on a guest terminal sized like this one. Stdin must be a terminal; implies -i."),
-            CLIFlag(name: "--tty", value: nil, summary: "Same as -t. Output is one combined terminal stream, not separate stdout and stderr."),
-        ],
+        flags: execFlags,
         examples: [
             "microvm exec demo --timeout 30 --cwd /workspace --env CI=1 -- npm test -- --runInBand",
             "microvm exec demo -- uname -a",
@@ -324,8 +329,9 @@ let cliCommandSpecs: [CLICommandSpec] = [
         path: ["rm"],
         group: .primary,
         summary: "Remove a sandbox and release its name.",
-        usage: "microvm rm NAME_OR_ID [--force] [--purge]",
+        usage: "microvm rm NAME_OR_ID [--force] [--purge] [--json]",
         flags: [
+            jsonFlag,
             CLIFlag(
                 name: "--force",
                 value: nil,
@@ -341,6 +347,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
             "microvm rm demo",
             "microvm rm demo --force",
             "microvm rm demo --purge",
+            "microvm rm demo --force --json",
         ],
         discussion: """
         A live sandbox requires --force because removal discards unexported work. The daemon checks the phase when \
@@ -348,15 +355,17 @@ let cliCommandSpecs: [CLICommandSpec] = [
         finish versus discard. Finished, failed, and interrupted sandboxes can be removed without --force. \
         --purge separately deletes the retained result and does not imply --force. There is no confirmation prompt. \
         A failed teardown keeps the record so removal can be retried. See docs/cli-removal.md.
-        """
+        """,
+        allowsJSON: true
     ),
     CLICommandSpec(
         path: ["run"],
         group: .advanced,
         summary: "Start a raw sandbox that is not a project task.",
         usage: "microvm run --name NAME [--cpus N] [--memory MB] [--ttl SEC] "
-            + "[--network none|nat|filtered] [--boot-timeout SEC]",
+            + "[--network none|nat|filtered] [--boot-timeout SEC] [--json]",
         flags: [
+            jsonFlag,
             CLIFlag(name: "--name", value: "NAME", summary: "Sandbox name. Required."),
             CLIFlag(name: "--cpus", value: "N", summary: "Guest CPUs. The default is 1."),
             CLIFlag(name: "--memory", value: "MB", summary: "Guest memory in megabytes, at least 128. The default is 1024."),
@@ -366,26 +375,47 @@ let cliCommandSpecs: [CLICommandSpec] = [
         ],
         examples: [
             "microvm run --name demo --cpus 2 --memory 1024 --ttl 1800 --network none --boot-timeout 60",
+            "microvm run --name demo --json",
         ],
-        discussion: sandboxLifetime
+        discussion: sandboxLifetime + " Output reports the phase, network, remaining TTL, and a next exec command, "
+            + "like clone. A raw sandbox has no project result: expiry or removal discards everything in it. "
+            + "Human progress uses stderr; JSON suppresses it. See docs/cli-creation.md.",
+        allowsJSON: true
     ),
     CLICommandSpec(
         path: ["ps"],
         group: .advanced,
         summary: "List raw sandboxes.",
-        usage: "microvm ps",
-        flags: [],
-        examples: ["microvm ps"],
-        discussion: "ps shows raw sandbox records. Use ls for project sandboxes and retained results."
+        usage: "microvm ps [--json]",
+        flags: [CLIFlag(name: "--json", value: nil, summary: "Print the ls JSON array, limited to raw sandboxes.")],
+        examples: ["microvm ps", "microvm ps --json"],
+        discussion: """
+        ps is ls limited to raw sandboxes (kind sandbox): the same columns, deadlines, and JSON schema. \
+        Use ls for project sandboxes and retained results, and inspect NAME for a raw sandbox's failure message. \
+        See docs/cli-json.md.
+        """,
+        allowsJSON: true
     ),
     CLICommandSpec(
         path: ["destroy"],
         group: .advanced,
-        summary: "Destroy a raw sandbox.",
-        usage: "microvm destroy NAME",
-        flags: [],
-        examples: ["microvm destroy demo"],
-        discussion: "destroy stops a raw sandbox immediately. It refuses a live project sandbox; use finish to export that work or rm --force to discard it."
+        summary: "Destroy a sandbox; the same removal as rm, without --purge.",
+        usage: "microvm destroy NAME_OR_ID [--force] [--json]",
+        flags: [
+            jsonFlag,
+            CLIFlag(
+                name: "--force",
+                value: nil,
+                summary: "Discard a live sandbox and its unexported work. Required while the sandbox is starting, running, or finalizing."
+            ),
+        ],
+        examples: ["microvm destroy demo --force", "microvm destroy demo --force --json"],
+        discussion: """
+        destroy sends the same request as rm and follows the same removal intent: the daemon refuses a live sandbox, \
+        raw or project, unless --force is given, and a stopped one is removed without it. Retained results are kept; \
+        use rm --purge to delete them. Output matches rm. See docs/cli-removal.md.
+        """,
+        allowsJSON: true
     ),
     CLICommandSpec(
         path: ["daemon"],
@@ -394,7 +424,8 @@ let cliCommandSpecs: [CLICommandSpec] = [
         usage: "microvm daemon",
         flags: [],
         examples: ["microvm daemon"],
-        discussion: "Commands that need the daemon start it automatically. daemon keeps it in the foreground for debugging."
+        discussion: "Commands that need the daemon start it automatically. daemon keeps it in the foreground for debugging. "
+            + "It has no result to print until it stops, so --json is unsupported; its log goes to stdout and stderr."
     ),
     CLICommandSpec(
         path: ["task", "start"],
@@ -402,6 +433,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
         summary: "Start a project task from a directory or repository URL.",
         usage: "microvm task start PATH|URL [OPTIONS]",
         flags: [
+            CLIFlag(name: "--json", value: nil, summary: "Print the clone result object; suppress human progress."),
             CLIFlag(name: "--name", value: "NAME", summary: "Friendly name. task- and runtime- prefixes are reserved."),
             CLIFlag(name: "--runtime", value: "NAME:VERSION", summary: "Runtime the sandbox must use, such as node:22."),
             CLIFlag(name: "--network", value: "none|nat|filtered", summary: "Sandbox network. The default is none."),
@@ -415,24 +447,31 @@ let cliCommandSpecs: [CLICommandSpec] = [
         examples: [
             "microvm task start /tmp/project --name demo --runtime node:22 --network none --ttl 1800 "
                 + "--cpus 2 --memory 1024 --ref main --ssh-key /tmp/key --git-token-env MICROVM_EXAMPLE_TOKEN",
+            "microvm task start /tmp/project --name demo --json",
         ],
-        discussion: networkChoice + " Prefer clone when choosing a name up front."
+        discussion: networkChoice + " Creation, progress, output, and JSON are the same as clone; see docs/cli-creation.md."
+            + " Prefer clone when choosing a name up front.",
+        allowsJSON: true
     ),
     CLICommandSpec(
         path: ["task", "exec"],
         group: .advanced,
-        summary: "Run a command in a project task.",
-        usage: "microvm task exec ID [-t] -- COMMAND [ARGS...]",
-        flags: [
-            CLIFlag(name: "-t", value: nil, summary: "Run on a guest terminal, as exec -t. Stdin must be a terminal."),
-            CLIFlag(name: "--tty", value: nil, summary: "Same as -t."),
+        summary: "Run a command in a project task; the same as exec.",
+        usage: "microvm task exec ID [OPTIONS] [--] COMMAND [ARGS...]",
+        flags: execFlags,
+        examples: [
+            "microvm task exec demo -- npm test",
+            "microvm task exec demo --timeout 300 --cwd /workspace --env CI=1 -- npm test",
+            "microvm task exec -i demo -- cat",
+            "microvm task exec --interactive demo -- cat",
+            "microvm task exec --no-input demo -- true",
+            "microvm task exec -t demo -- sh",
+            "microvm task exec --tty demo -- top",
         ],
-        examples: ["microvm task exec demo -- npm test", "microvm task exec -t demo -- sh", "microvm task exec --tty demo -- top"],
         discussion: """
-        Everything after -- is the guest command and is preserved unchanged, including tokens that look \
-        like microvm flags. Use exec to set the working directory, environment, or command timeout. \
-        -t behaves as it does for exec: a controlling guest terminal, raw host terminal, forwarded resizes, \
-        and one combined transcript.
+        task exec takes exactly the flags of exec, with the same defaults: a 60-second --timeout, /workspace for \
+        a project sandbox, piped stdin streamed, separate stdout and stderr unless -t, and the guest's exit status. \
+        Everything after -- is the guest command and is preserved unchanged. See docs/cli-exec.md.
         """
     ),
     CLICommandSpec(
@@ -449,10 +488,12 @@ let cliCommandSpecs: [CLICommandSpec] = [
         path: ["version"],
         group: .advanced,
         summary: "Print version and host virtualization support.",
-        usage: "microvm version",
-        flags: [],
-        examples: ["microvm version", "microvm --version"],
-        discussion: "The version flag is also accepted before or after another command and then exits without running it."
+        usage: "microvm version [--json]",
+        flags: [CLIFlag(name: "--json", value: nil, summary: "Print version, guest architecture, and virtualization support as JSON.")],
+        examples: ["microvm version", "microvm --version", "microvm version --json"],
+        discussion: "The version flag is also accepted before or after another command and then exits without running it. "
+            + "With --json, either form prints the version object. See docs/cli-commands.md.",
+        allowsJSON: true
     ),
     CLICommandSpec(
         path: ["help"],
@@ -461,7 +502,8 @@ let cliCommandSpecs: [CLICommandSpec] = [
         usage: "microvm help [COMMAND]",
         flags: [],
         examples: ["microvm help", "microvm help clone", "microvm clone --help"],
-        discussion: "microvm help COMMAND and microvm COMMAND --help show the same command help."
+        discussion: "microvm help COMMAND and microvm COMMAND --help show the same command help. Help is text only; "
+            + "--json is unsupported. See docs/cli-commands.md for every command's output and JSON support."
     ),
 ]
 

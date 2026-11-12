@@ -30,7 +30,10 @@ final class GitStyleCLITests: XCTestCase {
         XCTAssertEqual(finish.id, "demo")
         XCTAssertEqual(finish.op, "finish")
         XCTAssertEqual(try parseCommand(["microvm", "ps"]).command, .ps)
-        XCTAssertEqual(try parseCommand(["microvm", "destroy", "demo"]).command, .destroy("demo"))
+        guard case .destroy(let destroy) = try parseCommand(["microvm", "destroy", "demo"]).command else { return XCTFail("expected destroy") }
+        XCTAssertEqual(destroy.op, "remove", "destroy is rm's removal request")
+        XCTAssertEqual(destroy.id, "demo")
+        XCTAssertEqual(destroy.force, false)
         guard
             case .exec(let exec) = try parseCommand([
                 "microvm", "exec", "demo", "--cwd", "/tmp", "--env", "CI=1", "--timeout", "12", "--", "false",

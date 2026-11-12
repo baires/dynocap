@@ -59,34 +59,9 @@ struct Main {
             } else {
                 print(formatSandboxList(entries, now: unixNow(), width: listingWidth()), terminator: "")
             }
-        case .managed(let command):
-            let paths = try ready(invocation)
-            let client = DaemonClient(socketPath: paths.socket.path)
-            try client.requireTaskManagement()
-            let progress: ((String) -> Void)? = invocation.output == .human && command.op == "start" ? { fputs($0 + "\n", stderr) } : nil
-            let data = try client.task(command, onProgress: progress)
-            if command.op == "start" {
-                let descriptor = try JSONDecoder().decode(TaskDescriptor.self, from: data)
-                print(try formatCreationResult(
-                    descriptor, command: command, home: paths.home, output: invocation.output, now: unixNow()), terminator: "")
-            } else if command.op == "inspect" {
-                let inspection = try JSONDecoder().decode(SandboxInspection.self, from: data)
-                print(try formatInspection(inspection, output: invocation.output, now: unixNow(), arguments: args), terminator: "")
-            } else if command.op == "finish" {
-                let descriptor = try JSONDecoder().decode(TaskDescriptor.self, from: data)
-                print(try formatFinishResult(descriptor, output: invocation.output, now: unixNow()), terminator: "")
-            } else if command.op == "diff" {
-                let preview = try JSONDecoder().decode(TaskPreview.self, from: data)
-                let file = try FileHandle(forReadingFrom: URL(fileURLWithPath: preview.patchPath))
-                defer { try? file.close() }
-                while let chunk = try file.read(upToCount: 64 << 10), !chunk.isEmpty {
-                    try FileHandle.standardOutput.write(contentsOf: chunk)
-                }
-            } else if command.op == "remove" {
-                print("removed \(command.id ?? "")")
-            } else {
-                print(String(data: data, encoding: .utf8) ?? "")
-            }
+        case .managed(let command), .task(let command), .destroy(let command):
+            // Advanced forms (task start, task finish, destroy) run the same operations as clone, finish, and rm.
+            try manage(command, invocation, args)
         case .runtimePrepare(let preparation):
             let paths = try ready(invocation)
             try DaemonClient(socketPath: paths.socket.path).requireTasks()
@@ -109,35 +84,10 @@ struct Main {
                 throw failure
             }
             print(try formatRuntimePreparationResult(artifact, home: paths.home, log: log, output: invocation.output), terminator: "")
-        case .task(let command):
-            var request: ExecCommand?
-            if command.op == "exec", let id = command.id, let argv = command.argv {
-                var exec = ExecCommand(name: id, argv: argv, env: [], cwd: "/workspace", timeoutSeconds: 300)
-                if command.terminal == true {
-                    exec.terminal = TerminalSize(rows: 0, cols: 0)
-                    exec.input = "interactive"
-                }
-                try requireTerminalInput(exec, stdinIsTerminal: isatty(STDIN_FILENO) == 1)
-                request = exec
-            }
-            let paths = try ready(invocation)
-            let client = DaemonClient(socketPath: paths.socket.path)
-            if var request {
-                request.input = resolveExecInput(requested: request.input, stdinIsTerminal: isatty(STDIN_FILENO) == 1)
-                let status = try foregroundExec(client: client, command: request)
-                exit(status)
-            }
-            let data = try client.task(command)
-            if command.op == "finish" {
-                let descriptor = try JSONDecoder().decode(TaskDescriptor.self, from: data)
-                print(try formatFinishResult(descriptor, output: invocation.output, now: unixNow()), terminator: "")
-            } else {
-                print(String(data: data, encoding: .utf8) ?? "")
-            }
         case .help(let topic):
             print(commandHelp(topic))
         case .version:
-            print(MicroVMInfo.describe(), terminator: "")
+            print(try formatVersion(output: invocation.output), terminator: "")
         case .daemon:
             if ProcessInfo.processInfo.environment["MICROVM_DETACH"] == "1" {
                 _ = setsid()
@@ -148,13 +98,20 @@ struct Main {
             daemon.runForever()
         case .ps:
             let paths = try ready(invocation)
-            let records = try DaemonClient(socketPath: paths.socket.path).ps()
-            print(formatProcessTable(records, now: unixNow()), terminator: "")
+            // ps is ls limited to raw sandboxes, so both share one listing and JSON schema.
+            let data = try DaemonClient(socketPath: paths.socket.path).task(TaskCommand(op: "entries"))
+            let entries = try JSONDecoder().decode([ManagedEntry].self, from: data).filter { $0.kind == "sandbox" }
+            if invocation.output == .json {
+                print(try formatSandboxListJSON(entries), terminator: "")
+            } else {
+                print(formatSandboxList(entries, now: unixNow(), width: listingWidth(), empty: "No raw sandboxes."), terminator: "")
+            }
         case .run(let request):
             let paths = try ready(invocation)
+            if invocation.output == .human { fputs(CreationStage.booting.rawValue + "\n", stderr) }
             let status = try DaemonClient(socketPath: paths.socket.path).run(request)
-            print("\(status.name) \(status.phase)")
-        case .exec(let command):
+            print(try formatRunResult(status, home: paths.home, output: invocation.output, now: unixNow()), terminator: "")
+        case .exec(let command), .taskExec(let command):
             try requireTerminalInput(command, stdinIsTerminal: isatty(STDIN_FILENO) == 1)
             let paths = try ready(invocation)
             var command = command
@@ -167,10 +124,38 @@ struct Main {
             let status = try foregroundExec(client: DaemonClient(socketPath: paths.socket.path), command: command)
             fputs(shellExitNotice(command.name), stderr)
             exit(status)
-        case .destroy(let name):
-            let paths = try ready(invocation)
-            try DaemonClient(socketPath: paths.socket.path).destroy(name)
-            print("destroyed \(name)")
+        }
+    }
+
+    /// Management operations shared by their primary and advanced forms.
+    static func manage(_ command: TaskCommand, _ invocation: CLIInvocation, _ args: [String]) throws {
+        let paths = try ready(invocation)
+        let client = DaemonClient(socketPath: paths.socket.path)
+        try client.requireTaskManagement()
+        let progress: ((String) -> Void)? = invocation.output == .human && command.op == "start" ? { fputs($0 + "\n", stderr) } : nil
+        let data = try client.task(command, onProgress: progress)
+        switch command.op {
+        case "start":
+            let descriptor = try JSONDecoder().decode(TaskDescriptor.self, from: data)
+            print(try formatCreationResult(
+                descriptor, command: command, home: paths.home, output: invocation.output, now: unixNow()), terminator: "")
+        case "inspect":
+            let inspection = try JSONDecoder().decode(SandboxInspection.self, from: data)
+            print(try formatInspection(inspection, output: invocation.output, now: unixNow(), arguments: args), terminator: "")
+        case "finish":
+            let descriptor = try JSONDecoder().decode(TaskDescriptor.self, from: data)
+            print(try formatFinishResult(descriptor, output: invocation.output, now: unixNow()), terminator: "")
+        case "diff":
+            let preview = try JSONDecoder().decode(TaskPreview.self, from: data)
+            let file = try FileHandle(forReadingFrom: URL(fileURLWithPath: preview.patchPath))
+            defer { try? file.close() }
+            while let chunk = try file.read(upToCount: 64 << 10), !chunk.isEmpty {
+                try FileHandle.standardOutput.write(contentsOf: chunk)
+            }
+        case "remove":
+            print(try formatRemovalResult(target: command.id ?? "", purged: command.purge == true, output: invocation.output), terminator: "")
+        default:
+            print(String(data: data, encoding: .utf8) ?? "")
         }
     }
 

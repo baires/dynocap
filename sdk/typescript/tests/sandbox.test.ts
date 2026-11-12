@@ -57,6 +57,9 @@ test("create, exec, list, and destroy a sandbox", async () => {
 
     await sandbox.destroy();
     assert.deepEqual(await Sandbox.list({ home: daemon.home }), []);
+    // Unlike the CLI's destroy, Sandbox.destroy sends the daemon's raw destroy request
+    // without a force flag; the call itself is the explicit discard (docs/sdk-and-mcp.md).
+    assert.deepEqual(daemon.destroys, [{ name: "demo" }]);
   } finally {
     await daemon.close();
   }

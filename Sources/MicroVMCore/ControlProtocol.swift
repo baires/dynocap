@@ -221,6 +221,8 @@ public struct StatusResult: Codable, Equatable {
 
     public var network: NetworkMode?
     public var ttlSeconds: Int?
+    /// Creation time plus TTL. Older daemons omit it.
+    public var sandboxExpiresAtUnix: Int64?
 
     public init(name: String, phase: String, network: NetworkMode? = nil, ttlSeconds: Int? = nil) {
         self.network = network

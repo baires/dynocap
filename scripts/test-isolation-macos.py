@@ -193,8 +193,17 @@ def main():
                 assert (kept / "changes.patch").read_text() == "kept"
                 print("PASS: interrupted creation cleans up or reports microvm rm cancelled --force", flush=True)
 
-                cli("destroy", "offline")
-                cli("destroy", "online")
+                listed = json.loads(cli("ps", "--json").stdout)
+                assert [(entry["name"], entry["kind"]) for entry in listed] == [
+                    ("offline", "sandbox"), ("online", "sandbox")], listed
+                refused = cli("destroy", "offline", check=False)
+                assert refused.returncode == 1 and "--force" in refused.stderr, refused
+                assert cli("exec", "offline", "--", "echo", "kept").stdout == "kept\n"
+                destroyed = json.loads(cli("destroy", "offline", "--force", "--json").stdout)
+                assert destroyed == {"target": "offline", "removed": True, "purged": False}, destroyed
+                cli("destroy", "online", "--force")
+                assert json.loads(cli("ps", "--json").stdout) == []
+                print("PASS: ps lists raw sandboxes; destroy refuses a live sandbox without --force", flush=True)
             except BaseException:
                 log.flush()
                 print((home / "smoke-daemon.log").read_text())

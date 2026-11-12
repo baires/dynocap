@@ -17,10 +17,14 @@ final class IsolationPolicyTests: XCTestCase {
         XCTAssertEqual(online.ttlSeconds, 86400)
         let records = try fixture.client.ps()
         XCTAssertEqual(records.first { $0.name == "offline" }?.network, NetworkMode.none)
-        let table = formatProcessTable(records, now: unixNow())
+        XCTAssertEqual(records.first { $0.name == "offline" }?.ttlSeconds, 1800)
+        // ps renders the shared listing, which shows each raw sandbox's network and remaining TTL.
+        let data = try fixture.client.task(TaskCommand(op: "entries"))
+        let table = formatSandboxList(try JSONDecoder().decode([ManagedEntry].self, from: data), now: unixNow())
         XCTAssertTrue(table.contains("NETWORK"))
-        XCTAssertTrue(table.contains("TTL_SEC"))
-        XCTAssertTrue(table.contains("1800"))
+        XCTAssertTrue(table.contains("TTL"))
+        XCTAssertTrue(table.contains("nat"))
+        XCTAssertTrue(table.contains("m left") || table.contains("h left"), table)
         XCTAssertEqual(try IsolationPolicy.ttl(1), 1)
         XCTAssertEqual(try IsolationPolicy.ttl(nil), 1800)
         for value in [0, -1, 86401, Int.max] { XCTAssertThrowsError(try IsolationPolicy.ttl(value)) }
@@ -63,7 +67,10 @@ final class IsolationPolicyTests: XCTestCase {
         let json = Data("{\"name\":\"old\",\"phase\":\"running\",\"cpus\":1,\"memoryMB\":256,\"daemonToken\":\"dead\",\"createdAtUnix\":1}".utf8)
         let historical = try JSONDecoder().decode(VMRecord.self, from: json)
         XCTAssertNil(historical.network)
-        XCTAssertTrue(formatProcessTable([historical], now: 2).contains("unknown"))
+        let entry = ManagedEntry(
+            id: historical.name, name: historical.name, kind: "sandbox", phase: historical.phase.rawValue, runtime: "minimal",
+            network: historical.network)
+        XCTAssertTrue(formatSandboxList([entry], now: 2).contains("unknown"))
     }
 
     func testExpiryTerminatesActiveExecAndRejectsNewExec() throws {
