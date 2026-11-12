@@ -257,6 +257,8 @@ public struct PolicyCapabilities: Codable {
     public var execStreamVersion: Int? = 1
     public var execSignalVersion: Int? = 1
     public var execTerminalVersion: Int? = 1
+    /// 1 means `timeoutSeconds: 0` runs without a command deadline. Older daemons time out immediately.
+    public var execUntimedVersion: Int? = 1
 }
 
 public func validateExecTerminalCapability(_ data: Data) throws {
@@ -267,6 +269,17 @@ public func validateExecTerminalCapability(_ data: Data) throws {
             "daemon cannot allocate guest terminals; rebuild and restart it",
             code: .incompatibleDaemon,
             recovery: "Rebuild microvm, stop the running daemon, and retry; or drop --tty to run without a terminal.")
+    }
+}
+
+public func validateExecUntimedCapability(_ data: Data) throws {
+    guard let capability = try? JSONDecoder().decode(PolicyCapabilities.self, from: data),
+        capability.execUntimedVersion == 1
+    else {
+        throw MicroVMError(
+            "daemon cannot run a command without a deadline; rebuild and restart it",
+            code: .incompatibleDaemon,
+            recovery: "Rebuild microvm, stop the running daemon, and retry; or use exec -t with --timeout.")
     }
 }
 

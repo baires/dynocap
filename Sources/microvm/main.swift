@@ -161,6 +161,12 @@ struct Main {
             command.input = resolveExecInput(requested: command.input, stdinIsTerminal: isatty(STDIN_FILENO) == 1)
             let status = try foregroundExec(client: DaemonClient(socketPath: paths.socket.path), command: command)
             exit(status)
+        case .shell(let command):
+            try requireShellTerminal(stdinIsTerminal: isatty(STDIN_FILENO) == 1, stdoutIsTerminal: isatty(STDOUT_FILENO) == 1)
+            let paths = try ready(invocation)
+            let status = try foregroundExec(client: DaemonClient(socketPath: paths.socket.path), command: command)
+            fputs(shellExitNotice(command.name), stderr)
+            exit(status)
         case .destroy(let name):
             let paths = try ready(invocation)
             try DaemonClient(socketPath: paths.socket.path).destroy(name)

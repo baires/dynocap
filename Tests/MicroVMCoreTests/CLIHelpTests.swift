@@ -173,7 +173,7 @@ final class CLIHelpTests: XCTestCase {
     }
 
     private func assertNoUnimplementedCommands(_ text: String) {
-        for hidden in ["microvm shell", "microvm fork"] {
+        for hidden in ["microvm fork"] {
             XCTAssertFalse(text.contains(hidden), hidden)
         }
     }

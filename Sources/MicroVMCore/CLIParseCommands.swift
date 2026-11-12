@@ -269,6 +269,44 @@ func parseExec(_ args: [String], _ prefix: inout InvocationPrefix) throws -> Exe
     return command
 }
 
+/// Runs root's shell from /etc/passwd when it is executable and not a refusal, otherwise /bin/sh.
+/// It is not started as a login shell, so a profile cannot replace the exec environment.
+let guestShellArgv = [
+    "/bin/sh", "-c",
+    #"shell=$(awk -F: '$1 == "root" { print $7; exit }' /etc/passwd 2>/dev/null); "#
+        + #"case "$shell" in */nologin | */false) shell= ;; esac; [ -x "$shell" ] || shell=/bin/sh; exec "$shell""#,
+    "microvm-shell",
+]
+
+func parseShell(_ args: [String], _ prefix: inout InvocationPrefix) throws -> ExecCommand {
+    var name: String?
+    var reader = OptionReader(args: args)
+    while let token = try reader.next() {
+        if prefix.help || prefix.version { break }
+        switch token {
+        case .separator:
+            throw usageError("shell does not take a command; use microvm exec -t NAME -- COMMAND")
+        case .positional(let value):
+            guard name == nil else {
+                throw usageError("unexpected argument \(value); use microvm exec -t NAME -- COMMAND to run a command")
+            }
+            name = value
+        case .flag(let flag, let inline):
+            if try consumeGlobal(flag, inline, reader: &reader, prefix: &prefix) { continue }
+            throw usageError("unknown flag \(flag)")
+        }
+    }
+    let target = name ?? "help"
+    if !(prefix.help || prefix.version) {
+        guard name != nil else { throw usageError("usage: microvm shell NAME_OR_ID") }
+        try rethrowUsage { try validateVMName(target) }
+    }
+    // No command deadline: leaving the shell or the sandbox TTL ends it. The CLI fills in the host size.
+    var command = ExecCommand(name: target, argv: guestShellArgv, env: [], cwd: "", timeoutSeconds: 0, input: "interactive")
+    command.terminal = TerminalSize(rows: 0, cols: 0)
+    return command
+}
+
 func applyStartFlag(_ command: inout TaskCommand, _ flag: String, _ raw: String, allowName: Bool) throws {
     switch flag {
     case "--name":

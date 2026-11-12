@@ -149,6 +149,7 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
             emit(.failed("guest agent cannot allocate terminals; rebuild the guest image"))
             return
         }
+        // Zero starts no guest timer; the sandbox TTL still ends the command.
         let bounded = max(0, min(request.timeoutSeconds, 24 * 60 * 60))
         let timeoutMS = UInt32(bounded * 1000)
         let start = ExecStart(

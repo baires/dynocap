@@ -410,6 +410,9 @@ public final class Daemon {
         if let input = command.input, !["none", "pipe", "interactive"].contains(input) {
             throw MicroVMError("unsupported exec input \(input)")
         }
+        guard command.timeoutSeconds >= 0 else {
+            throw MicroVMError("exec timeoutSeconds must be 0 (no command deadline) or more")
+        }
         if let task = try tasks.records().first(where: { $0.id == command.name || $0.name == command.name }) {
             command.name = task.id
             if command.cwd.isEmpty { command.cwd = "/workspace" }
@@ -556,8 +559,9 @@ public final class Daemon {
                     fd: fd, name: command.name, id: id, state: state, sem: sem, streaming: streaming, send: send)
             }
         }
+        // Zero means no command deadline; the sandbox TTL still ends the command.
         let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global())
-        timer.schedule(deadline: .now() + .seconds(command.timeoutSeconds))
+        timer.schedule(deadline: command.timeoutSeconds == 0 ? .distantFuture : .now() + .seconds(command.timeoutSeconds))
         timer.setEventHandler { [weak self] in
             guard let self = self else { return }
             if state.markFinished() {
@@ -1002,6 +1006,7 @@ public struct DaemonClient {
         let streaming = command.input == "pipe" || command.input == "interactive" || command.terminal != nil
         if streaming { try requireExecStream() }
         if command.terminal != nil { try requireExecTerminal() }
+        if command.timeoutSeconds == 0 { try requireExecUntimed() }
         let fd = try connect()
         let fdLock = NSLock()
         // Host signal handlers can still fire after this call returns; they must not touch a reused fd number.
@@ -1090,6 +1095,12 @@ public struct DaemonClient {
         let reply = try roundTrip(.ping)
         guard case .result(let data) = reply else { throw messageError(reply) }
         try validateExecTerminalCapability(data)
+    }
+
+    private func requireExecUntimed() throws {
+        let reply = try roundTrip(.ping)
+        guard case .result(let data) = reply else { throw messageError(reply) }
+        try validateExecUntimedCapability(data)
     }
 
     private func requireExecStream() throws {

@@ -71,6 +71,9 @@ public func parseCommand(_ args: [String]) throws -> CLIInvocation {
     case "exec":
         let command = try parseExec(commandArgs, &prefix)
         return try finishParse(prefix, ["exec"], .exec(command))
+    case "shell":
+        let command = try parseShell(commandArgs, &prefix)
+        return try finishParse(prefix, ["shell"], .shell(command))
     default:
         throw usageError("unknown command \(sub)")
     }

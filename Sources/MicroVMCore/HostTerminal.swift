@@ -106,5 +106,21 @@ public func requireTerminalInput(_ command: ExecCommand, stdinIsTerminal: Bool) 
         recovery: "Run the command from an interactive terminal, or drop -t to pipe input with stdout and stderr kept separate.")
 }
 
+/// `shell` is for a person at a terminal. Without one there is no prompt to read or keystrokes
+/// to send, so scripts are pointed at exec before any daemon work.
+public func requireShellTerminal(stdinIsTerminal: Bool, stdoutIsTerminal: Bool) throws {
+    guard !stdinIsTerminal || !stdoutIsTerminal else { return }
+    let missing = stdinIsTerminal ? "stdout is not a terminal" : (stdoutIsTerminal ? "stdin is not a terminal" : "neither is a terminal")
+    throw MicroVMError(
+        "shell requires a terminal on stdin and stdout; \(missing)", exitCode: 2,
+        recovery: "Run microvm shell from an interactive terminal. To script a command, use microvm exec NAME -- COMMAND.")
+}
+
+/// Printed on stderr after the shell exits, because leaving it does not end the sandbox.
+public func shellExitNotice(_ name: String) -> String {
+    "microvm: left the shell; \(name) is still running until its TTL. "
+        + "Export with `microvm finish \(name)` or discard with `microvm rm \(name) --force`.\n"
+}
+
 /// Host signals that end a terminal exec. The terminal is restored before the CLI exits 128 + signal.
 public let terminalExitSignals: [Int32] = [SIGTERM, SIGHUP, SIGQUIT]

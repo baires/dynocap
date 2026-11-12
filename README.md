@@ -185,7 +185,12 @@ microvm run --name demo --cpus 2 --memory 1024 --ttl 3600 --network none --boot-
 # Opt in to unrestricted outbound networking:
 microvm run --name online --network nat
 microvm exec demo --timeout 30 --cwd /tmp --env FOO=bar -- uname -a
+microvm shell demo
 ```
+
+`shell` opens the guest's shell on a terminal, in `/workspace` for project
+sandboxes, with no command deadline; leaving it keeps the sandbox running until
+`finish`, `rm --force`, or its TTL. See [docs/cli-shell.md](docs/cli-shell.md).
 
 `microvm help run` and `microvm run --help` show the same command help. Top-level help
 teaches the repository workflow; `microvm help advanced` lists raw sandboxes, task

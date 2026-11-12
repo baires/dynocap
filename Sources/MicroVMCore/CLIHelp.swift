@@ -274,6 +274,25 @@ let cliCommandSpecs: [CLICommandSpec] = [
         """
     ),
     CLICommandSpec(
+        path: ["shell"],
+        group: .primary,
+        summary: "Open an interactive shell in a sandbox.",
+        usage: "microvm shell NAME_OR_ID",
+        flags: [],
+        examples: ["microvm shell demo", "microvm shell task-example"],
+        discussion: """
+        Starts the guest's shell on a guest terminal: root's shell from /etc/passwd when it is executable, \
+        otherwise /bin/sh. Bash is not required. Project sandboxes start in /workspace; raw sandboxes start in /. \
+        The host terminal is put in raw mode, window resizes are forwarded, and Ctrl-C is a keystroke that \
+        interrupts the guest foreground job, not the shell. The host terminal is restored when the shell ends, \
+        including when the connection is lost or the sandbox expires. There is no command deadline; the shell \
+        lasts until you exit it or the sandbox TTL ends it, and the TTL is not renewed. Leaving the shell does \
+        not finish or remove the sandbox; run finish or rm --force explicitly. The CLI exits with the shell's \
+        status. Stdin and stdout must be terminals; use exec to script commands. --json is unsupported. \
+        The session is retained as a terminal transcript for logs. See docs/cli-shell.md.
+        """
+    ),
+    CLICommandSpec(
         path: ["diff"],
         group: .primary,
         summary: "Print the verified patch for a project sandbox.",
@@ -459,6 +478,7 @@ private func topLevelHelp() -> String {
       microvm clone ./project demo
       microvm ls
       microvm inspect demo
+      microvm shell demo
       microvm exec demo -- npm test
       microvm exec demo -- uname -a
       microvm diff demo

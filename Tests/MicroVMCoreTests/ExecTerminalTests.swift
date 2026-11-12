@@ -56,6 +56,123 @@ final class ExecTerminalTests: XCTestCase {
         }
     }
 
+    func testShellIsAnUntimedTerminalExec() throws {
+        for args in [["shell", "demo"], ["--home", "/tmp/h", "shell", "demo"], ["shell", "demo", "--home=/tmp/h", "--verbose"]] {
+            guard case .shell(let command) = try parseCommand(["microvm"] + args).command else {
+                return XCTFail("expected shell for \(args)")
+            }
+            XCTAssertEqual(command.name, "demo")
+            XCTAssertEqual(command.argv, guestShellArgv)
+            XCTAssertEqual(command.timeoutSeconds, 0, "no command deadline")
+            XCTAssertEqual(command.terminal, TerminalSize(rows: 0, cols: 0))
+            XCTAssertEqual(command.input, "interactive")
+            XCTAssertEqual(command.cwd, "", "the daemon picks /workspace or /")
+            XCTAssertTrue(command.env.isEmpty)
+        }
+        for args in [["shell"], ["shell", "demo", "other"], ["shell", "demo", "--", "sh"], ["shell", "demo", "--json"],
+                     ["--json", "shell", "demo"], ["shell", "demo", "-t"], ["shell", "demo", "--timeout", "5"],
+                     ["shell", "demo", "--cwd=/tmp"], ["shell", "bad/name"]] {
+            XCTAssertThrowsError(try parseCommand(["microvm"] + args), "\(args)") {
+                XCTAssertEqual(($0 as? MicroVMError)?.exitCode, 2, "\(args)")
+            }
+        }
+        XCTAssertEqual(try parseCommand(["microvm", "shell", "--help"]).command, .help(topic: ["shell"]))
+        XCTAssertEqual(try parseCommand(["microvm", "help", "shell"]).command, .help(topic: ["shell"]))
+        let help = commandHelp(["shell"])
+        for text in ["microvm shell NAME_OR_ID", "/workspace", "Bash is not required", "no command deadline", "TTL",
+                     "does not finish or remove", "restored", "--json is unsupported", "docs/cli-shell.md"] {
+            XCTAssertTrue(help.contains(text), text)
+        }
+        XCTAssertTrue(commandHelp([]).contains("microvm shell demo"))
+        XCTAssertTrue(commandHelp([]).contains("microvm shell NAME_OR_ID"))
+    }
+
+    func testShellRequiresATerminalOnStdinAndStdout() {
+        XCTAssertNoThrow(try requireShellTerminal(stdinIsTerminal: true, stdoutIsTerminal: true))
+        for (input, output, text) in [(false, true, "stdin is not"), (true, false, "stdout is not"), (false, false, "neither")] {
+            XCTAssertThrowsError(try requireShellTerminal(stdinIsTerminal: input, stdoutIsTerminal: output)) { error in
+                let micro = error as? MicroVMError
+                XCTAssertEqual(micro?.exitCode, 2)
+                XCTAssertTrue(micro?.message.contains(text) == true, micro?.message ?? "")
+                XCTAssertTrue(micro?.recovery.contains("microvm exec NAME -- COMMAND") == true)
+            }
+        }
+    }
+
+    /// Runs the guest selection script against a substitute passwd file.
+    func testGuestShellSelectionDoesNotAssumeBash() throws {
+        let directory = URL(fileURLWithPath: "/tmp/microvm-shell-select-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let custom = directory.appendingPathComponent("custom-shell")
+        try "#!/bin/sh\necho custom\n".write(to: custom, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: custom.path)
+        let refusal = directory.appendingPathComponent("nologin")
+        try "#!/bin/sh\necho refused\n".write(to: refusal, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: refusal.path)
+        let cases: [(String?, String)] = [
+            ("root:x:0:0:root:/root:\(custom.path)\n", "custom"),
+            ("daemon:x:1:1::/:\(custom.path)\nroot:x:0:0:root:/root:/bin/bash-is-not-installed\n", "fallback"),
+            ("root:x:0:0:root:/root:\(refusal.path)\n", "fallback"),
+            ("root:x:0:0:root:/root:\n", "fallback"),
+            (nil, "fallback"),
+        ]
+        for (passwd, expected) in cases {
+            let file = directory.appendingPathComponent("passwd")
+            try? FileManager.default.removeItem(at: file)
+            if let passwd { try passwd.write(to: file, atomically: true, encoding: .utf8) }
+            // The fallback /bin/sh reads this script from stdin, which proves it was chosen.
+            let script = guestShellArgv[2].replacingOccurrences(of: "/etc/passwd", with: file.path)
+            XCTAssertNotEqual(script, guestShellArgv[2])
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: guestShellArgv[0])
+            process.arguments = [guestShellArgv[1], script, guestShellArgv[3]]
+            let input = Pipe()
+            let output = Pipe()
+            process.standardInput = input
+            process.standardOutput = output
+            try process.run()
+            try input.fileHandleForWriting.write(contentsOf: Data("echo fallback\n".utf8))
+            try input.fileHandleForWriting.close()
+            process.waitUntilExit()
+            let text = String(bytes: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            XCTAssertEqual(text, expected + "\n", passwd ?? "missing passwd")
+        }
+    }
+
+    func testUntimedExecHasNoCommandDeadline() throws {
+        let harness = try TerminalHarness()
+        defer { harness.close() }
+        let fd = try POSIX.connectUnix(harness.daemon.paths.socket.path)
+        defer { _ = closeFD(fd) }
+        try ControlCodec.write(fd, .ping)
+        guard case .result(let capabilities) = try ControlCodec.read(fd) else { return XCTFail("expected ping result") }
+        XCTAssertNoThrow(try validateExecUntimedCapability(capabilities))
+        XCTAssertThrowsError(try validateExecUntimedCapability(Data(#"{"ok":true,"execTerminalVersion":1}"#.utf8))) {
+            XCTAssertEqual(($0 as? MicroVMError)?.code, .incompatibleDaemon)
+        }
+
+        var command = ExecCommand(name: "demo", argv: guestShellArgv, env: [], cwd: "", timeoutSeconds: 0, input: "interactive")
+        command.terminal = TerminalSize(rows: 24, cols: 80)
+        let exec = try POSIX.connectUnix(harness.daemon.paths.socket.path)
+        defer { _ = closeFD(exec) }
+        try ControlCodec.write(exec, .exec(command))
+        guard case .stdout = try ControlCodec.read(exec) else { return XCTFail("expected terminal output") }
+        XCTAssertEqual(harness.backend.requests.last?.timeoutSeconds, 0, "the guest gets no timer either")
+        // A one-second deadline would already have ended an ordinary command.
+        var item = pollfd(fd: exec, events: Int16(POLLIN), revents: 0)
+        XCTAssertEqual(poll(&item, 1, 1500), 0, "nothing arrives while the command runs without a deadline")
+        try ControlCodec.write(exec, .stdin(Data("q".utf8)))
+        XCTAssertEqual(try ControlCodec.read(exec), .exit(code: 0, signal: 0))
+
+        let negative = try POSIX.connectUnix(harness.daemon.paths.socket.path)
+        defer { _ = closeFD(negative) }
+        try ControlCodec.write(negative, .exec(ExecCommand(name: "demo", argv: ["true"], env: [], cwd: "", timeoutSeconds: -1)))
+        guard case .error(let text) = try ControlCodec.read(negative) else { return XCTFail("expected rejection") }
+        XCTAssertTrue(text.contains("timeoutSeconds"), text)
+        XCTAssertEqual(harness.backend.requests.count, 1, "a negative deadline starts nothing")
+    }
+
     func testNonTerminalInputIsRefusedBeforeDaemonWork() throws {
         var command = ExecCommand(name: "demo", argv: ["top"], env: [], cwd: "", timeoutSeconds: 5)
         XCTAssertNoThrow(try requireTerminalInput(command, stdinIsTerminal: false))
@@ -304,6 +421,127 @@ final class ExecTerminalTests: XCTestCase {
         XCTAssertEqual(try harness.client.ps().first { $0.name == "demo" }?.phase, .running)
     }
 
+    func testShellSessionKeepsTheSandboxAndRestoresTheTerminal() throws {
+        let harness = try TerminalHarness()
+        defer { harness.close() }
+        let pty = try PTYProcess(home: harness.home, args: ["shell", "demo"], rows: 33, cols: 101)
+        defer { pty.close() }
+        let before = try pty.settings()
+        XCTAssertTrue(pty.waitFor("ready"), pty.text)
+        XCTAssertEqual(try pty.settings().c_lflag & tcflag_t(ICANON | ECHO | ISIG), 0, "host terminal is raw in the shell")
+        let request = try XCTUnwrap(harness.backend.requests.last)
+        XCTAssertEqual(request.argv, guestShellArgv)
+        XCTAssertEqual(request.terminal, TerminalSize(rows: 33, cols: 101))
+        XCTAssertEqual(request.timeoutSeconds, 0)
+        XCTAssertEqual(request.cwd, "/", "a raw sandbox starts in /")
+        XCTAssertTrue(request.streamStdin)
+        pty.type("ab")
+        XCTAssertTrue(pty.waitFor("ab"), pty.text)
+        pty.resize(rows: 40, cols: 120)
+        XCTAssertTrue(pty.waitFor("size 40 120"), pty.text)
+        // Ctrl-C interrupts the shell's foreground child; the shell keeps reading.
+        pty.type("\u{03}")
+        XCTAssertTrue(pty.waitFor("^C"), pty.text)
+        XCTAssertTrue(harness.backend.signals.isEmpty, "Ctrl-C reached the guest terminal as a byte")
+        usleep(200_000)
+        XCTAssertTrue(pty.process.isRunning, "the shell outlived Ctrl-C")
+        pty.type("q")
+        XCTAssertEqual(pty.wait(), 0, pty.text)
+        XCTAssertTrue(pty.waitFor("left the shell; demo is still running"), pty.text)
+        XCTAssertTrue(pty.text.contains("microvm finish demo") && pty.text.contains("microvm rm demo --force"), pty.text)
+        XCTAssertTrue(sameSettings(before, try pty.settings()))
+        XCTAssertEqual(harness.backend.cancelled, [])
+        XCTAssertEqual(try harness.client.ps().first { $0.name == "demo" }?.phase, .running, "leaving does not end the sandbox")
+        // The same sandbox takes another session.
+        let again = try PTYProcess(home: harness.home, args: ["shell", "demo"], rows: 24, cols: 80)
+        defer { again.close() }
+        XCTAssertTrue(again.waitFor("ready"), again.text)
+        again.type("q")
+        XCTAssertEqual(again.wait(), 0, again.text)
+    }
+
+    func testShellOpensInTheProjectWorkspace() throws {
+        let harness = try TerminalHarness()
+        defer { harness.close() }
+        let directory = harness.home.appendingPathComponent("tasks/demo")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let record = TaskRecord(id: "demo", name: "proj", phase: "running", runtimeDigest: "digest",
+                                createdAtUnix: unixNow(), expiresAtUnix: unixNow() + 86400, network: .none)
+        try JSONEncoder().encode(record).write(to: directory.appendingPathComponent("task.json"))
+        let pty = try PTYProcess(home: harness.home, args: ["shell", "proj"], rows: 24, cols: 80)
+        defer { pty.close() }
+        XCTAssertTrue(pty.waitFor("ready"), pty.text)
+        let request = try XCTUnwrap(harness.backend.requests.last)
+        XCTAssertEqual(request.name, "demo")
+        XCTAssertEqual(request.cwd, "/workspace")
+        pty.type("q")
+        XCTAssertEqual(pty.wait(), 0, pty.text)
+        XCTAssertTrue(pty.waitFor("proj is still running"), pty.text)
+    }
+
+    func testFailingShellExitPropagatesItsStatus() throws {
+        let harness = try TerminalHarness()
+        defer { harness.close() }
+        let pty = try PTYProcess(home: harness.home, args: ["shell", "demo"], rows: 24, cols: 80)
+        defer { pty.close() }
+        let before = try pty.settings()
+        XCTAssertTrue(pty.waitFor("ready"), pty.text)
+        pty.type("e")
+        XCTAssertEqual(pty.wait(), 3, pty.text)
+        XCTAssertTrue(pty.waitFor("left the shell"), pty.text)
+        XCTAssertTrue(sameSettings(before, try pty.settings()))
+        XCTAssertEqual(try harness.client.ps().first { $0.name == "demo" }?.phase, .running)
+    }
+
+    func testShellConnectionLossRestoresTheTerminal() throws {
+        let harness = try TerminalHarness()
+        defer { harness.close() }
+        let pty = try PTYProcess(home: harness.home, args: ["shell", "demo"], rows: 24, cols: 80)
+        defer { pty.close() }
+        let before = try pty.settings()
+        XCTAssertTrue(pty.waitFor("ready"), pty.text)
+        pty.type("x")
+        XCTAssertEqual(pty.wait(), 1, pty.text)
+        XCTAssertTrue(pty.waitFor("guest agent connection lost"), pty.text)
+        XCTAssertFalse(pty.text.contains("left the shell"), "a lost session is an error, not a normal exit")
+        XCTAssertTrue(sameSettings(before, try pty.settings()))
+    }
+
+    func testShellEndsWhenTheSandboxExpires() throws {
+        let harness = try TerminalHarness()
+        defer { harness.close() }
+        _ = try harness.client.run(RunRequest(name: "short", cpus: 1, memoryMB: 256, ttlSeconds: 2, bootTimeoutSeconds: 5))
+        let pty = try PTYProcess(home: harness.home, args: ["shell", "short"], rows: 24, cols: 80)
+        defer { pty.close() }
+        let before = try pty.settings()
+        XCTAssertTrue(pty.waitFor("ready"), pty.text)
+        XCTAssertEqual(pty.wait(seconds: 10), 1, pty.text)
+        XCTAssertTrue(pty.waitFor("lifetime expired"), pty.text)
+        XCTAssertFalse(pty.text.contains("left the shell"), pty.text)
+        XCTAssertTrue(sameSettings(before, try pty.settings()))
+    }
+
+    func testShellWithoutATerminalIsRejectedWithoutStartingADaemon() throws {
+        let home = URL(fileURLWithPath: "/tmp/microvm-shell-pipe-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: ProcessInfo.processInfo.environment["MICROVM_BIN"] ?? ".build/debug/microvm")
+        process.arguments = ["--home", home.path, "shell", "demo"]
+        process.standardInput = Pipe()
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+        try process.run()
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 2)
+        let text = String(bytes: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        XCTAssertTrue(text.contains("shell requires a terminal on stdin and stdout"), text)
+        XCTAssertTrue(text.contains("microvm exec NAME -- COMMAND"), text)
+        XCTAssertEqual(stdout.fileHandleForReading.readDataToEndOfFile(), Data())
+        XCTAssertFalse(FileManager.default.fileExists(atPath: home.path), "no daemon home was created")
+    }
+
     func testPipedInputWithTTYIsRejectedWithoutStartingADaemon() throws {
         let home = URL(fileURLWithPath: "/tmp/microvm-terminal-pipe-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: home) }
@@ -466,7 +704,8 @@ private final class TerminalHarness {
 }
 
 /// Stands in for a guest terminal: it echoes input, reports resizes, and treats
-/// Ctrl-C the way a line discipline would. `q` exits 0; `x` loses the connection.
+/// Ctrl-C the way a line discipline would; a shell survives it. `q` exits 0, `e` exits 3,
+/// and `x` loses the connection.
 private final class TerminalBackend: VMBackend {
     static let rejectedSize = TerminalSize(rows: 1, cols: 1)
     var onGuestExit: ((String, UUID, String?) -> Void)?
@@ -506,8 +745,12 @@ private final class TerminalBackend: VMBackend {
             _input.append(data)
             return emits[id]
         }
+        let shell = locked { _requests.first { $0.id == id }?.argv == guestShellArgv }
         for byte in data {
             switch byte {
+            case 0x03 where shell:
+                // A shell's foreground child gets SIGINT; the shell itself keeps reading.
+                emit?(.stdout(Data("^C\r\n".utf8)))
             case 0x03:
                 emit?(.stdout(Data("^C\r\n".utf8)))
                 emit?(.finished(code: -1, signal: SIGINT))
@@ -515,6 +758,8 @@ private final class TerminalBackend: VMBackend {
                 emit?(.finished(code: 0, signal: 0))
             case UInt8(ascii: "x"):
                 emit?(.failed("guest agent connection lost"))
+            case UInt8(ascii: "e"):
+                emit?(.finished(code: 3, signal: 0))
             default:
                 emit?(.stdout(Data([byte])))
             }

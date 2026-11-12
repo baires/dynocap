@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Real-VM terminal check: drives `exec --tty` from a host PTY. Uses an isolated home and an existing guest image.
+"""Real-VM terminal check: drives `exec --tty` and `shell` from a host PTY. Uses an isolated home and an existing guest image.
 
 The CLI runs with the PTY as its controlling terminal, so window changes produce a real SIGWINCH.
 Checks input, initial size, resizing, Ctrl-C, exit status, host terminal restoration (including after
 SIGKILL, guest connection loss, and daemon death), and that the sandbox stays usable. Also interrupts
-an ordinary (non-terminal) foreground command. Unless --skip-project is given, it prepares a node:22
-runtime (seeded from --cache; missing verified inputs are downloaded) and checks terminal transcripts
-in a project task's logs, before and after finish.
+an ordinary (non-terminal) foreground command. `shell` is checked for line editing and history, resizing,
+Ctrl-C of a child, outliving the ordinary 60-second command deadline, exit status, the sandbox staying
+alive, connection loss, and TTL expiry. Unless --skip-project is given, it prepares a node:22 runtime
+(seeded from --cache; missing verified inputs are downloaded), checks that `shell` opens in /workspace,
+and checks terminal transcripts in a project task's logs, before and after finish.
 """
 import argparse
 import fcntl
@@ -206,12 +208,71 @@ def main():
                 assert cli("exec", "term", "--", "echo", "usable").stdout == "usable\n"
                 print("PASS: Ctrl-C of a non-terminal foreground command exits 130; sandbox remains usable", flush=True)
 
+                refused = cli("shell", "term", check=False)
+                assert refused.returncode == 2 and "requires a terminal" in refused.stderr, refused
+                print("PASS: shell without a terminal exits 2 and points at exec", flush=True)
+
+                guest = Session(prefix, ["shell", "term"], rows=30, cols=90)
+                guest.read_until("/ ")  # BusyBox ash's default root prompt shows the working directory.
+                assert guest.is_raw(), "host terminal is not raw in the shell"
+                guest.output = b""
+                guest.type("PS1='mvm$ '\r")
+                guest.read_until("mvm$ ")
+
+                def say(line, expect, timeout=20):
+                    guest.output = b""
+                    guest.type(line + "\r")
+                    guest.read_until(expect + "\r\nmvm$ ", timeout=timeout)
+
+                say('echo "shell=$0 cwd=$(pwd)"', "shell=/bin/sh cwd=/")
+                say("command -v bash || echo no-bash", "no-bash")
+                # Line editing: backspace and cursor-left; history: up arrow repeats the last command.
+                say("echo hellx\x7fo", "hello")
+                say("echo wrd\x1b[D\x1b[Do", "word")
+                guest.output = b""
+                guest.type("\x1b[A\r")
+                guest.read_until("word\r\nmvm$ ")
+                guest.resize(40, 120)
+                time.sleep(0.5)
+                say("stty size", "40 120")
+                guest.output = b""
+                guest.type("sleep 30; echo not-interrupted\r")
+                time.sleep(1.5)
+                started = time.monotonic()
+                guest.type("\x03")
+                guest.read_until("mvm$ ", timeout=10)
+                # The typed line is echoed too; only a line of output would start with the word.
+                assert time.monotonic() - started < 5 and "\nnot-interrupted" not in guest.text, guest.text
+                say("echo alive", "alive")
+                print("PASS: shell is /bin/sh in /, edits and recalls lines, resizes, and survives Ctrl-C of its child", flush=True)
+                started = time.monotonic()
+                say("sleep 65; echo survived", "survived", timeout=90)
+                assert time.monotonic() - started >= 65
+                guest.type("exit 3\r")
+                assert guest.finish() == 3, guest.text
+                assert "left the shell; term is still running" in guest.text, guest.text
+                assert cli("exec", "term", "--", "echo", "usable").stdout == "usable\n"
+                print("PASS: shell outlives the 60s command deadline, exits 3, restores the terminal, and keeps the sandbox", flush=True)
+
+                quiet = Session(prefix, ["shell", "term"])
+                quiet.read_until("/ ")
+                quiet.type("\x04")
+                assert quiet.finish() == 0, quiet.text
+                print("PASS: Ctrl-D leaves the shell with status 0", flush=True)
+
                 cli("run", "--name", "brief", "--ttl", "8")
                 expiring = Session(prefix, ["exec", "-t", "brief", "--timeout", "60", "--", "sh", "-c", "echo ready; sleep 60"])
                 expiring.read_until("ready")
                 assert expiring.finish(timeout=30) == 1, expiring.text
                 assert "lifetime expired" in expiring.text, expiring.text
                 print("PASS: sandbox expiry ends the terminal session and restores the terminal", flush=True)
+
+                cli("run", "--name", "brief-shell", "--ttl", "15")
+                ending = Session(prefix, ["shell", "brief-shell"])
+                ending.read_until("/ ")
+                assert ending.finish(timeout=30) == 1, ending.text
+                assert "lifetime expired" in ending.text and "left the shell" not in ending.text, ending.text
+                print("PASS: sandbox expiry ends the shell with status 1 and restores the terminal", flush=True)
 
                 killed = Session(prefix, ["exec", "-t", "term", "--", "sh", "-c", "echo ready; sleep 60"])
                 killed.read_until("ready")
@@ -224,11 +285,14 @@ def main():
                 cli("run", "--name", "lost")
                 lost = Session(prefix, ["exec", "-t", "lost", "--timeout", "60", "--", "sh", "-c", "echo ready; sleep 60"])
                 lost.read_until("ready")
+                lost_shell = Session(prefix, ["shell", "lost"])
+                lost_shell.read_until("/ ")
                 # This exec is served by the agent it kills, so it fails too.
                 cli("exec", "lost", "--", "sh", "-c", "kill -9 $(pidof microvm-agent)", check=False)
                 assert lost.finish(timeout=30) == 1, lost.text
+                assert lost_shell.finish(timeout=30) == 1 and "left the shell" not in lost_shell.text, lost_shell.text
                 assert cli("exec", "term", "--", "echo", "usable").stdout == "usable\n", "another sandbox was affected"
-                print("PASS: guest agent loss ends the session with status 1 and restores the terminal", flush=True)
+                print("PASS: guest agent loss ends exec -t and shell sessions with status 1 and restores the terminal", flush=True)
 
                 if not args.skip_project:
                     if args.cache.is_dir():
@@ -263,6 +327,13 @@ def main():
 
                     replay()
                     print("PASS: project task journals one terminal transcript and replays it to stdout only", flush=True)
+                    workspace = Session(prefix, ["shell", "proj"])
+                    workspace.read_until("# ")
+                    workspace.type('[ "$(pwd -P)" = "$(readlink -f /workspace)" ] && cat hello.txt; exit\r')
+                    workspace.read_until("alpha")
+                    assert workspace.finish() == 0, workspace.text
+                    assert "left the shell; proj is still running" in workspace.text, workspace.text
+                    print("PASS: shell opens a project sandbox in /workspace and leaves it running", flush=True)
                     cli("finish", "proj", timeout=300)
                     replay()
                     published = list(home.glob(f"tasks/*/result/{terminal_ids[0]}.terminal"))

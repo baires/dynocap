@@ -175,6 +175,7 @@ public enum CLICommand: Equatable {
     case managed(TaskCommand)
     case run(RunRequest)
     case exec(ExecCommand)
+    case shell(ExecCommand)
     case destroy(String)
     case task(TaskCommand)
     case runtimePrepare(RuntimePreparation)
