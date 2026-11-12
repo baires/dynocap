@@ -14,7 +14,9 @@
 //	0x04 STDIN_EOF  host -> guest   u32 id
 //	0x05 KILL       host -> guest   u32 id
 //	0x06 SHUTDOWN   host -> guest   empty
+//	0x07 EXEC_TTY   host -> guest   u32 id, u32 timeout_ms, u16 rows, u16 cols, argv, env, cwd
 //	0x15 SIGNAL     host -> guest   u32 id, i32 signal
+//	0x16 RESIZE     host -> guest   u32 id, u16 rows, u16 cols
 //	0x10 STARTED    guest -> host   u32 id
 //	0x11 STDOUT     guest -> host   u32 id, u32+bytes
 //	0x12 STDERR     guest -> host   u32 id, u32+bytes
@@ -24,6 +26,9 @@
 // argv, env, and cwd are repeated u16+utf8 strings. env entries are KEY=VAL.
 // timeout_ms 0 means the guest applies no timer. EXIT code is -1 when the
 // process dies on a signal; a timeout is reported as code 124 and signal 0.
+//
+// EXEC_TTY runs the command on a guest terminal. Its combined output arrives as
+// STDOUT frames; there is no separate STDERR. A size of 0 means unknown.
 package protocol
 
 import (
@@ -55,12 +60,14 @@ const (
 	TypeStdinEOF uint8 = 0x04
 	TypeKill     uint8 = 0x05
 	TypeShutdown uint8 = 0x06
+	TypeExecTTY  uint8 = 0x07
 	TypeSignal   uint8 = 0x15
+	TypeResize   uint8 = 0x16
 
 	// AgentHello is the guest greeting. signal=1 means the agent can deliver a
-	// signal to the selected process group. The protocol version stays 1 so
-	// older hosts still accept the hello.
-	AgentHello        = "microvm-agent signal=1"
+	// signal to the selected process group; tty=1 means it accepts EXEC_TTY and
+	// RESIZE. The protocol version stays 1 so older hosts still accept the hello.
+	AgentHello        = "microvm-agent signal=1 tty=1"
 	TypeStarted uint8 = 0x10
 	TypeStdout  uint8 = 0x11
 	TypeStderr  uint8 = 0x12
@@ -93,6 +100,8 @@ type Message struct {
 	ExitCode   int32
 	ExitSignal int32
 	Signal     int32
+	Rows       uint16
+	Cols       uint16
 	Error      string
 }
 
@@ -100,6 +109,11 @@ type Message struct {
 // signals. The token must be exact so signal=10 does not match.
 func AdvertisesSignal(agent string) bool {
 	return strings.Contains(" "+agent+" ", " signal=1 ")
+}
+
+// AdvertisesTerminal reports whether a guest hello accepts EXEC_TTY and RESIZE.
+func AdvertisesTerminal(agent string) bool {
+	return strings.Contains(" "+agent+" ", " tty=1 ")
 }
 
 // ReadFrame reads one length-prefixed frame.
@@ -150,7 +164,7 @@ func Encode(m Message) ([]byte, error) {
 		out = binary.BigEndian.AppendUint32(out, m.Version)
 		out = append(out, body...)
 		return out, nil
-	case TypeExec:
+	case TypeExec, TypeExecTTY:
 		if len(m.Argv) == 0 || m.Argv[0] == "" {
 			return nil, ErrEmptyArgv
 		}
@@ -163,9 +177,13 @@ func Encode(m Message) ([]byte, error) {
 			}
 		}
 		out := make([]byte, 0, 64)
-		out = append(out, TypeExec)
+		out = append(out, m.Type)
 		out = binary.BigEndian.AppendUint32(out, m.ID)
 		out = binary.BigEndian.AppendUint32(out, m.TimeoutMS)
+		if m.Type == TypeExecTTY {
+			out = binary.BigEndian.AppendUint16(out, m.Rows)
+			out = binary.BigEndian.AppendUint16(out, m.Cols)
+		}
 		var err error
 		if out, err = appendStrings(out, m.Argv); err != nil {
 			return nil, err
@@ -201,6 +219,13 @@ func Encode(m Message) ([]byte, error) {
 		out[0] = TypeSignal
 		binary.BigEndian.PutUint32(out[1:], m.ID)
 		binary.BigEndian.PutUint32(out[5:], uint32(m.Signal))
+		return out, nil
+	case TypeResize:
+		out := make([]byte, 9)
+		out[0] = TypeResize
+		binary.BigEndian.PutUint32(out[1:], m.ID)
+		binary.BigEndian.PutUint16(out[5:], m.Rows)
+		binary.BigEndian.PutUint16(out[7:], m.Cols)
 		return out, nil
 	case TypeShutdown:
 		return []byte{TypeShutdown}, nil
@@ -256,13 +281,22 @@ func Decode(buf []byte) (Message, error) {
 		if err != nil {
 			return Message{}, err
 		}
-	case TypeExec:
+	case TypeExec, TypeExecTTY:
 		if len(rest) < 8 {
 			return Message{}, ErrShort
 		}
 		m.ID = binary.BigEndian.Uint32(rest[:4])
 		m.TimeoutMS = binary.BigEndian.Uint32(rest[4:8])
-		m.Argv, rest, err = takeStrings(rest[8:], maxArgs)
+		rest = rest[8:]
+		if m.Type == TypeExecTTY {
+			if len(rest) < 4 {
+				return Message{}, ErrShort
+			}
+			m.Rows = binary.BigEndian.Uint16(rest[:2])
+			m.Cols = binary.BigEndian.Uint16(rest[2:4])
+			rest = rest[4:]
+		}
+		m.Argv, rest, err = takeStrings(rest, maxArgs)
 		if err != nil {
 			return Message{}, err
 		}
@@ -308,6 +342,14 @@ func Decode(buf []byte) (Message, error) {
 		if m.Signal <= 0 || m.Signal >= 64 {
 			return Message{}, errors.New("unsupported signal")
 		}
+		rest = rest[8:]
+	case TypeResize:
+		if len(rest) < 8 {
+			return Message{}, ErrShort
+		}
+		m.ID = binary.BigEndian.Uint32(rest[:4])
+		m.Rows = binary.BigEndian.Uint16(rest[4:6])
+		m.Cols = binary.BigEndian.Uint16(rest[6:8])
 		rest = rest[8:]
 	case TypeShutdown:
 	case TypeExit:

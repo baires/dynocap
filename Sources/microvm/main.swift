@@ -146,6 +146,7 @@ struct Main {
             let status = try DaemonClient(socketPath: paths.socket.path).run(request)
             print("\(status.name) \(status.phase)")
         case .exec(let command):
+            try requireTerminalInput(command, stdinIsTerminal: isatty(STDIN_FILENO) == 1)
             let paths = try ready(invocation)
             var command = command
             command.input = resolveExecInput(requested: command.input, stdinIsTerminal: isatty(STDIN_FILENO) == 1)
@@ -159,7 +160,30 @@ struct Main {
     }
 
     /// Ctrl-C forwards SIGINT to the guest. A second Ctrl-C stops waiting and exits 130.
+    /// With a terminal, the host terminal is raw until the command ends, whatever ends it.
     static func foregroundExec(client: DaemonClient, command: ExecCommand) throws -> Int32 {
+        var command = command
+        var resize: ExecResize?
+        var terminal: HostTerminalMode?
+        var terminalSources: [DispatchSourceSignal] = []
+        defer {
+            for source in terminalSources { source.cancel() }
+            terminal?.restore()
+        }
+        if command.terminal != nil {
+            command.terminal = terminalSize(STDIN_FILENO)
+            let mode = try HostTerminalMode(fd: STDIN_FILENO)
+            terminal = mode
+            let windows = ExecResize()
+            resize = windows
+            terminalSources.append(watchSignal(SIGWINCH) { windows.deliver(terminalSize(STDIN_FILENO)) })
+            for value in terminalExitSignals {
+                terminalSources.append(watchSignal(value) {
+                    mode.restore()
+                    exit(128 + value)
+                })
+            }
+        }
         let interrupt = ExecInterrupt()
         let lock = NSLock()
         var count = 0
@@ -183,13 +207,29 @@ struct Main {
                 readStdin: command.input == "none" ? nil : { readExecStdin($0) },
                 onStdout: { try? FileHandle.standardOutput.write(contentsOf: $0) },
                 onStderr: { try? FileHandle.standardError.write(contentsOf: $0) },
-                interrupt: interrupt
+                interrupt: interrupt,
+                resize: resize
             )
             return cliExitStatus(code: outcome.code, signal: outcome.signal)
         } catch {
             if interrupt.didAbort { return 130 }
             throw error
         }
+    }
+
+    static func watchSignal(_ value: Int32, _ handler: @escaping () -> Void) -> DispatchSourceSignal {
+        signal(value, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: value, queue: .global())
+        source.setEventHandler(handler: handler)
+        source.setCancelHandler { signal(value, SIG_DFL) }
+        source.resume()
+        return source
+    }
+
+    static func terminalSize(_ fd: Int32) -> TerminalSize {
+        var size = winsize()
+        guard ioctl(fd, TIOCGWINSZ, &size) == 0 else { return TerminalSize(rows: 0, cols: 0) }
+        return TerminalSize(rows: size.ws_row, cols: size.ws_col)
     }
 
     static func readExecStdin(_ control: ExecStdinControl) -> Data? {

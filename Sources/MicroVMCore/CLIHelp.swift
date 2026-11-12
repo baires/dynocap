@@ -245,14 +245,18 @@ let cliCommandSpecs: [CLICommandSpec] = [
             CLIFlag(name: "--cwd", value: "DIR", summary: "Guest working directory. Project sandboxes use /workspace; raw sandboxes use /."),
             CLIFlag(name: "--env", value: "KEY=VAL", summary: "Environment entry for the guest command. Repeat for more than one."),
             CLIFlag(name: "-i", value: nil, summary: "Forward host stdin until EOF, including when stdin is a terminal."),
-            CLIFlag(name: "--interactive", value: nil, summary: "Same as -i. This does not allocate a guest terminal."),
+            CLIFlag(name: "--interactive", value: nil, summary: "Same as -i. This does not allocate a guest terminal; use -t for that."),
             CLIFlag(name: "--no-input", value: nil, summary: "Do not read host stdin. The guest receives immediate EOF."),
+            CLIFlag(name: "-t", value: nil, summary: "Run on a guest terminal sized like this one. Stdin must be a terminal; implies -i."),
+            CLIFlag(name: "--tty", value: nil, summary: "Same as -t. Output is one combined terminal stream, not separate stdout and stderr."),
         ],
         examples: [
             "microvm exec demo --timeout 30 --cwd /workspace --env CI=1 -- npm test -- --runInBand",
             "microvm exec demo -- uname -a",
             "microvm exec --interactive demo -- cat",
             "microvm exec --no-input demo -- true",
+            "microvm exec -it demo -- top",
+            "microvm exec --tty demo -- vi /workspace/README.md",
         ],
         discussion: """
         Tokens after -- are the guest command and are preserved unchanged, including values that look \
@@ -262,7 +266,11 @@ let cliCommandSpecs: [CLICommandSpec] = [
         is closed. A terminal is not read unless -i or --interactive is set. --no-input closes guest stdin \
         immediately and cannot be combined with -i. Ctrl-C forwards SIGINT to the guest process group and does not \
         destroy the sandbox. The CLI exits 130 when that signal ends the command. A second Ctrl-C stops waiting. \
-        Stdout and stderr stay separate. See docs/cli-exec.md.
+        Stdout and stderr stay separate. With -t (or -it), the command gets a controlling guest terminal: the host \
+        terminal is put in raw mode and restored on exit, window resizes are forwarded, and Ctrl-C is a keystroke \
+        that the guest terminal turns into SIGINT for its foreground job. A second Ctrl-C does not stop waiting \
+        in this mode. stdout and stderr arrive combined on stdout, and logs replays that transcript. -t needs a \
+        terminal on stdin and cannot be combined with --no-input. TERM defaults to xterm-256color. See docs/cli-exec.md.
         """
     ),
     CLICommandSpec(

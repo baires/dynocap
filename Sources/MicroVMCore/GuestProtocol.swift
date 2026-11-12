@@ -8,6 +8,7 @@ public enum GuestMessage: Equatable {
     case stdinEOF(id: UInt32)
     case kill(id: UInt32)
     case signal(id: UInt32, signal: Int32)
+    case resize(id: UInt32, size: TerminalSize)
     case shutdown
     case started(id: UInt32)
     case stdout(id: UInt32, data: Data)
@@ -18,12 +19,23 @@ public enum GuestMessage: Equatable {
     public var id: UInt32? {
         switch self {
         case .exec(let start): return start.id
-        case .stdin(let id, _), .stdinEOF(let id), .kill(let id), .signal(let id, _), .started(let id),
+        case .stdin(let id, _), .stdinEOF(let id), .kill(let id), .signal(let id, _), .resize(let id, _), .started(let id),
              .stdout(let id, _), .stderr(let id, _), .exit(let id, _, _), .error(let id, _):
             return id
         case .hello, .shutdown:
             return nil
         }
+    }
+}
+
+/// Terminal rows and columns. Zero means unknown; the guest then uses 24x80.
+public struct TerminalSize: Codable, Equatable {
+    public var rows: UInt16
+    public var cols: UInt16
+
+    public init(rows: UInt16, cols: UInt16) {
+        self.rows = rows
+        self.cols = cols
     }
 }
 
@@ -33,13 +45,16 @@ public struct ExecStart: Equatable {
     public var argv: [String]
     public var env: [String]
     public var cwd: String
+    /// Set for EXEC_TTY: the command runs on a guest terminal of this size.
+    public var terminal: TerminalSize?
 
-    public init(id: UInt32, timeoutMS: UInt32, argv: [String], env: [String], cwd: String) {
+    public init(id: UInt32, timeoutMS: UInt32, argv: [String], env: [String], cwd: String, terminal: TerminalSize? = nil) {
         self.id = id
         self.timeoutMS = timeoutMS
         self.argv = argv
         self.env = env
         self.cwd = cwd
+        self.terminal = terminal
     }
 }
 
@@ -57,7 +72,9 @@ public enum GuestProtocol {
     public static let stdinEOF: UInt8 = 0x04
     public static let kill: UInt8 = 0x05
     public static let shutdown: UInt8 = 0x06
+    public static let execTTY: UInt8 = 0x07
     public static let signal: UInt8 = 0x15
+    public static let resize: UInt8 = 0x16
     public static let started: UInt8 = 0x10
     public static let stdout: UInt8 = 0x11
     public static let stderr: UInt8 = 0x12
@@ -99,9 +116,13 @@ public enum GuestProtocol {
             for entry in start.env where !validEnv(entry) {
                 throw MicroVMError("env entry must be KEY=VAL")
             }
-            out.append(exec)
+            out.append(start.terminal == nil ? exec : execTTY)
             out.appendU32(start.id)
             out.appendU32(start.timeoutMS)
+            if let size = start.terminal {
+                out.appendU16(size.rows)
+                out.appendU16(size.cols)
+            }
             try out.appendStrings(start.argv)
             try out.appendStrings(start.env)
             try out.appendString16(start.cwd)
@@ -122,6 +143,11 @@ public enum GuestProtocol {
             out.append(signal)
             out.appendU32(id)
             out.appendI32(value)
+        case .resize(let id, let size):
+            out.append(resize)
+            out.appendU32(id)
+            out.appendU16(size.rows)
+            out.appendU16(size.cols)
         case .shutdown:
             out.append(shutdown)
         case .started(let id):
@@ -155,9 +181,10 @@ public enum GuestProtocol {
             let agent = try c.string16()
             try c.expectEnd()
             return .hello(version: version, agent: agent)
-        case exec:
+        case exec, execTTY:
             let id = try c.u32()
             let timeout = try c.u32()
+            let terminal = type == execTTY ? TerminalSize(rows: try c.u16(), cols: try c.u16()) : nil
             let argv = try c.strings(max: maxArgs)
             let env = try c.strings(max: maxArgs)
             let cwd = try c.string16()
@@ -166,7 +193,7 @@ public enum GuestProtocol {
             for entry in env where !validEnv(entry) {
                 throw MicroVMError("env entry must be KEY=VAL")
             }
-            return .exec(ExecStart(id: id, timeoutMS: timeout, argv: argv, env: env, cwd: cwd))
+            return .exec(ExecStart(id: id, timeoutMS: timeout, argv: argv, env: env, cwd: cwd, terminal: terminal))
         case stdin, stdout, stderr:
             let id = try c.u32()
             let n = Int(try c.u32())
@@ -190,6 +217,11 @@ public enum GuestProtocol {
             try c.expectEnd()
             guard value > 0, value < 64 else { throw MicroVMError("unsupported signal \(value)") }
             return .signal(id: id, signal: value)
+        case resize:
+            let id = try c.u32()
+            let size = TerminalSize(rows: try c.u16(), cols: try c.u16())
+            try c.expectEnd()
+            return .resize(id: id, size: size)
         case shutdown:
             try c.expectEnd()
             return .shutdown
@@ -222,6 +254,12 @@ public enum GuestProtocol {
 /// The guest hello token `signal=1` means this agent can signal the selected process group.
 public func guestAgentDeliversSignals(_ agent: String) -> Bool {
     agent.split(separator: " ").contains("signal=1")
+}
+
+/// The guest hello token `tty=1` means this agent accepts EXEC_TTY and RESIZE.
+/// An older agent drops the connection on those frames, so check before sending.
+public func guestAgentAllocatesTerminals(_ agent: String) -> Bool {
+    agent.split(separator: " ").contains("tty=1")
 }
 
 private extension GuestMessage {
@@ -290,6 +328,11 @@ struct Cursor {
 }
 
 extension Data {
+    mutating func appendU16(_ value: UInt16) {
+        append(UInt8((value >> 8) & 0xff))
+        append(UInt8(value & 0xff))
+    }
+
     mutating func appendU32(_ value: UInt32) {
         append(UInt8((value >> 24) & 0xff))
         append(UInt8((value >> 16) & 0xff))

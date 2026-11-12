@@ -6,14 +6,15 @@ public func formatExecutionList(_ logs: ExecutionLogs, arguments: [String] = [])
     var lines = ["EXEC  STATE  STARTED (UTC)  EXIT  STDOUT_BYTES  STDERR_BYTES  INTEGRITY  FORMAT  COMMAND"]
     for execution in logs.executions {
         let integrity: String
-        let values = [execution.stdout.integrity, execution.stderr.integrity]
+        let terminal = execution.format == "terminal"
+        let values = terminal ? [execution.stdout.integrity] : [execution.stdout.integrity, execution.stderr.integrity]
         if values.contains("missing") { integrity = "missing" } else if values.contains("truncated") { integrity = "truncated" } else {
             integrity = values.contains("unknown") ? "unknown" : "complete"
         }
         let date = ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: TimeInterval(execution.startedAtUnix)))
         lines.append([
             String(execution.id), execution.state, date, execution.exitCode.map(String.init) ?? "-",
-            execution.stdout.bytes.map(String.init) ?? "-", execution.stderr.bytes.map(String.init) ?? "-", integrity,
+            execution.stdout.bytes.map(String.init) ?? "-", terminal ? "-" : execution.stderr.bytes.map(String.init) ?? "-", integrity,
             execution.format, execution.command,
         ].map { safeDiagnostic($0, secrets: secrets) }.joined(separator: "  "))
     }
@@ -21,6 +22,7 @@ public func formatExecutionList(_ logs: ExecutionLogs, arguments: [String] = [])
 }
 
 /// Copies each ordinary stream independently. It does not claim to restore cross-stream chronology.
+/// A terminal transcript is already one chronological stream and is copied to stdout alone.
 public func replayExecutionLogs(
     _ logs: ExecutionLogs, execution: Int?, stdout: FileHandle = .standardOutput, stderr: FileHandle = .standardError
 ) throws {
@@ -28,7 +30,7 @@ public func replayExecutionLogs(
         throw MicroVMError("no recorded execution\(execution.map { " \($0)" } ?? "") for \(logs.name ?? logs.id)", code: .notFound,
                            recovery: "Run microvm logs NAME_OR_ID --list to discover available execution IDs.")
     }
-    guard entry.format == "separate" else {
+    guard entry.format == "separate" || entry.format == "terminal" else {
         throw MicroVMError("execution \(entry.id) uses unsupported log format \(entry.format)",
                            recovery: "Use a CLI that supports this transcript format; separate stdout/stderr replay is unavailable.")
     }
@@ -36,7 +38,8 @@ public func replayExecutionLogs(
         throw MicroVMError("execution \(entry.id) is still running", code: .invalidPhase,
                            recovery: "Wait for it to end, or use logs --list and --exec N to select an earlier execution.")
     }
-    for stream in [entry.stdout, entry.stderr] {
+    let streams = entry.format == "terminal" ? [entry.stdout] : [entry.stdout, entry.stderr]
+    for stream in streams {
         guard ["complete", "unknown"].contains(stream.integrity) else {
             throw MicroVMError("execution \(entry.id) has \(stream.integrity) logs; replay refused before output",
                                recovery: "Use logs --list to check integrity; inspect surviving files in \(logs.directory)."
@@ -45,17 +48,24 @@ public func replayExecutionLogs(
     }
     let out = try openLog(entry.stdout, directory: logs.directory)
     defer { try? out.close() }
+    if entry.format == "terminal" {
+        try checkLogLength(out, entry.stdout)
+        try copyLog(out, to: stdout, bytes: entry.stdout.bytes ?? 0)
+        return
+    }
     let err = try openLog(entry.stderr, directory: logs.directory)
     defer { try? err.close() }
     // Validate both handles before writing either stream, including races with finish/expiry/external truncation.
-    for (file, stream) in [(out, entry.stdout), (err, entry.stderr)] {
-        guard let bytes = stream.bytes, bytes >= 0, try file.seekToEnd() == UInt64(bytes) else {
-            throw MicroVMError("execution logs changed while being opened", recovery: "Retry logs after the execution and finalization have ended.")
-        }
-        try file.seek(toOffset: 0)
-    }
+    for (file, stream) in [(out, entry.stdout), (err, entry.stderr)] { try checkLogLength(file, stream) }
     try copyLog(out, to: stdout, bytes: entry.stdout.bytes ?? 0)
     try copyLog(err, to: stderr, bytes: entry.stderr.bytes ?? 0)
+}
+
+private func checkLogLength(_ file: FileHandle, _ stream: RecordedLogStream) throws {
+    guard let bytes = stream.bytes, bytes >= 0, try file.seekToEnd() == UInt64(bytes) else {
+        throw MicroVMError("execution logs changed while being opened", recovery: "Retry logs after the execution and finalization have ended.")
+    }
+    try file.seek(toOffset: 0)
 }
 
 private func openLog(_ stream: RecordedLogStream, directory: String) throws -> FileHandle {

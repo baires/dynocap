@@ -230,7 +230,7 @@ public final class Daemon {
             case .shutdown:
                 try ControlCodec.write(fd, .result(try JSONEncoder().encode(OKResult(ok: true))))
                 DispatchQueue.global().async { [weak self] in self?.stop() }
-            case .result, .stdout, .stderr, .exit, .error, .stdin, .stdinEOF, .signal:
+            case .result, .stdout, .stderr, .exit, .error, .stdin, .stdinEOF, .signal, .resize:
                 try ControlCodec.write(fd, .error(daemonErrorText(MicroVMError("clients cannot send response frames"))))
             }
         } catch {
@@ -418,7 +418,7 @@ public final class Daemon {
         }
         try POSIX.setWriteTimeout(fd, seconds: 5)
         let taskIndex: Int?
-        do { taskIndex = try tasks.begin(command.name, argv: command.argv, env: command.env) } catch {
+        do { taskIndex = try tasks.begin(command.name, argv: command.argv, env: command.env, terminal: command.terminal != nil) } catch {
             if String(describing: error).contains("limit") { DispatchQueue.global().async { try? self.destroyVM(command.name) } }
             throw error
         }
@@ -460,7 +460,8 @@ public final class Daemon {
             cwd: command.cwd,
             timeoutSeconds: command.timeoutSeconds
         )
-        request.streamStdin = command.input == "pipe" || command.input == "interactive"
+        request.terminal = command.terminal
+        request.streamStdin = command.input == "pipe" || command.input == "interactive" || command.terminal != nil
         let writeLock = NSLock()
         let state = ExecWait()
         let sem = DispatchSemaphore(value: 0)
@@ -617,6 +618,9 @@ public final class Daemon {
                         let text = (error as? MicroVMError)?.message ?? String(describing: error)
                         send(.stderr(Data((text + "\n").utf8)), false)
                     }
+                case .resize(let size):
+                    // A lost window change is cosmetic; it must not end the command.
+                    try? backend.resizeExec(name: name, id: id, size: size)
                 default:
                     stopExecInput(name: name, id: id, state: state, sem: sem)
                     return
@@ -991,13 +995,19 @@ public struct DaemonClient {
         readStdin: ((ExecStdinControl) -> Data?)? = nil,
         onStdout: (Data) -> Void = { _ in },
         onStderr: (Data) -> Void = { _ in },
-        interrupt: ExecInterrupt? = nil
+        interrupt: ExecInterrupt? = nil,
+        resize: ExecResize? = nil
     ) throws -> ExecOutcome {
         if command.requireOffline == true { try requirePolicy() }
-        let streaming = command.input == "pipe" || command.input == "interactive"
+        let streaming = command.input == "pipe" || command.input == "interactive" || command.terminal != nil
         if streaming { try requireExecStream() }
+        if command.terminal != nil { try requireExecTerminal() }
         let fd = try connect()
         let fdLock = NSLock()
+        // Host signal handlers can still fire after this call returns; they must not touch a reused fd number.
+        // closeLock guards only this flag, so abort never waits behind a stdin write blocked under fdLock.
+        let closeLock = NSLock()
+        var fdClosed = false
         let canSignal = interrupt == nil ? false : (try? requireExecSignal()) != nil
         let writerDone = DispatchSemaphore(value: 0)
         var control: ExecStdinControl?
@@ -1005,25 +1015,38 @@ public struct DaemonClient {
         defer {
             control?.stop()
             if writerStarted { writerDone.wait() }
+            fdLock.lock()
+            closeLock.lock()
+            fdClosed = true
             _ = closeFD(fd)
+            closeLock.unlock()
+            fdLock.unlock()
         }
         try ControlCodec.write(fd, .exec(command))
         interrupt?.bind(
             forward: { signal in
-                control?.stop()
+                // A terminal keeps taking keystrokes after a forwarded signal, like a local shell job.
+                if command.terminal == nil { control?.stop() }
                 guard canSignal else {
                     fputs("microvm: daemon cannot forward guest signals; rebuild and restart it\n", stderr)
                     return
                 }
                 fdLock.lock()
                 defer { fdLock.unlock() }
-                try? ControlCodec.write(fd, .signal(signal))
+                if !closeLock.withLock({ fdClosed }) { try? ControlCodec.write(fd, .signal(signal)) }
             },
             abort: {
                 control?.stop()
-                _ = shutdown(fd, Int32(SHUT_RDWR))
+                closeLock.lock()
+                defer { closeLock.unlock() }
+                if !fdClosed { _ = shutdown(fd, Int32(SHUT_RDWR)) }
             }
         )
+        resize?.bind { size in
+            fdLock.lock()
+            defer { fdLock.unlock() }
+            if !closeLock.withLock({ fdClosed }) { try? ControlCodec.write(fd, .resize(size)) }
+        }
         if streaming, let readStdin {
             let gate = ExecStdinControl()
             control = gate
@@ -1061,6 +1084,12 @@ public struct DaemonClient {
         let reply = try roundTrip(.ping)
         guard case .result(let data) = reply else { throw messageError(reply) }
         try validateExecSignalCapability(data)
+    }
+
+    private func requireExecTerminal() throws {
+        let reply = try roundTrip(.ping)
+        guard case .result(let data) = reply else { throw messageError(reply) }
+        try validateExecTerminalCapability(data)
     }
 
     private func requireExecStream() throws {

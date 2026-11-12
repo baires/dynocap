@@ -7,6 +7,7 @@ public struct RecordedLogStream: Codable {
     public var integrity: String
 }
 
+/// For format `terminal`, `stdout` is the combined terminal transcript and `stderr` is `absent`.
 public struct RecordedExecution: Codable {
     public var id: Int
     public var command: String
@@ -39,7 +40,8 @@ extension TaskManager {
         let directory = record.resultDirectory.map { URL(fileURLWithPath: $0) } ?? dir(record.id)
         let executions = try record.commands.enumerated().map { index, command -> RecordedExecution in
             // The journal owns these names. Never let a corrupt entry turn log replay into arbitrary file access.
-            guard command.stdout == "\(index).stdout", command.stderr == "\(index).stderr" else {
+            let output = command.isTerminal ? "\(index).terminal" : "\(index).stdout"
+            guard command.stdout == output, command.stderr == "\(index).stderr" else {
                 throw MicroVMError("execution \(index) has invalid log filenames",
                                    recovery: "Inspect the retained task record; log replay will not follow arbitrary paths.")
             }
@@ -67,7 +69,10 @@ extension TaskManager {
                 id: index, command: boundedLabel, state: state,
                 startedAtUnix: command.startedAtUnix, endedAtUnix: command.endedAtUnix, exitCode: command.exitCode,
                 format: command.outputFormat ?? "separate", stdout: stream(command.stdout, expected: command.stdoutBytes),
-                stderr: stream(command.stderr, expected: command.stderrBytes))
+                // A terminal has no stderr recording. `absent` keeps the field for older CLIs, which refuse the format.
+                stderr: command.isTerminal
+                    ? RecordedLogStream(fileName: command.stderr, bytes: nil, expectedBytes: nil, integrity: "absent")
+                    : stream(command.stderr, expected: command.stderrBytes))
         }
         return ExecutionLogs(id: record.id, name: record.name, resultExpiresAtUnix: record.expiresAtUnix,
                              directory: directory.path, executions: executions)

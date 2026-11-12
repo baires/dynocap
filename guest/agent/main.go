@@ -7,6 +7,7 @@ import (
 	"microvm.dev/guest/internal/workspace"
 	"net"
 	"os"
+	"os/signal"
 	"sync"
 	"syscall"
 
@@ -46,12 +47,23 @@ func main() {
 		return
 	}
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+	resetInheritedSignals()
 	if err := osChdirRoot(); err != nil {
 		log.Printf("chdir /: %v", err)
 	}
 	if err := serve(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// resetInheritedSignals stops guest commands from inheriting ignored signals.
+// The guest init starts the agent as an asynchronous shell command, so it begins
+// with SIGINT ignored; without this, Ctrl-C and a forwarded SIGINT would not end
+// most guest commands. Go keeps SIGINT and SIGHUP ignored if they were ignored
+// at startup; a caught signal instead reverts to its default action across exec.
+// The agent itself keeps running on these signals; nothing reads the channel.
+func resetInheritedSignals() {
+	signal.Notify(make(chan os.Signal, 1), syscall.SIGINT, syscall.SIGHUP)
 }
 
 type lockedConn struct {
@@ -96,6 +108,10 @@ func handleConn(c net.Conn) {
 			if s := lookupSession(msg.ID); s != nil {
 				s.signal(syscall.Signal(msg.Signal))
 			}
+		case protocol.TypeResize:
+			if s := lookupSession(msg.ID); s != nil {
+				s.resize(msg.Rows, msg.Cols)
+			}
 		default:
 			if !dispatchFrame(w, msg) {
 				return
@@ -138,7 +154,7 @@ func deliverStdinEOF(id uint32, leftover []protocol.Message) {
 
 func dispatchFrame(w *lockedConn, msg protocol.Message) bool {
 	switch msg.Type {
-	case protocol.TypeExec:
+	case protocol.TypeExec, protocol.TypeExecTTY:
 		sess := registerSession(msg.ID)
 		go func(req protocol.Message, s *session) {
 			defer finishSession(req.ID)

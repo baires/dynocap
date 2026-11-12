@@ -47,10 +47,12 @@ func TestGoldenVectors(t *testing.T) {
 		{"hello", Message{Type: TypeHello, Version: Version, Agent: AgentHello}},
 		{"exec-uname", Message{Type: TypeExec, ID: 7, TimeoutMS: 5000, Argv: []string{"uname", "-a"}}},
 		{"exec-shell", Message{Type: TypeExec, ID: 9, Argv: []string{"sh", "-c", "echo hello"}, Env: []string{"FOO=bar"}, Cwd: "/tmp"}},
+		{"exec-tty", Message{Type: TypeExecTTY, ID: 7, TimeoutMS: 5000, Rows: 24, Cols: 80, Argv: []string{"sh"}, Env: []string{"TERM=xterm"}, Cwd: "/workspace"}},
 		{"stdin-eof", Message{Type: TypeStdinEOF, ID: 7}},
 		{"stdin-binary", Message{Type: TypeStdin, ID: 7, Data: []byte{0, 255, 10}}},
 		{"kill", Message{Type: TypeKill, ID: 7}},
 		{"signal-int", Message{Type: TypeSignal, ID: 7, Signal: 2}},
+		{"resize", Message{Type: TypeResize, ID: 7, Rows: 40, Cols: 120}},
 		{"shutdown", Message{Type: TypeShutdown}},
 		{"started", Message{Type: TypeStarted, ID: 7}},
 		{"stdout-hello", Message{Type: TypeStdout, ID: 7, Data: []byte("hello\n")}},
@@ -82,7 +84,8 @@ func TestGoldenVectors(t *testing.T) {
 			if got.Type != tc.msg.Type || got.ID != tc.msg.ID || got.Agent != tc.msg.Agent || got.Cwd != tc.msg.Cwd || got.Error != tc.msg.Error {
 				t.Fatalf("decode mismatch %+v vs %+v", got, tc.msg)
 			}
-			if !bytes.Equal(got.Data, tc.msg.Data) || got.ExitCode != tc.msg.ExitCode || got.ExitSignal != tc.msg.ExitSignal {
+			if !bytes.Equal(got.Data, tc.msg.Data) || got.ExitCode != tc.msg.ExitCode || got.ExitSignal != tc.msg.ExitSignal ||
+				got.Rows != tc.msg.Rows || got.Cols != tc.msg.Cols || got.TimeoutMS != tc.msg.TimeoutMS {
 				t.Fatalf("payload mismatch %+v", got)
 			}
 		})
@@ -98,6 +101,13 @@ func TestRejects(t *testing.T) {
 	}
 	if _, err := Decode([]byte{0x99}); err == nil {
 		t.Fatal("expected unknown type")
+	}
+	// An EXEC_TTY body without the size is malformed, not a plain exec.
+	if _, err := Decode([]byte{TypeExecTTY, 0, 0, 0, 7, 0, 0, 0, 0, 0, 1}); err == nil {
+		t.Fatal("expected short exec-tty")
+	}
+	if !AdvertisesTerminal(AgentHello) || AdvertisesTerminal("microvm-agent signal=1") || AdvertisesTerminal("microvm-agent tty=10") {
+		t.Fatal("terminal capability token is not exact")
 	}
 	// Length prefix claims more than the cap.
 	var huge [4]byte

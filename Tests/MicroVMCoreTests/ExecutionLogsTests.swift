@@ -122,12 +122,12 @@ final class ExecutionLogsTests: XCTestCase {
         let unknown = try fixture.run(["logs", "demo", "--exec", "999"])
         XCTAssertEqual(unknown.status, 1)
         XCTAssertEqual(unknown.stdout, Data())
-        fixture.record.commands[1].outputFormat = "terminal"
+        fixture.record.commands[1].outputFormat = "pty-v2"
         try fixture.save()
-        let terminal = try fixture.run(["logs", "demo"])
-        XCTAssertEqual(terminal.status, 1)
-        XCTAssertEqual(terminal.stdout, Data())
-        XCTAssertTrue(String(data: terminal.stderr, encoding: .utf8)?.contains("terminal") == true)
+        let future = try fixture.run(["logs", "demo"])
+        XCTAssertEqual(future.status, 1)
+        XCTAssertEqual(future.stdout, Data())
+        XCTAssertTrue(String(data: future.stderr, encoding: .utf8)?.contains("pty-v2") == true)
         fixture.record.commands = []
         try fixture.save()
         let empty = try fixture.run(["logs", "demo", "--list"])

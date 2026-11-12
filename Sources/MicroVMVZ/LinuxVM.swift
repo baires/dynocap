@@ -72,6 +72,14 @@ public final class VirtualizationBackend: VMBackend {
         try vm.signalExec(id, signal)
     }
 
+    public func resizeExec(name: String, id: UInt32, size: TerminalSize) throws {
+        lock.lock()
+        let vm = machines[name]
+        lock.unlock()
+        guard let vm else { throw MicroVMError("VM \(name) is not running") }
+        try vm.resizeExec(id, size)
+    }
+
     public func destroy(name: String, completion: @escaping (Result<Void, Error>) -> Void) {
         lock.lock()
         let vm = machines[name]
@@ -136,6 +144,11 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
             emit(.failed("guest agent is not connected"))
             return
         }
+        // An older agent drops the whole connection on EXEC_TTY, which would end every exec in this sandbox.
+        if request.terminal != nil && !guestAgentAllocatesTerminals(guestAgent) {
+            emit(.failed("guest agent cannot allocate terminals; rebuild the guest image"))
+            return
+        }
         let bounded = max(0, min(request.timeoutSeconds, 24 * 60 * 60))
         let timeoutMS = UInt32(bounded * 1000)
         let start = ExecStart(
@@ -143,7 +156,8 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
             timeoutMS: timeoutMS,
             argv: request.argv,
             env: request.env,
-            cwd: request.cwd
+            cwd: request.cwd,
+            terminal: request.terminal
         )
         let started = DispatchSemaphore(value: 0)
         handlerLock.lock()
@@ -203,6 +217,14 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
         guard signal > 0, signal < 64 else { throw MicroVMError("unsupported signal \(signal)") }
         guard let link = connectedLink else { throw MicroVMError("guest agent is not connected") }
         try link.write(.signal(id: id, signal: signal))
+    }
+
+    func resizeExec(_ id: UInt32, _ size: TerminalSize) throws {
+        guard guestAgentAllocatesTerminals(guestAgent) else {
+            throw MicroVMError("guest agent cannot allocate terminals; rebuild the guest image")
+        }
+        guard let link = connectedLink else { throw MicroVMError("guest agent is not connected") }
+        try link.write(.resize(id: id, size: size))
     }
 
     func cancelExec(_ id: UInt32) {

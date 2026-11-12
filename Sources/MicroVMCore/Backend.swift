@@ -46,6 +46,8 @@ public struct ExecRequest: Equatable {
     public var stdinFile: URL?
     /// When true, the backend leaves guest stdin open until writeStdin/closeStdin.
     public var streamStdin = false
+    /// Set to run on a guest terminal. Output arrives as `.stdout` only.
+    public var terminal: TerminalSize?
     public var name: String
     public var id: UInt32
     public var argv: [String]
@@ -77,6 +79,7 @@ public protocol VMBackend: AnyObject {
     func writeStdin(name: String, id: UInt32, data: Data) throws
     func closeStdin(name: String, id: UInt32) throws
     func signalExec(name: String, id: UInt32, signal: Int32) throws
+    func resizeExec(name: String, id: UInt32, size: TerminalSize) throws
     func cancelExec(name: String, id: UInt32)
     func destroy(name: String, completion: @escaping (Result<Void, Error>) -> Void)
 }
@@ -87,6 +90,10 @@ extension VMBackend {
 
     public func signalExec(name: String, id: UInt32, signal: Int32) throws {
         throw MicroVMError("guest agent cannot deliver signals; rebuild the guest image")
+    }
+
+    public func resizeExec(name: String, id: UInt32, size: TerminalSize) throws {
+        throw MicroVMError("guest agent cannot allocate terminals; rebuild the guest image")
     }
 }
 

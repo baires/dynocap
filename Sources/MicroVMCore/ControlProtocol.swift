@@ -1,7 +1,7 @@
 import Foundation
 
 /// CLI ↔ daemon frames. One request per connection, except an exec that streams
-/// stdin may send stdin frames until EOF, and may send a signal frame, while the daemon writes output.
+/// stdin may send stdin frames until EOF, and may send signal and resize frames, while the daemon writes output.
 ///
 ///	u32 length
 ///	u8  type
@@ -23,6 +23,7 @@ public enum ControlMessage: Equatable {
     case stdin(Data)
     case stdinEOF
     case signal(Int32)
+    case resize(TerminalSize)
 }
 
 public enum ControlType {
@@ -42,6 +43,7 @@ public enum ControlType {
     public static let stdin: UInt8 = 21
     public static let stdinEOF: UInt8 = 22
     public static let signal: UInt8 = 23
+    public static let resize: UInt8 = 24
 }
 
 public enum ControlCodec {
@@ -102,6 +104,12 @@ public enum ControlCodec {
             type = ControlType.signal
             var body = Data()
             body.appendI32(signal)
+            payload = body
+        case .resize(let size):
+            type = ControlType.resize
+            var body = Data()
+            body.appendU16(size.rows)
+            body.appendU16(size.cols)
             payload = body
         }
         var out = Data()
@@ -164,6 +172,11 @@ public enum ControlCodec {
             try c.expectEnd()
             guard signal > 0, signal < 64 else { throw MicroVMError("unsupported signal \(signal)") }
             return .signal(signal)
+        case ControlType.resize:
+            var c = Cursor(Data(payload))
+            let size = TerminalSize(rows: try c.u16(), cols: try c.u16())
+            try c.expectEnd()
+            return .resize(size)
         default:
             throw MicroVMError("unknown control type \(type)")
         }
@@ -243,6 +256,18 @@ public struct PolicyCapabilities: Codable {
     public var transferVersion: Int? = 1
     public var execStreamVersion: Int? = 1
     public var execSignalVersion: Int? = 1
+    public var execTerminalVersion: Int? = 1
+}
+
+public func validateExecTerminalCapability(_ data: Data) throws {
+    guard let capability = try? JSONDecoder().decode(PolicyCapabilities.self, from: data),
+        capability.execTerminalVersion == 1
+    else {
+        throw MicroVMError(
+            "daemon cannot allocate guest terminals; rebuild and restart it",
+            code: .incompatibleDaemon,
+            recovery: "Rebuild microvm, stop the running daemon, and retry; or drop --tty to run without a terminal.")
+    }
 }
 
 public func validateExecSignalCapability(_ data: Data) throws {

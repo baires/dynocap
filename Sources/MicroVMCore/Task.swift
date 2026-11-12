@@ -35,6 +35,10 @@ public struct TaskCommandRecord: Codable {
     var stderrBytes: Int64?
     var logsTruncated: Bool?
     var outputFormat: String?
+
+    /// A terminal transcript is one file; there is no separate stderr recording.
+    var isTerminal: Bool { outputFormat == "terminal" }
+    var logFiles: [String] { isTerminal ? [stdout] : [stdout, stderr] }
 }
 
 public struct TaskRecord: Codable {
@@ -347,7 +351,8 @@ final class TaskManager {
             throw error
         }
     }
-    func begin(_ name: String, argv: [String], env: [String] = []) throws -> Int? {
+    /// A terminal exec journals one combined transcript in `N.terminal` with format `terminal`.
+    func begin(_ name: String, argv: [String], env: [String] = [], terminal: Bool = false) throws -> Int? {
         condition.lock()
         defer { condition.unlock() }
         guard var record = current, record.id == name else { return nil }
@@ -358,12 +363,13 @@ final class TaskManager {
         let index = record.commands.count
         record.commands.append(
             TaskCommandRecord(
-                argv: argv, startedAtUnix: unixNow(), stdout: "\(index).stdout", stderr: "\(index).stderr",
-                stdoutBytes: 0, stderrBytes: 0, logsTruncated: false, outputFormat: "separate"))
+                argv: argv, startedAtUnix: unixNow(), stdout: terminal ? "\(index).terminal" : "\(index).stdout",
+                stderr: "\(index).stderr", stdoutBytes: 0, stderrBytes: 0, logsTruncated: false,
+                outputFormat: terminal ? "terminal" : "separate"))
         guard record.commands.count <= 1000, try JSONEncoder().encode(record).count <= 4 << 20 else {
             throw MicroVMError("task command journal limit exceeded")
         }
-        try ensureCommandLogs(directory: dir(name), index: index)
+        try ensureCommandLogs(directory: dir(name), names: record.commands[index].logFiles)
         current = record
         try save(record)
         active += 1
@@ -488,7 +494,7 @@ final class TaskManager {
             _ = try hostTree(
                 "microvm-workspace", ["result", directory.appendingPathComponent("baseline").path, final.path, stage.path], nil, nil)
             for cmd in record.commands {
-                for name in [cmd.stdout, cmd.stderr] {
+                for name in cmd.logFiles {
                     try publishCommandLog(from: directory.appendingPathComponent(name), to: stage.appendingPathComponent(name))
                 }
             }
@@ -511,7 +517,7 @@ final class TaskManager {
             }
             try fm.moveItem(at: stage, to: URL(fileURLWithPath: record.resultDirectory!))
             for command in record.commands {
-                for name in [command.stdout, command.stderr] { try? fm.removeItem(at: directory.appendingPathComponent(name)) }
+                for name in command.logFiles { try? fm.removeItem(at: directory.appendingPathComponent(name)) }
             }
             condition.lock()
             current = record
@@ -634,8 +640,8 @@ final class TaskManager {
     }
 }
 
-func ensureCommandLogs(directory: URL, index: Int) throws {
-    for name in ["\(index).stdout", "\(index).stderr"] {
+func ensureCommandLogs(directory: URL, names: [String]) throws {
+    for name in names {
         let path = directory.appendingPathComponent(name)
         if FileManager.default.fileExists(atPath: path.path) { continue }
         guard FileManager.default.createFile(atPath: path.path, contents: Data()) else {

@@ -38,6 +38,9 @@ public struct ExecCommand: Codable, Equatable {
     /// `none` closes guest stdin immediately, `pipe` streams host stdin until EOF,
     /// and `interactive` does the same even when host stdin is a terminal.
     public var input: String?
+    /// Set to run on a guest terminal of this size. Output is one combined stdout stream.
+    /// An older daemon ignores this field, so clients must check `execTerminalVersion`.
+    public var terminal: TerminalSize?
 
     public init(
         name: String, argv: [String], env: [String], cwd: String, timeoutSeconds: Int,
@@ -108,6 +111,27 @@ public final class ExecInterrupt {
         lock.lock()
         defer { lock.unlock() }
         return aborted
+    }
+}
+
+/// Host window changes for one terminal exec.
+public final class ExecResize {
+    public init() {}
+
+    private let lock = NSLock()
+    private var send: ((TerminalSize) -> Void)?
+
+    public func bind(_ send: @escaping (TerminalSize) -> Void) {
+        lock.lock()
+        self.send = send
+        lock.unlock()
+    }
+
+    public func deliver(_ size: TerminalSize) {
+        lock.lock()
+        let send = self.send
+        lock.unlock()
+        send?(size)
     }
 }
 

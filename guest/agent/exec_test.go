@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"net"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
 	"syscall"
@@ -287,11 +289,17 @@ func TestSignalReachesProcessGroupWhileStdinIsBlocked(t *testing.T) {
 		ID:   7,
 		Argv: []string{"python3", "-c", `
 import os, signal, time
+# The child reports readiness only after it can die from SIGINT; Python
+# otherwise ignores a KeyboardInterrupt raised inside its fork hooks.
+ready_r, ready_w = os.pipe()
 pid = os.fork()
 if pid == 0:
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+    os.write(ready_w, b"x")
     time.sleep(30)
     os._exit(0)
 signal.signal(signal.SIGINT, signal.SIG_IGN)
+os.read(ready_r, 1)
 print("ready", flush=True)
 os.wait()
 print("done", flush=True)
@@ -339,4 +347,59 @@ print("done", flush=True)
 	}
 	client.Close()
 	<-readDone
+}
+
+// Input and EOF that both arrive before the process starts must not be dropped.
+func TestStdinBeforeStartIsKeptAcrossEarlyEOF(t *testing.T) {
+	s := registerSession(53)
+	defer finishSession(53)
+	if !s.tryWriteStdin([]byte("early\n")) {
+		t.Fatal("pre-start stdin was refused")
+	}
+	s.closeStdin()
+	var stdout bytes.Buffer
+	var exit protocol.Message
+	Execute(protocol.Message{Type: protocol.TypeExec, ID: 53, Argv: []string{"cat"}}, func(m protocol.Message) error {
+		switch m.Type {
+		case protocol.TypeStdout:
+			stdout.Write(m.Data)
+		case protocol.TypeExit:
+			exit = m
+		}
+		return nil
+	})
+	if stdout.String() != "early\n" || exit.ExitCode != 0 {
+		t.Fatalf("stdout %q exit %+v", stdout.String(), exit)
+	}
+}
+
+// The guest init starts the agent as an asynchronous shell command, so the
+// agent begins with SIGINT ignored. Guest commands must not inherit that. The
+// check runs in a child test binary started the same way, with the signals ignored.
+func TestCommandsDoNotInheritAnIgnoredInterrupt(t *testing.T) {
+	cmd := exec.Command("sh", "-c", `trap "" INT HUP; exec "$0" -test.run='^TestHelperStartedWithInterruptIgnored$'`, os.Args[0])
+	cmd.Env = append(os.Environ(), "MICROVM_AGENT_IGNORED_HELPER=1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("helper failed: %v\n%s", err, out)
+	}
+	if !bytes.Contains(out, []byte("inherited: False False\n")) {
+		t.Fatalf("guest command inherited ignored signals:\n%s", out)
+	}
+}
+
+func TestHelperStartedWithInterruptIgnored(t *testing.T) {
+	if os.Getenv("MICROVM_AGENT_IGNORED_HELPER") != "1" {
+		t.Skip("helper for TestCommandsDoNotInheritAnIgnoredInterrupt")
+	}
+	resetInheritedSignals()
+	msgs := collectExec(t, protocol.Message{Type: protocol.TypeExec, ID: 54, Argv: []string{"python3", "-c", `
+import signal
+print("inherited:", signal.getsignal(signal.SIGINT) is signal.SIG_IGN, signal.getsignal(signal.SIGHUP) is signal.SIG_IGN)
+`}})
+	for _, m := range msgs {
+		if m.Type == protocol.TypeStdout {
+			os.Stdout.Write(m.Data)
+		}
+	}
 }

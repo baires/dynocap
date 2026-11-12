@@ -195,6 +195,7 @@ func parseExec(_ args: [String], _ prefix: inout InvocationPrefix) throws -> Exe
     var env: [String] = []
     var argv: [String] = []
     var input: String?
+    var terminal = false
     var reader = OptionReader(args: args)
     while let token = try reader.next() {
         if prefix.help || prefix.version { break }
@@ -211,6 +212,14 @@ func parseExec(_ args: [String], _ prefix: inout InvocationPrefix) throws -> Exe
             }
         case .flag(let flag, let inline):
             if try consumeGlobal(flag, inline, reader: &reader, prefix: &prefix) { continue }
+            // -it and -ti are the familiar spelling of -i -t.
+            if flag == "-it" || flag == "-ti" {
+                if inline != nil { throw usageError("\(flag) does not take a value") }
+                if input == "none" { throw usageError("--tty cannot be combined with --no-input") }
+                input = "interactive"
+                terminal = true
+                continue
+            }
             guard knownFlag(["exec"], flag) else { throw usageError("unknown flag \(flag)") }
             switch flag {
             case "--timeout":
@@ -228,7 +237,12 @@ func parseExec(_ args: [String], _ prefix: inout InvocationPrefix) throws -> Exe
             case "--no-input":
                 if inline != nil { throw usageError("--no-input does not take a value") }
                 if input == "interactive" { throw usageError("--no-input cannot be combined with --interactive") }
+                if terminal { throw usageError("--no-input cannot be combined with --tty") }
                 input = "none"
+            case "-t", "--tty":
+                if inline != nil { throw usageError("\(flag) does not take a value") }
+                if input == "none" { throw usageError("--tty cannot be combined with --no-input") }
+                terminal = true
             default:
                 throw usageError("unknown flag \(flag)")
             }
@@ -242,7 +256,13 @@ func parseExec(_ args: [String], _ prefix: inout InvocationPrefix) throws -> Exe
     guard !argv.isEmpty, !argv[0].isEmpty else {
         throw usageError("exec requires a command. Example: microvm exec \(name) -- uname -a")
     }
-    return ExecCommand(name: name, argv: argv, env: env, cwd: cwd, timeoutSeconds: timeout, input: input)
+    var command = ExecCommand(name: name, argv: argv, env: env, cwd: cwd, timeoutSeconds: timeout, input: input)
+    if terminal {
+        // A terminal always carries live input. The CLI fills in the host size before sending.
+        command.input = "interactive"
+        command.terminal = TerminalSize(rows: 0, cols: 0)
+    }
+    return command
 }
 
 func applyStartFlag(_ command: inout TaskCommand, _ flag: String, _ raw: String, allowName: Bool) throws {
