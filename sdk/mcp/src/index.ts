@@ -73,6 +73,12 @@ export function createServer(options: ToolOptions = {}): McpServer {
         cwd: z.string().optional(),
         env: z.record(z.string(), z.string()).optional(),
         timeoutSeconds: z.number().int().positive().optional(),
+        terminal: z
+          .boolean()
+          .optional()
+          .describe(
+            "Run on a 24x80 guest terminal; output is one combined transcript"
+          ),
       },
     },
     async (input) => microvmExec(input as ExecInput, host)
@@ -130,13 +136,14 @@ export function createServer(options: ToolOptions = {}): McpServer {
     "microvm_task_exec",
     {
       description:
-        "Run a task command with a 300-second default deadline. Returns bounded output and a host log directory.",
+        "Run a task command with a 300-second default deadline. Returns bounded output and a host log directory. Set terminal for programs that require a terminal; output is then one combined 24x80 terminal transcript.",
       inputSchema: {
         name: z.string(),
         command: z.string(),
         cwd: z.string().optional(),
         env: z.record(z.string(), z.string()).optional(),
         timeoutSeconds: z.number().int().min(1).max(86400).optional(),
+        terminal: z.boolean().optional(),
       },
     },
     async (input) => microvmTaskExec(input, host)

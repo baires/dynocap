@@ -53,6 +53,14 @@ export type ExecOptions = {
   timeoutSeconds?: number;
   /** Streamed to the guest, then closed. Requires an exec stream v1 daemon. */
   stdin?: Uint8Array;
+  /**
+   * Run on a guest terminal of this fixed size, for programs that need one.
+   * `stdin` is typed into the terminal (its EOF does not close it). Output is
+   * one combined terminal transcript in `stdout`, including echo, CR LF, and
+   * control sequences; `stderr` is empty. Requires `execTerminalVersion: 1`
+   * and a guest image that advertises `tty=1`. There is no live resize.
+   */
+  terminal?: { rows: number; cols: number };
   /** Raw guest bytes for this chunk. A character may be split across chunks. */
   onStdout?: (chunk: Uint8Array) => void;
   onStderr?: (chunk: Uint8Array) => void;
@@ -149,10 +157,17 @@ export class Sandbox {
         env: envEntries(options.env ?? {}),
         cwd: options.cwd ?? "",
         timeoutSeconds: options.timeoutSeconds ?? 60,
-        ...(options.stdin === undefined ? {} : { input: "pipe" as const }),
+        ...(options.terminal
+          ? {
+              input: "interactive" as const,
+              terminal: terminalSize(options.terminal),
+            }
+          : options.stdin === undefined
+            ? {}
+            : { input: "pipe" as const }),
       },
       options,
-      options.stdin
+      options.terminal ? (options.stdin ?? new Uint8Array()) : options.stdin
     );
     const exitCode = outcome.signal > 0 ? 128 + outcome.signal : outcome.code;
     return {
@@ -215,4 +230,19 @@ function envEntries(env: Record<string, string>): string[] {
     }
     return `${key}=${value}`;
   });
+}
+
+function terminalSize(size: { rows: number; cols: number }): {
+  rows: number;
+  cols: number;
+} {
+  const valid = (value: number) =>
+    Number.isInteger(value) && value >= 1 && value <= 0xffff;
+  if (!valid(size.rows) || !valid(size.cols)) {
+    throw new SandboxError(
+      "daemon",
+      "terminal rows and cols must be integers from 1 to 65535"
+    );
+  }
+  return { rows: size.rows, cols: size.cols };
 }

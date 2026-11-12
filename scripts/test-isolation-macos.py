@@ -83,17 +83,23 @@ def main():
                   const home = { home: process.argv[3] };
                   const sdk = await Sandbox.create({ ...home, name: 'sdk' });
                   assert.equal((await sdk.exec('echo sdk')).stdout.trim(), 'sdk');
+                  const tty = await sdk.exec('tty; stty size; echo err >&2', { terminal: { rows: 30, cols: 100 } });
+                  assert.equal(tty.exitCode, 0);
+                  assert.match(tty.stdout, /^\\/dev\\/pts\\/\\d+\\r\\n30 100\\r\\nerr\\r\\n$/);
+                  assert.equal(tty.stderr, '');
                   assert.equal((await Sandbox.list(home)).find(s => s.name === 'sdk').network, 'none');
                   await sdk.destroy();
                   assert.equal((await microvmRun({name: 'mcp'}, home)).isError, undefined);
                   assert.equal((await microvmExec({name: 'mcp', command: 'true'}, home)).isError, undefined);
+                  const term = await microvmExec({name: 'mcp', command: 'stty size', terminal: true}, home);
+                  assert.equal(term.content[0].text, 'exit 0\\nterminal:\\n24 80\\r\\n');
                   assert.equal((await microvmRun({name: 'denied', network: 'nat'}, home)).isError, true);
                   assert.equal((await microvmExec({name: 'online', command: 'true'}, home)).isError, true);
                   assert.equal((await microvmExec({name: 'online', command: 'true'}, {...home, allowNat: true})).isError, undefined);
                   await microvmDestroy('mcp', home);
                 """
                 subprocess.run(["node", "--input-type=module", "-e", client_test, sdk, mcp, str(home)], check=True, timeout=30)
-                print("PASS: real SDK/MCP offline exec and MCP NAT permission checks", flush=True)
+                print("PASS: real SDK/MCP offline exec, terminal exec, and MCP NAT permission checks", flush=True)
 
                 cli("run", "--name", "short", "--ttl", "2")
                 started = time.monotonic()

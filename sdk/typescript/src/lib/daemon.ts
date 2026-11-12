@@ -34,6 +34,8 @@ export type ExecBody = {
   requireOffline?: boolean;
   permitFiltered?: boolean;
   input?: "none" | "pipe" | "interactive";
+  /** Run on a guest terminal of this size. Older daemons ignore it, so check first. */
+  terminal?: { rows: number; cols: number };
   name: string;
   argv: string[];
   env: string[];
@@ -79,6 +81,7 @@ export async function exec(
   if (request.input === "pipe" || request.input === "interactive") {
     await requireExecStream(home);
   }
+  if (request.terminal) await requireExecTerminal(home);
   return execStream(
     daemonSocket(home),
     encodeJSON(ControlType.exec, request),
@@ -170,6 +173,23 @@ async function requireExecStream(home: string): Promise<void> {
     throw new SandboxError(
       "daemon",
       "daemon lacks exec stream v1; rebuild and restart it"
+    );
+  }
+}
+
+async function requireExecTerminal(home: string): Promise<void> {
+  const reply = await roundTrip(
+    daemonSocket(home),
+    encodeFrame(ControlType.ping, new Uint8Array())
+  );
+  if (
+    !reply ||
+    typeof reply !== "object" ||
+    (reply as Record<string, unknown>).execTerminalVersion !== 1
+  ) {
+    throw new SandboxError(
+      "daemon",
+      "daemon cannot allocate guest terminals; rebuild and restart it"
     );
   }
 }

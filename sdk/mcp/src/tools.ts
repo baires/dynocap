@@ -9,7 +9,7 @@ import {
   type ClientOptions,
 } from "@microvm/sdk";
 
-import { cap, presentExec } from "./lib/policy.ts";
+import { MCP_TERMINAL, cap, presentExec } from "./lib/policy.ts";
 
 const local =
   "This is a local Linux sandbox on the user's Mac, through their microvm daemon. It is not a cloud sandbox.";
@@ -39,11 +39,13 @@ export type ExecInput = {
   cwd?: string;
   env?: Record<string, string>;
   timeoutSeconds?: number;
+  /** Run on a 24x80 guest terminal. Output is one combined transcript. */
+  terminal?: boolean;
 };
 
 export const toolDescriptions = {
   microvm_run: `${local} Boot a sandbox and return when it is running. Default network none. nat is unrestricted outbound access and requires MICROVM_MCP_ALLOW_NAT=1. filtered allows HTTPS only to registry.npmjs.org and the task Git host and requires MICROVM_MCP_ALLOW_FILTERED=1. Default lifetime 1800 seconds, maximum 86400.`,
-  microvm_exec: `${local} Run a shell command inside a running sandbox. The command is sh -c. Default deadline is 30 seconds. Output is capped.`,
+  microvm_exec: `${local} Run a shell command inside a running sandbox. The command is sh -c. Default deadline is 30 seconds. Output is capped. Set terminal for programs that require a terminal: they run on a 24x80 guest terminal and output is one combined transcript, including control sequences.`,
   microvm_ps: `${local} List sandboxes and their phases.`,
   microvm_destroy: `${local} Destroy a sandbox and delete its record.`,
 } as const;
@@ -190,11 +192,16 @@ export async function microvmTaskExec(
     const task = input.name.startsWith("task-")
       ? Task.connect(input.name, access)
       : await Task.open(input.name, access);
-    const result = await task.exec(input.command, input);
+    const { terminal, ...execOptions } = input;
+    const result = await task.exec(input.command, {
+      ...execOptions,
+      ...(terminal ? { terminal: MCP_TERMINAL } : {}),
+    });
+    const output = terminal
+      ? `terminal:\n${result.stdout}`
+      : `${result.stdout}\nstderr:\n${result.stderr}`;
     return ok(
-      cap(
-        `exit ${result.exitCode}\nlogs: ${result.logDirectory}\n${result.stdout}\nstderr:\n${result.stderr}`
-      )
+      cap(`exit ${result.exitCode}\nlogs: ${result.logDirectory}\n${output}`)
     );
   });
 }

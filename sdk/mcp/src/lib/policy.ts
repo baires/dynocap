@@ -2,6 +2,8 @@ import type { Sandbox } from "@microvm/sdk";
 
 export const EXEC_TIMEOUT_SECONDS = 30;
 export const OUTPUT_CAP_BYTES = 64 * 1024;
+/** Fixed size for `terminal: true`; MCP has no window to follow. */
+export const MCP_TERMINAL = { rows: 24, cols: 80 } as const;
 
 const TRUNCATED = "\n… output truncated\n";
 
@@ -14,9 +16,11 @@ export async function presentExec(
     cwd?: string;
     env?: Record<string, string>;
     timeoutSeconds?: number;
+    terminal?: boolean;
   }
 ): Promise<string> {
   const result = await sandbox.exec(command, {
+    ...(options.terminal ? { terminal: MCP_TERMINAL } : {}),
     requireOffline: options.requireOffline,
     ...(options.permitFiltered === undefined
       ? {}
@@ -25,6 +29,9 @@ export async function presentExec(
     env: options.env,
     timeoutSeconds: options.timeoutSeconds ?? EXEC_TIMEOUT_SECONDS,
   });
+  // A terminal has one combined transcript; there is no stderr to label.
+  if (options.terminal)
+    return cap(`exit ${result.exitCode}\nterminal:\n${result.stdout}`);
   let text = `exit ${result.exitCode}\n${result.stdout}`;
   if (result.stderr.length > 0) text += `\nstderr:\n${result.stderr}`;
   return cap(text);

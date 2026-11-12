@@ -12,6 +12,7 @@ import Glibc
 public final class HostTerminalMode {
     private let fd: Int32
     private let saved: termios
+    private let guardian: TerminalGuardian?
     private let lock = NSLock()
     private var active = true
 
@@ -20,9 +21,12 @@ public final class HostTerminalMode {
         guard tcgetattr(fd, &original) == 0 else {
             throw MicroVMError("cannot read host terminal settings: \(POSIX.errnoString())")
         }
+        // Started before raw mode so it saves the settings to put back.
+        guardian = ttyname(fd).flatMap { TerminalGuardian(terminalPath: String(cString: $0)) }
         var raw = original
         cfmakeraw(&raw)
         guard tcsetattr(fd, TCSANOW, &raw) == 0 else {
+            guardian?.release()
             throw MicroVMError("cannot put the host terminal in raw mode: \(POSIX.errnoString())")
         }
         self.fd = fd
@@ -38,6 +42,58 @@ public final class HostTerminalMode {
         active = false
         var original = saved
         _ = tcsetattr(fd, TCSANOW, &original)
+        guardian?.release()
+    }
+}
+
+/// Restores the host terminal if the CLI dies while it is raw, including by SIGKILL,
+/// which no handler can catch. A shell helper saves the settings, then waits on a pipe
+/// that only this process can write. `done` means the CLI restored the terminal itself;
+/// EOF without it means the CLI died, and the helper puts the saved settings back.
+/// Best effort: a signal sent to the whole process group can end the helper too.
+final class TerminalGuardian {
+    static let script = """
+        trap '' HUP INT QUIT TERM TSTP TTIN TTOU
+        saved=$(stty -g <"$1") || exit 0
+        echo ready
+        IFS= read -r line || line=
+        [ "$line" = done ] || stty "$saved" <"$1"
+        """
+
+    private let control: FileHandle
+    private let lock = NSLock()
+    private var released = false
+
+    init?(terminalPath: String) {
+        let process = Process()
+        let input = Pipe()
+        let output = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", Self.script, "microvm-terminal-guard", terminalPath]
+        process.standardInput = input
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        do { try process.run() } catch { return nil }
+        control = input.fileHandleForWriting
+        let ready = DispatchSemaphore(value: 0)
+        var line = Data()
+        Thread.detachNewThread {
+            line = output.fileHandleForReading.readData(ofLength: 6)
+            ready.signal()
+        }
+        guard ready.wait(timeout: .now() + 2) == .success, line == Data("ready\n".utf8) else {
+            try? control.close()
+            return nil
+        }
+    }
+
+    func release() {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !released else { return }
+        released = true
+        try? control.write(contentsOf: Data("done\n".utf8))
+        try? control.close()
     }
 }
 

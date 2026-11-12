@@ -401,12 +401,17 @@ let cliCommandSpecs: [CLICommandSpec] = [
         path: ["task", "exec"],
         group: .advanced,
         summary: "Run a command in a project task.",
-        usage: "microvm task exec ID -- COMMAND [ARGS...]",
-        flags: [],
-        examples: ["microvm task exec demo -- npm test"],
+        usage: "microvm task exec ID [-t] -- COMMAND [ARGS...]",
+        flags: [
+            CLIFlag(name: "-t", value: nil, summary: "Run on a guest terminal, as exec -t. Stdin must be a terminal."),
+            CLIFlag(name: "--tty", value: nil, summary: "Same as -t."),
+        ],
+        examples: ["microvm task exec demo -- npm test", "microvm task exec -t demo -- sh", "microvm task exec --tty demo -- top"],
         discussion: """
         Everything after -- is the guest command and is preserved unchanged, including tokens that look \
-        like microvm flags. Use exec to set the working directory, environment, or command timeout.
+        like microvm flags. Use exec to set the working directory, environment, or command timeout. \
+        -t behaves as it does for exec: a controlling guest terminal, raw host terminal, forwarded resizes, \
+        and one combined transcript.
         """
     ),
     CLICommandSpec(

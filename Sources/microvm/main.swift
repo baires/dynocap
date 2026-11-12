@@ -110,11 +110,20 @@ struct Main {
             }
             print(try formatRuntimePreparationResult(artifact, home: paths.home, log: log, output: invocation.output), terminator: "")
         case .task(let command):
+            var request: ExecCommand?
+            if command.op == "exec", let id = command.id, let argv = command.argv {
+                var exec = ExecCommand(name: id, argv: argv, env: [], cwd: "/workspace", timeoutSeconds: 300)
+                if command.terminal == true {
+                    exec.terminal = TerminalSize(rows: 0, cols: 0)
+                    exec.input = "interactive"
+                }
+                try requireTerminalInput(exec, stdinIsTerminal: isatty(STDIN_FILENO) == 1)
+                request = exec
+            }
             let paths = try ready(invocation)
             let client = DaemonClient(socketPath: paths.socket.path)
-            if command.op == "exec", let id = command.id, let argv = command.argv {
-                var request = ExecCommand(name: id, argv: argv, env: [], cwd: "/workspace", timeoutSeconds: 300)
-                request.input = resolveExecInput(requested: nil, stdinIsTerminal: isatty(STDIN_FILENO) == 1)
+            if var request {
+                request.input = resolveExecInput(requested: request.input, stdinIsTerminal: isatty(STDIN_FILENO) == 1)
                 let status = try foregroundExec(client: client, command: request)
                 exit(status)
             }

@@ -10,6 +10,8 @@ export type FakeExec = {
   env: string[];
   cwd: string;
   timeoutSeconds: number;
+  input?: string;
+  terminal?: { rows: number; cols: number };
 };
 
 type Recorded = {
@@ -89,6 +91,7 @@ type FakeBehavior = {
   taskVersion: number | null;
   taskManagementVersion: number | null;
   execStreamVersion: number | null;
+  execTerminalVersion: number | null;
   resolveID: string;
   execNetwork: "none" | "nat";
   recordedNetwork: "none" | "nat" | "unknown";
@@ -134,6 +137,9 @@ function handle(
               ...(behavior.execStreamVersion === null
                 ? {}
                 : { execStreamVersion: behavior.execStreamVersion ?? 1 }),
+              ...(behavior.execTerminalVersion === null
+                ? {}
+                : { execTerminalVersion: behavior.execTerminalVersion ?? 1 }),
             })
           )
         );
@@ -286,9 +292,16 @@ function handle(
           env: request.env as string[],
           cwd: String(request.cwd ?? ""),
           timeoutSeconds: Number(request.timeoutSeconds),
+          ...(request.input === undefined
+            ? {}
+            : { input: String(request.input) }),
+          ...(request.terminal === undefined
+            ? {}
+            : { terminal: request.terminal as { rows: number; cols: number } }),
         });
         if (request.input === "pipe" || request.input === "interactive") {
           openExecs.set(socket, []);
+          if (request.terminal) terminals.add(socket);
           return;
         }
         if (argv[0] === "sleep" || command.startsWith("sleep")) {
@@ -359,6 +372,18 @@ function handle(
           return;
         }
         openExecs.delete(socket);
+        if (terminals.delete(socket)) {
+          // Like a guest terminal: echo with CR LF, then the program's output, all on stdout.
+          const typed = Buffer.concat(chunks).toString("utf8");
+          const echo = typed.replace(/\r/g, "\r\n");
+          writeFrame(
+            socket,
+            17,
+            Buffer.from(`${echo}tty: ${typed.trim()}\r\n`)
+          );
+          writeFrame(socket, 19, exitFrame(0, 0));
+          return;
+        }
         writeFrame(socket, 17, Buffer.concat(chunks));
         writeFrame(socket, 19, exitFrame(0, 0));
         return;
@@ -374,6 +399,8 @@ function handle(
     );
   }
 }
+
+const terminals = new WeakSet<net.Socket>();
 
 function exitFrame(code: number, signal: number): Buffer {
   const payload = Buffer.alloc(8);

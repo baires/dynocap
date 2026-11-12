@@ -28,6 +28,27 @@ final class ExecTerminalTests: XCTestCase {
         }
     }
 
+    func testTaskExecTerminalFlag() throws {
+        for flag in ["-t", "--tty"] {
+            guard case .task(let command) = try parseCommand(["microvm", "task", "exec", flag, "demo", "--", "sh"]).command else {
+                return XCTFail("expected task exec for \(flag)")
+            }
+            XCTAssertEqual(command.terminal, true)
+            XCTAssertEqual(command.argv, ["sh"])
+        }
+        guard case .task(let plain) = try parseCommand(["microvm", "task", "exec", "demo", "--", "ls", "-t"]).command else {
+            return XCTFail("expected task exec")
+        }
+        XCTAssertNil(plain.terminal)
+        XCTAssertEqual(plain.argv, ["ls", "-t"])
+        for flags in [["--tty=1"], ["--no-input"], ["-i"]] {
+            XCTAssertThrowsError(try parseCommand(["microvm", "task", "exec"] + flags + ["demo", "--", "sh"]), "\(flags)") {
+                XCTAssertEqual(($0 as? MicroVMError)?.exitCode, 2)
+            }
+        }
+        XCTAssertTrue(commandHelp(["task", "exec"]).contains("--tty"))
+    }
+
     func testExecHelpDocumentsTerminalMode() {
         let help = commandHelp(["exec"])
         for text in ["-t", "--tty", "raw mode", "restored", "resizes", "combined", "terminal on stdin", "xterm-256color"] {
@@ -190,6 +211,41 @@ final class ExecTerminalTests: XCTestCase {
         XCTAssertEqual(pty.wait(), 0, pty.text)
         XCTAssertTrue(sameSettings(before, try pty.settings()))
         XCTAssertTrue(harness.backend.signals.isEmpty)
+        // After a normal exit the guardian stands down: a later change by the shell stays.
+        var changed = try pty.settings()
+        changed.c_lflag &= ~tcflag_t(ECHO)
+        try pty.apply(changed)
+        usleep(300_000)
+        XCTAssertEqual(try pty.settings().c_lflag & tcflag_t(ECHO), 0)
+    }
+
+    func testSIGKILLStillRestoresTheTerminal() throws {
+        let harness = try TerminalHarness()
+        defer { harness.close() }
+        let pty = try PTYProcess(home: harness.home, args: ["exec", "-t", "demo", "--", "top"], rows: 24, cols: 80)
+        defer { pty.close() }
+        let before = try pty.settings()
+        XCTAssertTrue(pty.waitFor("ready"), pty.text)
+        XCTAssertEqual(try pty.settings().c_lflag & tcflag_t(ICANON), 0)
+        kill(pty.process.processIdentifier, SIGKILL)
+        XCTAssertEqual(pty.wait(), SIGKILL, "Foundation reports the uncaught signal as the status")
+        XCTAssertTrue(waitUntil(3) { (try? pty.settings()).map { sameSettings(before, $0) } ?? false })
+        XCTAssertTrue(waitUntil(3) { !harness.backend.cancelled.isEmpty }, "the daemon cancels the orphaned command")
+    }
+
+    func testTaskExecRunsOnATerminal() throws {
+        let harness = try TerminalHarness()
+        defer { harness.close() }
+        let pty = try PTYProcess(home: harness.home, args: ["task", "exec", "-t", "demo", "--", "top"], rows: 30, cols: 90)
+        defer { pty.close() }
+        let before = try pty.settings()
+        XCTAssertTrue(pty.waitFor("ready"), pty.text)
+        let request = try XCTUnwrap(harness.backend.requests.last)
+        XCTAssertEqual(request.terminal, TerminalSize(rows: 30, cols: 90))
+        XCTAssertEqual(request.cwd, "/workspace")
+        pty.type("q")
+        XCTAssertEqual(pty.wait(), 0, pty.text)
+        XCTAssertTrue(sameSettings(before, try pty.settings()))
     }
 
     func testCtrlCIsAKeystrokeAndTheTerminalIsRestored() throws {
@@ -341,6 +397,11 @@ private final class PTYProcess {
         var value = termios()
         guard tcgetattr(pts, &value) == 0 else { throw MicroVMError("tcgetattr failed") }
         return value
+    }
+
+    func apply(_ value: termios) throws {
+        var value = value
+        guard tcsetattr(pts, TCSANOW, &value) == 0 else { throw MicroVMError("tcsetattr failed") }
     }
 
     func waitFor(_ needle: String, seconds: TimeInterval = 5) -> Bool {

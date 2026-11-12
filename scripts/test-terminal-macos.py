@@ -2,8 +2,11 @@
 """Real-VM terminal check: drives `exec --tty` from a host PTY. Uses an isolated home and an existing guest image.
 
 The CLI runs with the PTY as its controlling terminal, so window changes produce a real SIGWINCH.
-Checks input, initial size, resizing, Ctrl-C, exit status, host terminal restoration, and that the
-sandbox stays usable. Also interrupts an ordinary (non-terminal) foreground command.
+Checks input, initial size, resizing, Ctrl-C, exit status, host terminal restoration (including after
+SIGKILL, guest connection loss, and daemon death), and that the sandbox stays usable. Also interrupts
+an ordinary (non-terminal) foreground command. Unless --skip-project is given, it prepares a node:22
+runtime (seeded from --cache; missing verified inputs are downloaded) and checks terminal transcripts
+in a project task's logs, before and after finish.
 """
 import argparse
 import fcntl
@@ -11,6 +14,7 @@ import os
 import pathlib
 import platform
 import select
+import shutil
 import signal
 import struct
 import subprocess
@@ -78,7 +82,7 @@ class Session:
         lflag = termios.tcgetattr(self.ptmx)[3]
         return not lflag & (termios.ICANON | termios.ECHO | termios.ISIG)
 
-    def finish(self, timeout=20):
+    def finish(self, timeout=20, settle=3):
         deadline = time.monotonic() + timeout
         while self.process.poll() is None:
             if time.monotonic() >= deadline:
@@ -90,6 +94,10 @@ class Session:
                     self.output += os.read(self.ptmx, 4096)
                 except OSError:
                     pass
+        # SIGKILL leaves restoration to the CLI's guardian process, which needs a moment.
+        settled = time.monotonic() + settle
+        while settings(self.ptmx) != self.before and time.monotonic() < settled:
+            time.sleep(0.05)
         restored = settings(self.ptmx) == self.before
         os.close(self.ptmx)
         os.close(self.pts)
@@ -102,6 +110,9 @@ def main():
     repo = pathlib.Path(__file__).resolve().parent.parent
     parser.add_argument("--binary", type=pathlib.Path, default=repo / ".build/release/microvm")
     parser.add_argument("--images", type=pathlib.Path, default=pathlib.Path.home() / ".microvm/images")
+    parser.add_argument("--cache", type=pathlib.Path, default=pathlib.Path.home() / ".microvm/cache",
+                        help="verified inputs copied into the isolated home before runtime preparation")
+    parser.add_argument("--skip-project", action="store_true", help="skip the project task and runtime preparation")
     args = parser.parse_args()
     if platform.system() != "Darwin":
         parser.error("requires a virtualization-capable Mac and an entitled binary")
@@ -202,7 +213,70 @@ def main():
                 assert "lifetime expired" in expiring.text, expiring.text
                 print("PASS: sandbox expiry ends the terminal session and restores the terminal", flush=True)
 
-                cli("destroy", "term")
+                killed = Session(prefix, ["exec", "-t", "term", "--", "sh", "-c", "echo ready; sleep 60"])
+                killed.read_until("ready")
+                assert killed.is_raw()
+                killed.process.kill()
+                assert killed.finish(timeout=10) == -signal.SIGKILL, killed.text
+                assert cli("exec", "term", "--", "echo", "usable").stdout == "usable\n"
+                print("PASS: SIGKILL of the CLI still restores the terminal; sandbox remains usable", flush=True)
+
+                cli("run", "--name", "lost")
+                lost = Session(prefix, ["exec", "-t", "lost", "--timeout", "60", "--", "sh", "-c", "echo ready; sleep 60"])
+                lost.read_until("ready")
+                # This exec is served by the agent it kills, so it fails too.
+                cli("exec", "lost", "--", "sh", "-c", "kill -9 $(pidof microvm-agent)", check=False)
+                assert lost.finish(timeout=30) == 1, lost.text
+                assert cli("exec", "term", "--", "echo", "usable").stdout == "usable\n", "another sandbox was affected"
+                print("PASS: guest agent loss ends the session with status 1 and restores the terminal", flush=True)
+
+                if not args.skip_project:
+                    if args.cache.is_dir():
+                        shutil.copytree(args.cache, home / "cache", dirs_exist_ok=True)
+                    (home / "cache").mkdir(exist_ok=True)
+                    seeded = set(os.listdir(home / "cache"))
+                    cli("runtime", "prepare", str(repo), "--runtime", "node:22", timeout=900)
+                    fetched = sorted(set(os.listdir(home / "cache")) - seeded)
+                    print(f"PASS: runtime prepared ({len(fetched)} inputs downloaded beyond the seed)", flush=True)
+                    project = home / "project"
+                    project.mkdir()
+                    (project / "hello.txt").write_text("alpha\n")
+                    cli("clone", str(project), "proj", "--memory", "512", "--ttl", "600", timeout=180)
+                    transcript = Session(prefix, ["exec", "-t", "proj", "--", "sh", "-c", 'printf "a\\tb\\n"; echo err >&2; exit 4'])
+                    transcript.read_until("err")
+                    assert transcript.finish() == 4, transcript.text
+                    # /workspace is a symlink to /work/project; compare physical paths.
+                    task = Session(prefix, ["task", "exec", "-t", "proj", "--", "sh", "-c",
+                                            '[ "$(pwd -P)" = "$(readlink -f /workspace)" ] && echo in-workspace; tty'])
+                    task.read_until("/dev/pts/")
+                    assert task.finish() == 0 and "in-workspace\r\n" in task.text, repr(task.text)
+                    rows = [line.split() for line in cli("logs", "proj", "--list").stdout.splitlines()[1:]]
+                    terminal_ids = [row[0] for row in rows if "terminal" in row]
+                    assert len(terminal_ids) == 2, rows
+                    expected = b"a\tb\r\nerr\r\n"
+
+                    def replay():
+                        result = subprocess.run(prefix + ["logs", "proj", "--exec", terminal_ids[0]],
+                                                capture_output=True, stdin=subprocess.DEVNULL, timeout=30)
+                        assert result.returncode == 0, result.stderr
+                        assert result.stdout == expected and result.stderr == b"", (result.stdout, result.stderr)
+
+                    replay()
+                    print("PASS: project task journals one terminal transcript and replays it to stdout only", flush=True)
+                    cli("finish", "proj", timeout=300)
+                    replay()
+                    published = list(home.glob(f"tasks/*/result/{terminal_ids[0]}.terminal"))
+                    assert len(published) == 1 and published[0].read_bytes() == expected, published
+                    assert not (published[0].parent / f"{terminal_ids[0]}.stderr").exists()
+                    print("PASS: finish publishes N.terminal without a stderr file; logs replay it after shutdown", flush=True)
+
+                # Last: the daemon dies under a live session, taking its sandboxes with it.
+                orphan = Session(prefix, ["exec", "-t", "term", "--", "sh", "-c", "echo ready; sleep 60"])
+                orphan.read_until("ready")
+                daemon.kill()
+                daemon.wait(timeout=15)
+                assert orphan.finish(timeout=15) == 1, orphan.text
+                print("PASS: daemon death ends the session with status 1 and restores the terminal", flush=True)
             except BaseException:
                 log.flush()
                 print((home / "terminal-daemon.log").read_text())

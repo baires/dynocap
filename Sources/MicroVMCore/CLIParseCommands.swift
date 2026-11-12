@@ -114,6 +114,7 @@ func parseTaskFinish(_ args: [String], _ prefix: inout InvocationPrefix) throws 
 func parseTaskExec(_ args: [String], _ prefix: inout InvocationPrefix) throws -> TaskCommand {
     var id: String?
     var argv: [String]?
+    var terminal = false
     var reader = OptionReader(args: args)
     while let token = try reader.next() {
         if prefix.help || prefix.version { return TaskCommand(op: "exec") }
@@ -129,7 +130,9 @@ func parseTaskExec(_ args: [String], _ prefix: inout InvocationPrefix) throws ->
             }
         case .flag(let name, let inline):
             if try consumeGlobal(name, inline, reader: &reader, prefix: &prefix) { continue }
-            throw usageError("unknown flag \(name)")
+            guard knownFlag(["task", "exec"], name) else { throw usageError("unknown flag \(name)") }
+            if inline != nil { throw usageError("\(name) does not take a value") }
+            terminal = true
         }
     }
     if prefix.help || prefix.version { return TaskCommand(op: "exec") }
@@ -137,6 +140,7 @@ func parseTaskExec(_ args: [String], _ prefix: inout InvocationPrefix) throws ->
     var command = TaskCommand(op: "exec")
     command.id = id
     command.argv = argv
+    if terminal { command.terminal = true }
     return command
 }
 

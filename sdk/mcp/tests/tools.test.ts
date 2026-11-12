@@ -391,6 +391,17 @@ test("task tools preserve MCP NAT permission and return retained result referenc
     );
     assert.match(result.content[0].text, /logs:/);
     assert(Buffer.byteLength(result.content[0].text) <= 65536);
+    const terminal = await microvmTaskExec(
+      { name: "task-fake", command: "vi", terminal: true },
+      options
+    );
+    assert.match(
+      terminal.content[0].text,
+      /^exit 0\nlogs: .+\nterminal:\ntty: \r\n$/
+    );
+    assert.equal(terminal.content[0].text.includes("stderr:"), false);
+    assert.deepEqual(daemon.execs.at(-1)?.terminal, { rows: 24, cols: 80 });
+    assert.equal(daemon.execs.at(-1)?.cwd, "/workspace");
     assert.equal(
       (await microvmTaskFinish("task-fake", options)).isError,
       undefined
@@ -437,5 +448,39 @@ test("named management tools return bounded previews, host paths, and explicit p
     assert.equal(daemon.runs.at(-1)?.force, false);
   } finally {
     await daemon.close();
+  }
+});
+
+test("terminal exec returns one labeled transcript at a fixed size", async () => {
+  const daemon = await fakeDaemon();
+  const home = { home: daemon.home };
+  try {
+    await microvmRun({ name: "demo", cpus: 1, memoryMB: 256 }, home);
+    const result = await microvmExec(
+      { name: "demo", command: "top -b -n 1", terminal: true },
+      home
+    );
+    assert.equal(result.isError, undefined);
+    assert.equal(result.content[0].text, "exit 0\nterminal:\ntty: \r\n");
+    assert.deepEqual(daemon.execs.at(-1)?.terminal, { rows: 24, cols: 80 });
+    await microvmExec({ name: "demo", command: "true" }, home);
+    assert.equal(daemon.execs.at(-1)?.terminal, undefined);
+  } finally {
+    await daemon.close();
+  }
+  const old = await fakeDaemon({ execTerminalVersion: null });
+  try {
+    await microvmRun(
+      { name: "demo", cpus: 1, memoryMB: 256 },
+      { home: old.home }
+    );
+    const refused = await microvmExec(
+      { name: "demo", command: "top", terminal: true },
+      { home: old.home }
+    );
+    assert.equal(refused.isError, true);
+    assert.match(refused.content[0].text, /cannot allocate guest terminals/);
+  } finally {
+    await old.close();
   }
 });
