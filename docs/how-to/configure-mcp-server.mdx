@@ -30,7 +30,7 @@ By default, `@microvm/mcp` enforces strict security boundaries:
 
 - **Offline Only by Default:** The LLM cannot allocate network interfaces or connect to external hosts.
 - **Opt-in Network Modes:** You must explicitly enable network flags via environment variables when launching the server:
-  - `MICROVM_MCP_ALLOW_FILTERED=1`: Permits HTTPS access to the task runtime's package registry (`registry.npmjs.org` for node and plain sandboxes) and Git origins.
+  - `MICROVM_MCP_ALLOW_FILTERED=1`: Permits HTTPS access to the task runtime's package registry (`registry.npmjs.org` for node, `pypi.org` and `files.pythonhosted.org` for python, `proxy.golang.org` and `sum.golang.org` for go, and none for `shell:1`) and, for a repository URL, that URL's host.
   - `MICROVM_MCP_ALLOW_NAT=1`: Permits unrestricted outbound NAT connectivity.
 
 ---
