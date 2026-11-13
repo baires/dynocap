@@ -108,7 +108,7 @@ export function createServer(options: ToolOptions = {}): McpServer {
     "microvm_task_start",
     {
       description:
-        "Start a task from a local directory or a repository URL on a prepared runtime (default node:24). filtered allows only that runtime's package registry and the task Git host. A URL is cloned in the guest and requires nat or filtered. A token or SSH key is held for that guest fetch and is not imported. An ssh URL requires nat. Results require finish before TTL.",
+        "Start a task from a local directory or a repository URL on a prepared runtime. Omit runtimes to let microvm decide from the project's files, falling back to shell:1 (bash, git, ssh); the result reports the runtime used. filtered allows only that runtime's package registry and the task Git host. A URL is cloned in the guest and requires nat or filtered. A token or SSH key is held for that guest fetch and is not imported. An ssh URL requires nat. Results require finish before TTL.",
       inputSchema: {
         name: z.string().optional(),
         projectPath: z.string().optional(),
@@ -125,7 +125,7 @@ export function createServer(options: ToolOptions = {}): McpServer {
           .array(z.object({ name: z.string(), version: z.string() }))
           .optional()
           .describe(
-            "Exactly one prepared runtime, such as [{name:'node',version:'24'}]. Defaults to node:24."
+            "Exactly one prepared runtime, such as [{name:'python',version:'3.14'}]. Omit it and microvm decides: for a local projectPath, package.json means node:24; pyproject.toml, uv.lock, requirements.txt, setup.py, or Pipfile means python:3.14; go.mod means go:1.27. Anything else, including a repositoryUrl, gets shell:1 (bash, git, ssh). Supported: node:24, node:22, python:3.14, go:1.27, shell:1."
           ),
         network: z.enum(["none", "nat", "filtered"]).optional(),
         ttlSeconds: z.number().int().min(1).max(86400).optional(),

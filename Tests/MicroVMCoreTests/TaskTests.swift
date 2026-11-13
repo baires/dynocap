@@ -148,13 +148,35 @@ final class TaskTests: XCTestCase {
         XCTAssertNoThrow(try tasks.admit())
         tasks.release()
     }
+    /// The daemon picks the runtime for every client (CLI, MCP, SDK): project files first, then bash.
+    func testOmittedRuntimeFollowsTheProjectThenFallsBackToShell() throws {
+        let root = try home()
+        let tasks = manager(root)
+        try tasks.recover()
+        let project = root.appendingPathComponent("project")
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        var request = TaskCommand(op: "start")
+        request.projectPath = project.path
+        func refusal() -> String {
+            do { _ = try tasks.start(request) } catch { return (error as? MicroVMError)?.message ?? "\(error)" }
+            return "started"
+        }
+        XCTAssertEqual(refusal(), "runtime shell:1 is not prepared yet")
+        try Data().write(to: project.appendingPathComponent("pyproject.toml"))
+        XCTAssertEqual(refusal(), "runtime python:3.14 is not prepared yet")
+        request.projectPath = nil
+        request.repositoryUrl = "https://example.invalid/repo.git"
+        request.network = .nat
+        XCTAssertEqual(refusal(), "runtime shell:1 is not prepared yet", "a URL cannot be inspected before boot")
+    }
+
     func testCatalogKeepsSelectionsSeparate() throws {
         let root = try home()
         let first = String(repeating: "a", count: 64)
         let second = String(repeating: "b", count: 64)
-        try JSONEncoder().encode(["aarch64/node@22": first, "aarch64/node@24": second]).write(
+        try JSONEncoder().encode(["aarch64/node@22": first, "aarch64/shell@1": second]).write(
             to: root.appendingPathComponent("runtime-catalog.json"))
-        XCTAssertEqual(try RuntimeArtifact.directory(nil, home: root, arch: "aarch64").lastPathComponent, second, "node:24 is the default")
+        XCTAssertEqual(try RuntimeArtifact.directory(nil, home: root, arch: "aarch64").lastPathComponent, second, "shell:1 is the default")
         XCTAssertEqual(
             try RuntimeArtifact.directory([RuntimeSelection(name: "node", version: "22")], home: root, arch: "aarch64").lastPathComponent,
             first)

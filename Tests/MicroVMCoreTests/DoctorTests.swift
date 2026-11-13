@@ -234,6 +234,12 @@ final class DoctorTests: XCTestCase {
         let node = try XCTUnwrap(ProjectRuntime.detect(root))
         XCTAssertEqual(node.runtime, RuntimeSelection(name: "node", version: "24"))
         XCTAssertEqual(node.note, "Using runtime node:24 (detected from package.json); choose another with --runtime.")
+        XCTAssertEqual(ProjectRuntime.choose(projectPath: root.path).runtime, RuntimeSelection(name: "node", version: "24"))
+        let fallback = ProjectRuntime.choose(projectPath: nil)
+        XCTAssertEqual(fallback.runtime, RuntimeSelection(name: "shell", version: "1"), "URLs and marker-less projects get bash")
+        XCTAssertNil(fallback.marker)
+        XCTAssertEqual(ProjectRuntime.choose(projectPath: "/").runtime, fallback.runtime)
+        XCTAssertTrue(fallback.note.hasPrefix("Using runtime shell:1 (bash, git and ssh;"))
         for (_, runtime) in ProjectRuntime.markers {
             XCTAssertTrue(RuntimeArtifact.supportedSelections.contains(runtime.name + ":" + runtime.version))
         }
@@ -254,7 +260,7 @@ final class DoctorTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         let prepared = diagnoseHost(paths: fixture.paths, executable: fixture.binary, runtimes: [], host: fixture.host)
         XCTAssertTrue(prepared.ok)
-        XCTAssertEqual(prepared.checks.first { $0.id == "runtime" }?.message, "Prepared runtimes: node:24.")
+        XCTAssertEqual(prepared.checks.first { $0.id == "runtime" }?.message, "Prepared runtimes: shell:1.")
         try FileManager.default.removeItem(at: fixture.paths.home.appendingPathComponent("runtime-catalog.json"))
         let none = diagnoseHost(paths: fixture.paths, executable: fixture.binary, runtimes: [], host: fixture.host, source: fixture.root)
         XCTAssertTrue(none.ok, "raw sandboxes need no runtime")
@@ -425,6 +431,7 @@ private struct DoctorFixture {
             runtimes: RuntimeArtifact.defaultRuntimes, arch: "aarch64", baseImageDigest: "base", artifactDigest: digest,
             tools: [:], environment: [:], formatVersion: RuntimeArtifact.currentFormatVersion, verificationCommand: ["true"])
         try JSONEncoder().encode(artifact).write(to: runtime.appendingPathComponent("runtime.json"))
-        try JSONEncoder().encode(["aarch64/node@24": digest]).write(to: paths.home.appendingPathComponent("runtime-catalog.json"))
+        let key = RuntimeArtifact.selectionKey(RuntimeArtifact.defaultRuntimes, arch: "aarch64")
+        try JSONEncoder().encode([key: digest]).write(to: paths.home.appendingPathComponent("runtime-catalog.json"))
     }
 }

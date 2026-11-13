@@ -17,6 +17,7 @@ export type TaskOptions = ClientOptions & {
   ref?: string;
   gitToken?: string;
   sshKeyPath?: string;
+  /** Omit to let the daemon choose from the project's files (package.json, pyproject.toml, go.mod), else shell:1. */
   runtimes?: RuntimeSelection[];
   network?: "none" | "nat" | "filtered";
   ttlSeconds?: number;

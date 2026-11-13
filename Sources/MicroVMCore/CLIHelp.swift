@@ -131,7 +131,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
         usage: "microvm runtime prepare [REPO] [--runtime NAME:VERSION] [--json]",
         flags: [
             CLIFlag(name: "--json", value: nil, summary: "Print a documented success or error object; suppress human progress."),
-            CLIFlag(name: "--runtime", value: "NAME:VERSION", summary: "Runtime to build. The default is node:24."),
+            CLIFlag(name: "--runtime", value: "NAME:VERSION", summary: "Runtime to build. The default is shell:1 (bash, git and ssh)."),
         ],
         examples: [
             "microvm runtime prepare . --runtime node:24",
@@ -140,7 +140,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
         discussion: """
         Preparation is explicit. Creating a sandbox does not download or substitute a runtime. \
         Supported selections: node:24 and node:22 with npm; python:3.14 with uv; go:1.27 with Go modules; shell:1 with bash, git and ssh only. \
-        The default selection is node:24 when --runtime is omitted. REPO is the microvm source tree, defaulting to the current directory.
+        The default selection is shell:1 when --runtime is omitted. REPO is the microvm source tree, defaulting to the current directory.
         Progress goes to human stderr; companion output is saved in a build log. JSON suppresses progress.
         See docs/reference/cli/json-schemas.mdx for result schemas.
         """,
@@ -155,7 +155,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
             CLIFlag(name: "--json", value: nil, summary: "Print a documented success or error object; suppress human progress."),
             CLIFlag(
                 name: "--runtime", value: "NAME:VERSION",
-                summary: "Runtime the sandbox must use. A local project's files choose it otherwise (pyproject.toml is python:3.14)."),
+                summary: "Runtime the sandbox must use. Otherwise a local project's files choose it, else shell:1 (bash)."),
             CLIFlag(name: "--network", value: "none|nat|filtered", summary: "Sandbox network. The default is none."),
             CLIFlag(name: "--ttl", value: "SEC", summary: "Sandbox lifetime in seconds, from 1 to 86400. The default is 1800."),
             CLIFlag(name: "--cpus", value: "N", summary: "Guest CPUs. The default is 2 for a project sandbox."),
@@ -444,7 +444,9 @@ let cliCommandSpecs: [CLICommandSpec] = [
         flags: [
             CLIFlag(name: "--json", value: nil, summary: "Print the clone result object; suppress human progress."),
             CLIFlag(name: "--name", value: "NAME", summary: "Friendly name. task- and runtime- prefixes are reserved."),
-            CLIFlag(name: "--runtime", value: "NAME:VERSION", summary: "Runtime the sandbox must use, such as node:24."),
+            CLIFlag(
+                name: "--runtime", value: "NAME:VERSION",
+                summary: "Runtime the sandbox must use. Otherwise a local project's files choose it, else shell:1 (bash)."),
             CLIFlag(name: "--network", value: "none|nat|filtered", summary: "Sandbox network. The default is none."),
             CLIFlag(name: "--ttl", value: "SEC", summary: "Sandbox lifetime in seconds, from 1 to 86400. The default is 1800."),
             CLIFlag(name: "--cpus", value: "N", summary: "Guest CPUs, at least 1."),

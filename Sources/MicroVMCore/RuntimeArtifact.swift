@@ -127,7 +127,8 @@ public struct RuntimeArtifact: Codable {
         }
     }
 
-    public static let defaultRuntimes = [RuntimeSelection(name: "node", version: "24")]
+    /// bash, git and ssh with no language: what a sandbox gets when nothing names a runtime.
+    public static let defaultRuntimes = [RuntimeSelection(name: "shell", version: "1")]
 }
 
 func fileDigest(_ url: URL) throws -> String {

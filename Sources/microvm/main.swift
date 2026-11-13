@@ -143,9 +143,11 @@ struct Main {
         var runtimes = request.runtimes ?? []
         var origin: String?
         let project = request.project.map { URL(fileURLWithPath: $0).standardizedFileURL } ?? (current == source?.standardizedFileURL ? nil : current)
-        if request.runtimes == nil, let project, let detected = ProjectRuntime.detect(project) {
-            runtimes = [detected.runtime]
-            origin = detected.marker
+        // A named PROJECT gets exactly what clone would use, shell:1 included; a bare directory only counts with project files.
+        if request.runtimes == nil, let project,
+           let chosen = request.project == nil ? ProjectRuntime.detect(project) : ProjectRuntime.choose(projectPath: project.path) {
+            runtimes = [chosen.runtime]
+            origin = chosen.marker
         }
         return diagnoseHost(paths: resolve(invocation), executable: executable, runtimes: runtimes, host: host, source: source,
                             runtimeOrigin: origin, fixCommand: doctorFixCommand(home: invocation.home, runtimes: request.runtimes, project: request.project))
@@ -211,11 +213,11 @@ struct Main {
     /// Management operations shared by their primary and advanced forms.
     static func manage(_ command: TaskCommand, _ invocation: CLIInvocation, _ args: [String]) throws {
         var command = command
-        // A local project without --runtime gets the runtime its files call for, and the choice is shown.
-        if command.op == "start", command.runtimes == nil, let path = command.projectPath,
-           let detected = ProjectRuntime.detect(URL(fileURLWithPath: path)) {
-            command.runtimes = [detected.runtime]
-            if invocation.output == .human { fputs(detected.note + "\n", stderr) }
+        // Without --runtime the daemon chooses by the same rule; showing it here keeps the choice visible.
+        if command.op == "start", command.runtimes == nil {
+            let chosen = ProjectRuntime.choose(projectPath: command.projectPath)
+            command.runtimes = [chosen.runtime]
+            if invocation.output == .human { fputs(chosen.note + "\n", stderr) }
         }
         let paths = try ready(invocation)
         let client = DaemonClient(socketPath: paths.socket.path)

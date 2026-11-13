@@ -15,7 +15,7 @@ MicroVM includes a first-party MCP server package (`@microvm/mcp`) that exposes 
 ## Prerequisites
 
 1. MicroVM CLI built and signed (`./scripts/build-macos.sh`).
-2. A runtime prepared, such as the default `node:24` (`microvm runtime prepare . --runtime node:24`). Tasks may select any prepared runtime with `runtimes`.
+2. The runtime your projects use, prepared with `microvm doctor --fix ./project` (or `--runtime python:3.14`, for example). When a task omits `runtimes`, microvm picks one from the project's files, the same way `clone` does, and falls back to `shell:1` (bash, git, ssh). The task result reports the runtime used.
 3. Build the TypeScript packages:
    ```sh
    npm run typecheck

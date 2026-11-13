@@ -70,9 +70,11 @@ microvm rm deps
   seven days from creation.
 - `rm` releases a finished sandbox. Discarding live work needs
   `rm NAME --force`; deleting a kept result needs `rm NAME --purge`.
-- The quick start uses the default `node:24` runtime. Pass `--runtime` to
-  `runtime prepare` and `clone` for `node:22`, `python:3.14` (uv), `go:1.27`
-  (Go modules), or `shell:1` (bash, git and ssh only). Each runtime has one
+- The quick start's `./project` has a `package.json`, so it runs on `node:24`.
+  A project without `package.json`, `pyproject.toml` (or `uv.lock`,
+  `requirements.txt`), or `go.mod`, and any repository URL, gets `shell:1`
+  (bash, git and ssh only); the MCP server and SDK choose the same way. Pass
+  `--runtime` for `node:22` or to override the choice. Each runtime has one
   package manager, and filtered egress reaches only that runtime's registry. See
   [Manage Dependencies and Caching](docs/how-to/manage-dependencies-and-caching.mdx)
   for each runtime's lockfile and offline install command.

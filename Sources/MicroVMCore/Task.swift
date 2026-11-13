@@ -213,6 +213,8 @@ final class TaskManager {
             timings[name] = (now - mark) * 1000
             mark = now
         }
+        var command = command
+        if command.runtimes == nil { command.runtimes = [ProjectRuntime.choose(projectPath: command.projectPath).runtime] }
         let resolved = try TaskSourceResolver.resolve(command)
         progress(.checkingRuntime)
         // Resolution precedes allocation and runtime requests are never silently substituted.

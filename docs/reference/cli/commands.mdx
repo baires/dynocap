@@ -47,7 +47,7 @@ microvm clone SOURCE NAME [options]
   - `SOURCE`: Path to a local directory / Git checkout, or an HTTPS/SSH Git repository URL.
   - `NAME`: Friendly name for the sandbox (e.g. `agent-fix`, `demo`).
 - **Options:**
-  - `--runtime <name:version>`: Runtime the sandbox uses. For a local directory, the default comes from its files: `package.json` → `node:24`; `pyproject.toml`, `uv.lock`, `requirements.txt`, `setup.py`, or `Pipfile` → `python:3.14`; `go.mod` → `go:1.27`. `clone` prints the runtime it chose. Otherwise, and for repository URLs, the default is `node:24`.
+  - `--runtime <name:version>`: Runtime the sandbox uses. For a local directory, the default comes from its files: `package.json` → `node:24`; `pyproject.toml`, `uv.lock`, `requirements.txt`, `setup.py`, or `Pipfile` → `python:3.14`; `go.mod` → `go:1.27`. `clone` prints the runtime it chose. Otherwise, and for repository URLs, the default is `shell:1` (bash, git and ssh). The MCP server and SDK follow the same rule when `runtimes` is omitted.
   - `--network <none|filtered|nat>`: Outbound network policy. Default: `none`.
   - `--ttl <seconds>`: Maximum lifetime from creation (30s to 86400s). Default: `1800` (30m).
   - `--cpus <count>`: Number of virtual CPUs. Default: `2`.
@@ -217,7 +217,7 @@ microvm runtime prepare [REPO_PATH] [options]
 - **Arguments:**
   - `REPO_PATH`: Path to the `microvm` source tree (defaults to `.`).
 - **Options:**
-  - `--runtime <name:version>`: Runtime to prepare. Default `node:24`. Supported: `node:24` and `node:22` (npm), `python:3.14` (uv), `go:1.27` (Go modules), and `shell:1` (bash, git and ssh; no language). An unsupported selection fails and lists the supported ones; no version is substituted.
+  - `--runtime <name:version>`: Runtime to prepare. Default `shell:1`. Supported: `node:24` and `node:22` (npm), `python:3.14` (uv), `go:1.27` (Go modules), and `shell:1` (bash, git and ssh; no language). An unsupported selection fails and lists the supported ones; no version is substituted.
   - `--json`: Output preparation result object as JSON.
 
 ---

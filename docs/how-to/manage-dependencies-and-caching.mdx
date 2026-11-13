@@ -28,7 +28,7 @@ This guide shows you how to:
 | `go:1.27`     | Go modules      | `go.sum`            | `proxy.golang.org`, `sum.golang.org` | `go mod download`  | `go mod download`            |
 | `shell:1`     | none            | no seed             | only a task repository URL's host    | n/a                | n/a                          |
 
-`node:24` is the default when `--runtime` is omitted. Prepare a runtime once per home before you use it, for example `microvm runtime prepare . --runtime python:3.14`.
+When `--runtime` is omitted, the project's files choose the runtime (`package.json` → `node:24`, `pyproject.toml` → `python:3.14`, `go.mod` → `go:1.27`); anything else gets `shell:1`. Prepare a runtime once per home before you use it, for example `microvm runtime prepare . --runtime python:3.14`.
 
 Some files change the seed key besides the lockfile: `.npmrc` for npm and `uv.toml` for uv. The prepared runtime's digest is also part of the key, so a seed is never restored into a different runtime or version. uv uses the runtime's Python and never downloads an interpreter. Go runs with `GOTOOLCHAIN=local` and never switches to another toolchain.
 
