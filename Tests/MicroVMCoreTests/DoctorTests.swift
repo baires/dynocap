@@ -325,6 +325,16 @@ final class DoctorTests: XCTestCase {
         XCTAssertEqual((json["repairs"] as? [[String: Any]])?.map { $0["fix"] as? String }, ["restart-daemon", "build-images", "prepare-runtime"])
     }
 
+    func testImageBuildFailureQuotesTheBuildErrorNotGoRunStatus() throws {
+        let log = URL(fileURLWithPath: "/tmp/microvm-log-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: log) }
+        let reason = "mkimage: Get \"https://example.invalid/alpine.tar.gz\": dial tcp: lookup example.invalid: no such host"
+        try Data("downloading Alpine\n\(reason)\nexit status 1\n".utf8).write(to: log)
+        XCTAssertEqual(lastLogLine(log), reason)
+        try Data("exit status 1\n".utf8).write(to: log)
+        XCTAssertNil(lastLogLine(log))
+    }
+
     func testImageBuildMovesMismatchedFilesAsideInsteadOfDeletingThem() throws {
         let fixture = try DoctorFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }

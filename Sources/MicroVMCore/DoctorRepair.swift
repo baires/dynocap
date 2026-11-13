@@ -168,9 +168,12 @@ public func buildGuestImage(paths: MicroVMPaths, arch: String, source: URL, go: 
     return DoctorRepairOutput(log: log, note: note)
 }
 
-/// The last non-empty line of a build log: usually the error that ended the build.
+/// The last useful line of a build log. `go run` appends `exit status N` after the tool's own error,
+/// and that status is already in the summary, so the line before it is the one a person can act on.
 func lastLogLine(_ log: URL) -> String? {
     guard let text = try? String(contentsOf: log, encoding: .utf8) else { return nil }
-    return text.split(separator: "\n").last { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-        .map { String($0.prefix(200)) }
+    let lines = text.split(separator: "\n").map(String.init).filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+    return lines.reversed().first { line in
+        line.trimmingCharacters(in: .whitespaces).range(of: #"^exit status \d+$"#, options: .regularExpression) == nil
+    }.map { String($0.prefix(200)) }
 }
