@@ -120,23 +120,18 @@ public func requireGo() throws -> URL {
 }
 
 /// Builds the guest kernel/initrd from the microvm checkout into the home's image directory.
-/// Files already there failed verification, so they may be hand-built: they are moved aside, never deleted.
+/// A valid `images/<arch>` beside the checkout is copied when the home image is missing or does not match.
+/// A missing or damaged bundle still compiles with Go. Files already in the home may be hand-built, so they
+/// are moved aside, never deleted.
 public func buildGuestImage(paths: MicroVMPaths, arch: String, source: URL, go: URL? = nil) throws -> DoctorRepairOutput {
+    if let copied = try installBundledGuestImage(paths: paths, arch: arch, source: source) {
+        return copied
+    }
     let go = try go ?? requireGo()
     try paths.ensure()
-    let fm = FileManager.default
     let images = paths.imageDir(arch)
-    let existing = ["kernel", "initrd", "manifest.json"].filter { fm.fileExists(atPath: images.appendingPathComponent($0).path) }
-    var note: String?
-    if !existing.isEmpty {
-        let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "")
-        let backup = images.appendingPathComponent("replaced-\(stamp)", isDirectory: true)
-        try fm.createDirectory(at: backup, withIntermediateDirectories: true)
-        for name in existing {
-            try fm.moveItem(at: images.appendingPathComponent(name), to: backup.appendingPathComponent(name))
-        }
-        note = "The previous \(existing.joined(separator: ", ")) did not match and were moved to \(backup.path)"
-    }
+    try FileManager.default.createDirectory(at: images, withIntermediateDirectories: true)
+    let note = try moveAsideImageFiles(in: images)
     let log = paths.home.appendingPathComponent("image-build-\(UUID().uuidString.lowercased()).log")
     guard FileManager.default.createFile(atPath: log.path, contents: nil, attributes: [.posixPermissions: 0o600]) else {
         throw MicroVMError("cannot create the image build log at \(log.path)")
@@ -166,6 +161,38 @@ public func buildGuestImage(paths: MicroVMPaths, arch: String, source: URL, go: 
                 + (note.map { " \($0)." } ?? "")), log: log)
     }
     return DoctorRepairOutput(log: log, note: note)
+}
+
+/// Copies `source/images/<arch>` into the home when that bundle matches its manifest.
+/// Returns nil when the bundle is missing or damaged so the caller compiles with Go.
+func installBundledGuestImage(paths: MicroVMPaths, arch: String, source: URL) throws -> DoctorRepairOutput? {
+    let bundled = source.appendingPathComponent("images").appendingPathComponent(arch)
+    guard guestImageIsValid(directory: bundled, arch: arch) else { return nil }
+    try paths.ensure()
+    let images = paths.imageDir(arch)
+    try FileManager.default.createDirectory(at: images, withIntermediateDirectories: true)
+    let retired = try moveAsideImageFiles(in: images)
+    for name in ["kernel", "initrd", "manifest.json"] {
+        try FileManager.default.copyItem(at: bundled.appendingPathComponent(name), to: images.appendingPathComponent(name))
+    }
+    var note = "Copied the bundled \(arch) guest image into \(images.path)."
+    if let retired { note += " " + retired }
+    return DoctorRepairOutput(note: note)
+}
+
+/// Moves kernel, initrd, and manifest.json into `replaced-<time>` when any of them are present.
+private func moveAsideImageFiles(in images: URL) throws -> String? {
+    let fm = FileManager.default
+    let names = ["kernel", "initrd", "manifest.json"]
+    let existing = names.filter { fm.fileExists(atPath: images.appendingPathComponent($0).path) }
+    guard !existing.isEmpty else { return nil }
+    let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "")
+    let backup = images.appendingPathComponent("replaced-\(stamp)", isDirectory: true)
+    try fm.createDirectory(at: backup, withIntermediateDirectories: true)
+    for name in existing {
+        try fm.moveItem(at: images.appendingPathComponent(name), to: backup.appendingPathComponent(name))
+    }
+    return "The previous \(existing.joined(separator: ", ")) did not match and were moved to \(backup.path)"
 }
 
 /// The last useful line of a build log. `go run` appends `exit status N` after the tool's own error,

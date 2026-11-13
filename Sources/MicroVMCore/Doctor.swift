@@ -108,9 +108,16 @@ public func diagnoseHost(
     }
     var images = doctorImages(paths: paths, arch: arch)
     if images.status == "error" {
-        images.recovery = source == nil ? "Run \(fixCommand) from inside the microvm source checkout to build the guest image."
-            : "Run \(fixCommand) to build the guest image (downloads pinned Alpine files; needs Go)."
-        images.fix = source == nil ? nil : .buildImages
+        let bundled = source?.appendingPathComponent("images").appendingPathComponent(arch)
+        if source == nil {
+            images.recovery = "Run \(fixCommand) from inside the microvm source checkout to build the guest image."
+        } else if let bundled, guestImageIsValid(directory: bundled, arch: arch) {
+            images.recovery = "Run \(fixCommand) to copy the bundled guest image into the home."
+            images.fix = .buildImages
+        } else {
+            images.recovery = "Run \(fixCommand) to build the guest image (downloads pinned Alpine files; needs Go)."
+            images.fix = .buildImages
+        }
     }
     checks.append(images)
     var runtime = runtimes.isEmpty ? doctorPreparedRuntimes(paths: paths, arch: arch)
@@ -267,19 +274,23 @@ private struct DoctorImageManifest: Decodable {
     var initrdSHA256: String
 }
 
+func guestImageIsValid(directory: URL, arch: String) -> Bool {
+    guard let manifest = try? JSONDecoder().decode(DoctorImageManifest.self, from: Data(contentsOf: directory.appendingPathComponent("manifest.json"))),
+          manifest.arch == arch, manifest.guestPort == Int(MicroVMInfo.guestPort),
+          manifest.kernelSHA256.count == 64, manifest.initrdSHA256.count == 64,
+          (try? fileDigest(directory.appendingPathComponent("kernel"))) == manifest.kernelSHA256,
+          (try? fileDigest(directory.appendingPathComponent("initrd"))) == manifest.initrdSHA256 else { return false }
+    return true
+}
+
 private func doctorImages(paths: MicroVMPaths, arch: String) -> DoctorCheck {
-    do {
-        let manifest = try JSONDecoder().decode(DoctorImageManifest.self, from: Data(contentsOf: paths.imageDir(arch).appendingPathComponent("manifest.json")))
-        guard manifest.arch == arch, manifest.guestPort == Int(MicroVMInfo.guestPort),
-              manifest.kernelSHA256.count == 64, manifest.initrdSHA256.count == 64,
-              try fileDigest(paths.kernel(arch)) == manifest.kernelSHA256,
-              try fileDigest(paths.initrd(arch)) == manifest.initrdSHA256 else { throw MicroVMError("image manifest or file hashes do not match") }
+    let directory = paths.imageDir(arch)
+    if guestImageIsValid(directory: directory, arch: arch) {
         return DoctorCheck("images", "ok", "Kernel and initrd hashes match the image manifest for \(arch).")
-    } catch {
-        let present = FileManager.default.fileExists(atPath: paths.imageDir(arch).appendingPathComponent("manifest.json").path)
-        return DoctorCheck("images", "error", present ? "The guest image for \(arch) does not match its manifest."
-                               : "The guest image for \(arch) has not been built yet.")
     }
+    let present = FileManager.default.fileExists(atPath: directory.appendingPathComponent("manifest.json").path)
+    return DoctorCheck("images", "error", present ? "The guest image for \(arch) does not match its manifest."
+                           : "The guest image for \(arch) has not been built yet.")
 }
 
 public func formatDoctorReport(_ report: DoctorReport, output: CLIOutput, arguments: [String] = []) throws -> String {

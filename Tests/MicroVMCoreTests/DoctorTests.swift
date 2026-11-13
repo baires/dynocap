@@ -355,6 +355,52 @@ final class DoctorTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: kept), Data("hand-built".utf8))
     }
 
+    func testBundledImageIsCopiedBeforeCompilingWithGo() throws {
+        let fixture = try DoctorFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let source = fixture.root.appendingPathComponent("source")
+        try FileManager.default.createDirectory(at: source.appendingPathComponent("guest"), withIntermediateDirectories: true)
+        let bundled = source.appendingPathComponent("images/aarch64")
+        let marker = fixture.root.appendingPathComponent("go-ran")
+        let go = fixture.root.appendingPathComponent("go")
+        try Data("#!/bin/sh\necho ran >> '\(marker.path)'\nexit 0\n".utf8).write(to: go)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: go.path)
+        try removeGuestImage(fixture.paths.imageDir("aarch64"))
+
+        let missingBundle = try buildGuestImage(paths: fixture.paths, arch: "aarch64", source: source, go: go)
+        XCTAssertNil(missingBundle.note)
+        XCTAssertEqual(try String(contentsOf: marker, encoding: .utf8), "ran\n")
+
+        try removeGuestImage(fixture.paths.imageDir("aarch64"))
+        try writeGuestImage(bundled, kernel: "bundled-kernel", initrd: "bundled-initrd", match: false)
+        try FileManager.default.removeItem(at: marker)
+        _ = try buildGuestImage(paths: fixture.paths, arch: "aarch64", source: source, go: go)
+        XCTAssertEqual(try String(contentsOf: marker, encoding: .utf8), "ran\n")
+        XCTAssertFalse(guestImageIsValid(directory: fixture.paths.imageDir("aarch64"), arch: "aarch64"))
+
+        try removeGuestImage(fixture.paths.imageDir("aarch64"))
+        try writeGuestImage(bundled, kernel: "bundled-kernel", initrd: "bundled-initrd", match: true)
+        try FileManager.default.removeItem(at: marker)
+        let report = diagnoseHost(paths: fixture.paths, executable: fixture.binary, runtimes: [], host: fixture.host, source: source)
+        let images = try XCTUnwrap(report.checks.first { $0.id == "images" })
+        XCTAssertEqual(images.fix, .buildImages)
+        XCTAssertTrue(images.recovery?.contains("copy the bundled guest image") == true, images.recovery ?? "")
+        let copied = try buildGuestImage(paths: fixture.paths, arch: "aarch64", source: source, go: go)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
+        XCTAssertNil(copied.log)
+        XCTAssertEqual(try Data(contentsOf: fixture.paths.kernel("aarch64")), Data("bundled-kernel".utf8))
+        XCTAssertEqual(try Data(contentsOf: fixture.paths.initrd("aarch64")), Data("bundled-initrd".utf8))
+        XCTAssertTrue(guestImageIsValid(directory: fixture.paths.imageDir("aarch64"), arch: "aarch64"))
+        XCTAssertTrue(copied.note?.contains("Copied the bundled aarch64 guest image") == true, copied.note ?? "")
+
+        try Data("damaged".utf8).write(to: fixture.paths.kernel("aarch64"))
+        let replaced = try buildGuestImage(paths: fixture.paths, arch: "aarch64", source: source, go: go)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
+        XCTAssertEqual(try Data(contentsOf: fixture.paths.kernel("aarch64")), Data("bundled-kernel".utf8))
+        XCTAssertTrue(replaced.note?.contains("moved to") == true, replaced.note ?? "")
+        XCTAssertTrue(guestImageIsValid(directory: fixture.paths.imageDir("aarch64"), arch: "aarch64"))
+    }
+
     func testSourceIsFoundFromTheBuildProductOrWorkingDirectory() throws {
         let root = URL(fileURLWithPath: "/tmp/microvm-source-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
@@ -367,6 +413,27 @@ final class DoctorTests: XCTestCase {
         XCTAssertEqual(locateMicroVMSource(executable: product.appendingPathComponent("microvm"), currentDirectory: elsewhere)?.path, root.path)
         XCTAssertEqual(locateMicroVMSource(executable: URL(fileURLWithPath: "/usr/bin/microvm"), currentDirectory: product)?.path, root.path)
         XCTAssertNil(locateMicroVMSource(executable: URL(fileURLWithPath: "/usr/bin/microvm"), currentDirectory: elsewhere))
+    }
+
+    private func writeGuestImage(_ directory: URL, kernel: String, initrd: String, match: Bool) throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let kernelData = Data(kernel.utf8)
+        let initrdData = Data(initrd.utf8)
+        try kernelData.write(to: directory.appendingPathComponent("kernel"))
+        try initrdData.write(to: directory.appendingPathComponent("initrd"))
+        let kernelHash = match ? try dataDigest(kernelData) : String(repeating: "ab", count: 32)
+        let manifest: [String: Any] = [
+            "arch": "aarch64", "guestPort": 5252,
+            "kernelSHA256": kernelHash, "initrdSHA256": try dataDigest(initrdData),
+        ]
+        try JSONSerialization.data(withJSONObject: manifest).write(to: directory.appendingPathComponent("manifest.json"))
+    }
+
+    private func removeGuestImage(_ directory: URL) throws {
+        for name in ["kernel", "initrd", "manifest.json"] {
+            let file = directory.appendingPathComponent(name)
+            if FileManager.default.fileExists(atPath: file.path) { try FileManager.default.removeItem(at: file) }
+        }
     }
 
     private func object(_ string: String) throws -> [String: Any] {

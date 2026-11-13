@@ -17,18 +17,56 @@ The tool is local-first: one user and one machine, with no hosted account,
 cluster, or host filesystem share. Tasks have finite lifetimes; persistent
 workspaces and resume are not implemented.
 
-## Quick start
+## Install
 
-Install the [requirements](#requirements), then build the signed CLI from this
-checkout:
+This release is Apple Silicon (`darwin-arm64`) only. Intel Macs are refused by
+the installers. There is no Apple Developer ID signature: both installers
+re-sign the CLI on your Mac with `codesign --sign -` and the bundled
+virtualization entitlement, and they clear the download quarantine flag.
+Runtime preparation still needs `mke2fs` from `e2fsprogs`.
+
+### Curl
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/OWNER/microvm/main/scripts/install.sh | sh
+```
+
+The script downloads the latest GitHub release, checks its sha256, unpacks it
+to `~/.local/microvm`, and symlinks `~/.local/bin/microvm`. If `mke2fs` is
+missing it tells you to run `brew install e2fsprogs`. Its last step is
+`microvm doctor --fix`.
+
+### Homebrew
+
+`packaging/homebrew/microvm.rb` is the formula for a tap named
+`OWNER/homebrew-tap`. Copy it into that tap, replace `OWNER`, and set `url`
+and `sha256` from the published `microvm-<tag>-darwin-arm64.tar.gz` and its
+`.sha256` file. `brew trust` is required because this third-party formula runs
+`codesign`.
+
+```sh
+brew trust --formula OWNER/tap/microvm
+brew install OWNER/tap/microvm
+```
+
+The formula depends on macOS Ventura and `e2fsprogs`, and it refuses Intel.
+
+### From source
 
 ```sh
 ./scripts/build-macos.sh
 export PATH="$PWD/.build/release:$PATH"
 ```
 
-The repository workflow below is the same one `microvm help` prints. `./project`
-is your project, with a `package-lock.json` and `node_modules/` in `.gitignore`.
+`./scripts/build-macos.sh` is still the way to compile and ad-hoc sign from a
+checkout. A source tree has no bundled guest image, so `microvm doctor --fix`
+builds one with Go. See [Build and run](#build-and-run) for a raw sandbox.
+
+## Quick start
+
+After `microvm` is on your PATH, the repository workflow below is the same one
+`microvm help` prints. `./project` is your project, with a `package-lock.json`
+and `node_modules/` in `.gitignore`.
 
 <!-- quick start: kept identical to `microvm help` by CLIQuickStartTests -->
 
