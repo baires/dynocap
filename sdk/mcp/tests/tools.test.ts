@@ -342,6 +342,41 @@ test("stdio entrypoint only enables filtered networking for the literal value 1"
   }
 });
 
+test("task start keeps the daemon recovery command", async () => {
+  const { microvmTaskStart } = await import("../src/tools.ts");
+  const daemon = await fakeDaemon({
+    taskError:
+      "microvm-error-v1:" +
+      JSON.stringify({
+        code: "operation_failed",
+        message: "runtime node:22 is not prepared yet",
+        exitCode: 1,
+        recovery:
+          "Run microvm doctor --fix --runtime node:22 with the same --home, then retry.",
+      }),
+  });
+  try {
+    const started = await microvmTaskStart(
+      {
+        projectPath: ".",
+        runtimes: [{ name: "node", version: "22" }],
+      },
+      { home: daemon.home }
+    );
+    assert.equal(started.isError, true);
+    assert.match(
+      started.content[0].text,
+      /runtime node:22 is not prepared yet/
+    );
+    assert.match(
+      started.content[0].text,
+      /Next: Run microvm doctor --fix --runtime node:22/
+    );
+  } finally {
+    await daemon.close();
+  }
+});
+
 test("task start reports the runtime the daemon selected", async () => {
   const { microvmTaskStart } = await import("../src/tools.ts");
   const daemon = await fakeDaemon();

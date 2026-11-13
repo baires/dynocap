@@ -32,6 +32,23 @@ async function expectError(
   }
 }
 
+test("typed daemon errors keep the recovery command", async () => {
+  const { classifyDaemonMessage } = await import("../src/lib/errors.ts");
+  const error = classifyDaemonMessage(
+    "microvm-error-v1:" +
+      JSON.stringify({
+        code: "operation_failed",
+        message: "runtime node:22 is not prepared yet",
+        exitCode: 1,
+        recovery:
+          "Run microvm doctor --fix --runtime node:22 with the same --home, then retry.",
+      }),
+    false
+  );
+  assert.equal(error.message, "runtime node:22 is not prepared yet");
+  assert.match(error.recovery ?? "", /doctor --fix --runtime node:22/);
+});
+
 test("typed daemon errors classify independently of message wording", async () => {
   await expectError(
     typedError("command_timeout", "deadline reached", 124),

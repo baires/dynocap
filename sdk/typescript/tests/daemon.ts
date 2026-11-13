@@ -101,6 +101,7 @@ export async function fakeDaemon(
 
 type FakeBehavior = {
   execError: string;
+  taskError: string;
   policyVersion: number | null;
   taskVersion: number | null;
   taskManagementVersion: number | null;
@@ -162,6 +163,10 @@ function handle(
       case 7: {
         const request = json();
         runs.push(request);
+        if (behavior.taskError) {
+          writeFrame(socket, 20, Buffer.from(behavior.taskError));
+          return;
+        }
         const id =
           request.op === "resolve"
             ? (behavior.resolveID ?? "task-fake")

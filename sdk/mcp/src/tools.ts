@@ -142,9 +142,12 @@ async function guard(run: () => Promise<ToolResult>): Promise<ToolResult> {
     return await run();
   } catch (error) {
     if (error instanceof SandboxError) {
+      const next = error.recovery ? `\nNext: ${error.recovery}` : "";
       return {
         isError: true,
-        content: [{ type: "text", text: `${error.kind}: ${error.message}` }],
+        content: [
+          { type: "text", text: `${error.kind}: ${error.message}${next}` },
+        ],
       };
     }
     const message = error instanceof Error ? error.message : String(error);

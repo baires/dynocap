@@ -3,12 +3,19 @@ export type SandboxErrorKind = "daemon" | "timeout" | "not_found";
 export class SandboxError extends Error {
   readonly kind: SandboxErrorKind;
   readonly exitCode: number;
+  readonly recovery?: string;
 
-  constructor(kind: SandboxErrorKind, message: string, exitCode = 1) {
+  constructor(
+    kind: SandboxErrorKind,
+    message: string,
+    exitCode = 1,
+    recovery?: string
+  ) {
     super(message);
     this.name = "SandboxError";
     this.kind = kind;
     this.exitCode = exitCode;
+    this.recovery = recovery;
   }
 }
 
@@ -34,10 +41,15 @@ export function classifyDaemonMessage(
             : failure.code === "command_timeout"
               ? "timeout"
               : "daemon";
+        const recovery =
+          "recovery" in failure && typeof failure.recovery === "string"
+            ? failure.recovery
+            : undefined;
         return new SandboxError(
           kind,
           failure.message,
-          kind === "timeout" && exec ? 124 : 1
+          kind === "timeout" && exec ? 124 : 1,
+          recovery
         );
       }
     } catch {
