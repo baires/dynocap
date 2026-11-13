@@ -180,7 +180,7 @@ enum HostTree {
     static func run(
         _ name: String, _ args: [String], input: URL? = nil, output: URL? = nil, environment: [String: String]? = nil
     ) throws -> Data {
-        let binary = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL.resolvingSymlinksInPath()
+        let binary = CLIExecutable.resolve(argument: CommandLine.arguments[0])
             .deletingLastPathComponent().appendingPathComponent(name)
         let process = Process()
         process.executableURL = binary

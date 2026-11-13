@@ -113,7 +113,7 @@ struct Main {
     ) throws -> (RuntimeArtifact, URL) {
         try DaemonClient(socketPath: paths.socket.path).requireTasks()
         say("Preparing the runtime; verified inputs may be downloaded...")
-        let executable = URL(fileURLWithPath: args[0]).standardizedFileURL.resolvingSymlinksInPath().deletingLastPathComponent()
+        let executable = CLIExecutable.resolve(argument: args[0]).deletingLastPathComponent()
             .appendingPathComponent("microvm-mkruntime")
         let log = try buildRuntime(preparation, paths: paths, executable: executable) { log in
             onLog(log)
@@ -133,7 +133,7 @@ struct Main {
     }
 
     static func diagnose(_ request: DoctorRequest, _ invocation: CLIInvocation, _ args: [String]) -> DoctorReport {
-        let executable = URL(fileURLWithPath: args[0]).standardizedFileURL.resolvingSymlinksInPath()
+        let executable = CLIExecutable.resolve(argument: args[0])
         let host = DoctorHost(
             arch: HostArch.guest, platformSupported: MicroVMInfo.virtualizationAvailable,
             backend: DoctorVirtualizationSupport.backendCheck(), signing: DoctorVirtualizationSupport.signingCheck(executable: executable))
@@ -157,7 +157,7 @@ struct Main {
     static func doctorFix(_ request: DoctorRequest, _ invocation: CLIInvocation, _ args: [String]) -> DoctorReport {
         let before = diagnose(request, invocation, args)
         let human = invocation.output == .human
-        let executable = URL(fileURLWithPath: args[0]).standardizedFileURL.resolvingSymlinksInPath()
+        let executable = CLIExecutable.resolve(argument: args[0])
         let source = locateMicroVMSource(executable: executable, currentDirectory: URL(fileURLWithPath: FileManager.default.currentDirectoryPath))
         let paths = resolve(invocation)
         if human {
@@ -392,7 +392,7 @@ struct Main {
         let client = DaemonClient(socketPath: paths.socket.path)
         if (try? client.ping()) != nil { return }
         let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
+        proc.executableURL = CLIExecutable.resolve(argument: CommandLine.arguments[0])
         if let home {
             proc.arguments = ["--home", home.path, "daemon"]
         } else if let envHome = ProcessInfo.processInfo.environment["MICROVM_HOME"], !envHome.isEmpty {

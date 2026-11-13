@@ -6,6 +6,37 @@ import Darwin
 import Glibc
 #endif
 
+/// The running CLI. A shell PATH lookup sets argv[0] to the bare name `microvm`, which is not a path.
+public enum CLIExecutable {
+    public static func current() -> URL? {
+        #if canImport(Darwin)
+        var size = UInt32(1024)
+        var buffer = [Int8](repeating: 0, count: Int(size))
+        if _NSGetExecutablePath(&buffer, &size) != 0 {
+            buffer = [Int8](repeating: 0, count: Int(size))
+            guard _NSGetExecutablePath(&buffer, &size) == 0 else { return nil }
+        }
+        return URL(fileURLWithPath: String(cString: buffer)).resolvingSymlinksInPath().standardizedFileURL
+        #else
+        let link = "/proc/self/exe"
+        guard let target = try? FileManager.default.destinationOfSymbolicLink(atPath: link) else { return nil }
+        let path = target.hasPrefix("/")
+            ? target
+            : URL(fileURLWithPath: link).deletingLastPathComponent().appendingPathComponent(target).path
+        return URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL
+        #endif
+    }
+
+    /// Keep an explicit path, including one that does not exist yet. A bare command name means this process.
+    public static func resolve(argument: String) -> URL {
+        let candidate = URL(fileURLWithPath: argument).standardizedFileURL.resolvingSymlinksInPath()
+        if argument.contains("/") || argument.hasPrefix(".") {
+            return candidate
+        }
+        return current() ?? candidate
+    }
+}
+
 public enum MicroVMErrorCode: String, Codable {
     case usage = "invalid_usage"
     case operationFailed = "operation_failed"
