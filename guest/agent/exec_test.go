@@ -388,6 +388,62 @@ func TestCommandsDoNotInheritAnIgnoredInterrupt(t *testing.T) {
 	}
 }
 
+func TestStdinChunksStayInOrderWhenThePipeIsFull(t *testing.T) {
+	client, server := net.Pipe()
+	defer client.Close()
+	go handleConn(server)
+	if _, err := protocol.ReadFrame(client); err != nil {
+		t.Fatal(err)
+	}
+	if err := protocol.WriteFrame(client, protocol.Message{
+		Type: protocol.TypeExec, ID: 9, Argv: []string{"cat"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var want bytes.Buffer
+	started := false
+	var got bytes.Buffer
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatal("cat did not finish")
+		default:
+		}
+		msg, err := protocol.ReadFrame(client)
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch msg.Type {
+		case protocol.TypeStarted:
+			if started {
+				break
+			}
+			started = true
+			for i := 0; i < 80; i++ {
+				chunk := bytes.Repeat([]byte{byte(i)}, 32<<10)
+				want.Write(chunk)
+				if err := protocol.WriteFrame(client, protocol.Message{Type: protocol.TypeStdin, ID: 9, Data: chunk}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := protocol.WriteFrame(client, protocol.Message{Type: protocol.TypeStdinEOF, ID: 9}); err != nil {
+				t.Fatal(err)
+			}
+		case protocol.TypeStdout:
+			got.Write(msg.Data)
+		case protocol.TypeExit:
+			if !bytes.Equal(got.Bytes(), want.Bytes()) {
+				t.Fatalf("stdin was reordered or truncated: got %d bytes, want %d", got.Len(), want.Len())
+			}
+			if msg.ExitCode != 0 {
+				t.Fatalf("exit %d", msg.ExitCode)
+			}
+			return
+		}
+	}
+}
+
 func TestHelperStartedWithInterruptIgnored(t *testing.T) {
 	if os.Getenv("MICROVM_AGENT_IGNORED_HELPER") != "1" {
 		t.Skip("helper for TestCommandsDoNotInheritAnIgnoredInterrupt")

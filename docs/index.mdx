@@ -6,7 +6,19 @@ sidebar_position: 1
 
 # MicroVM Documentation
 
-**MicroVM** provides fast, local Linux sandboxes for AI coding agents and developers on macOS. Powered by Apple's `Virtualization.framework`, MicroVM boots an isolated Linux guest in under 300ms, streams commands over a high-speed virtio-vsock binary channel, and enforces an offline-by-default boundary with no host directory sharing.
+**MicroVM** provides fast, local Linux sandboxes for AI coding agents and developers on macOS. Powered by Apple's `Virtualization.framework`, it boots an isolated Linux guest with no host directory share and an offline-by-default network.
+
+On one Apple Silicon Mac, 13 November 2026, with the daemon already running and artifacts already prepared:
+
+| What returned                                       |          Median |
+| --------------------------------------------------- | --------------: |
+| `microvm run`, guest agent ready                    | 299 ms (6 runs) |
+| `microvm clone` of a one-file directory (`shell:1`) | 491 ms (3 runs) |
+| `microvm clone` of this repository, 387 files       | 989 ms (2 runs) |
+| `microvm diff` of that repository                   |          882 ms |
+| the next `microvm exec -- true`                     |           12 ms |
+
+The runtime disk is hashed again only when its size, inode, or mtime changes. First installation, runtime preparation, and dependency installs are not in these numbers. Method and the before/after table: [Boot time](research/boot-time.md).
 
 Whether you run agents through the command-line interface, embed sandboxes in TypeScript applications, or connect coding agents via the Model Context Protocol (MCP), MicroVM ensures untrusted code runs safely, deterministically, and with verified diff extraction.
 

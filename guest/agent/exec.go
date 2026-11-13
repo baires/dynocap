@@ -436,7 +436,7 @@ func (s *session) writer() {
 			_ = w.Close()
 			continue
 		}
-		_, _ = w.Write(chunk.data)
+		_, _ = io.Copy(w, bytes.NewReader(chunk.data))
 	}
 }
 

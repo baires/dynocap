@@ -40,7 +40,7 @@ MicroVM is an isolated, local execution platform designed specifically for untru
 +-----------------------------------------------------------------------------------+
 | Linux Guest (ARM64 VM)                                                            |
 |                                                                                   |
-|   Linux Kernel (6.12.46)                                                          |
+|   Linux Kernel (Alpine virt 6.18.62)                                              |
 |      v                                                                            |
 |   /init (PID 1, Alpine minirootfs)                                                |
 |      v                                                                            |
@@ -68,7 +68,7 @@ MicroVM is an isolated, local execution platform designed specifically for untru
 Rather than relying on heavy emulation (like QEMU) or container translation layers, MicroVM leverages macOS's native `Virtualization.framework`.
 
 - **Hardware Acceleration:** Uses Apple Silicon's hardware virtualization extensions directly.
-- **Fast Boot:** Kernel and initramfs boot directly into userspace without an emulated BIOS or UEFI firmware phase. Boot times average under **200–300 milliseconds**.
+- **Fast Boot:** Kernel and initramfs boot directly into userspace without an emulated BIOS or UEFI firmware phase. On the measurement Mac, with the daemon already up and the image in the page cache, `microvm run` returned in **299 ms** median. A prepared `shell:1` clone of a one-file directory was ready in **491 ms** median, and cloning this repository (387 files) was ready in **989 ms** median. The next `exec true` was about **12 ms**. Those figures are one Apple Silicon Mac on 13 November 2026, after the runtime disk had already been verified; they are not a first-install time or an `npm ci`. The full table is in the [boot-time record](../research/boot-time.md).
 - **Memory & CPU:** Each guest receives dedicated virtual CPU cores and RAM mapped directly by the hypervisor.
 
 ---

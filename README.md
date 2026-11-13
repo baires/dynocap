@@ -388,10 +388,26 @@ rejection, expiry during boot/exec, late callbacks, and teardown failure/retry.
 
 ## Boot time
 
-A measured cold start on this Mac is in [docs/research/boot-time.md](docs/research/boot-time.md).
-`run` returns when the guest agent answers. The unit tests still do not boot
-a VM. If `run` times out, read `~/.microvm/vms/<name>/console.log` and
-`~/.microvm/daemon.log`.
+`run` returns when the guest agent answers. On this Apple Silicon Mac, 13
+November 2026, with the daemon already up, the image in the page cache, and a
+runtime that had already been verified:
+
+| Command                                            | Median | Runs |
+| -------------------------------------------------- | -----: | ---: |
+| `microvm run`                                      | 299 ms |    6 |
+| `microvm clone` of a one-file directory, `shell:1` | 491 ms |    3 |
+| `microvm clone` of this repository (387 files)     | 989 ms |    2 |
+| `microvm diff` of that clone                       | 882 ms |    2 |
+| `microvm exec NAME -- true`                        |  12 ms |    3 |
+
+The first clone after a runtime disk changes also reads that disk (about 270 ms
+for the 512 MB `shell:1` image). Preparation, `npm ci`, and a cold Mac are not
+in the table. The method, the earlier 185 ms kernel (it cannot mount a task
+disk), and the before/after breakdown are in
+[docs/research/boot-time.md](docs/research/boot-time.md).
+
+The unit tests still do not boot a VM. If `run` times out, read
+`~/.microvm/vms/<name>/console.log` and `~/.microvm/daemon.log`.
 
 ## Layout
 

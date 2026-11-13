@@ -621,6 +621,8 @@ func copyWorktreeExcept(src, dst string, ignored map[string]bool) error {
 }
 
 // Git's index is built from transported bytes, never from project clean filters.
+// Regular files are hashed in one git process. One process per file made a
+// few hundred files take longer than the boot.
 func stageExactTree(bin, repo string, env []string, root string, ignored map[string]bool) error {
 	names, err := Names(root, false)
 	if err != nil {
@@ -629,21 +631,69 @@ func stageExactTree(bin, repo string, env []string, root string, ignored map[str
 	if _, err = runGit(bin, repo, env, gitArgs(repo, "read-tree", "--empty")); err != nil {
 		return err
 	}
-	var entries bytes.Buffer
+	type reviewFile struct {
+		name string
+		path string
+		info os.FileInfo
+	}
+	var files []reviewFile
 	for _, name := range names {
 		if ignored[name] {
 			continue
 		}
-		path := filepath.Join(root, name)
+		path := filepath.Join(root, filepath.FromSlash(name))
 		info, err := os.Lstat(path)
 		if err != nil {
 			return err
 		}
-		object, err := hashGitEntry(bin, repo, env, path, info)
-		if err != nil {
-			return err
+		files = append(files, reviewFile{name, path, info})
+	}
+	objects := make([]string, len(files))
+	regularAt := make([]int, 0, len(files))
+	regularPaths := make([]string, 0, len(files))
+	linkAt := make([]int, 0)
+	linkText := make([]string, 0)
+	for i, file := range files {
+		if strings.ContainsRune(file.path, '\n') {
+			object, err := hashGitEntry(bin, repo, env, file.path, file.info)
+			if err != nil {
+				return err
+			}
+			objects[i] = object
+			continue
 		}
-		fmt.Fprintf(&entries, "%o %s\t%s%c", gitFileMode(info.Mode()), object, name, 0)
+		if file.info.Mode()&os.ModeSymlink != 0 {
+			link, err := os.Readlink(file.path)
+			if err != nil {
+				return err
+			}
+			linkAt = append(linkAt, i)
+			linkText = append(linkText, link)
+			continue
+		}
+		if !file.info.Mode().IsRegular() {
+			return fmt.Errorf("unsupported review file %s", file.name)
+		}
+		regularAt = append(regularAt, i)
+		regularPaths = append(regularPaths, file.path)
+	}
+	hashed, err := hashGitPaths(bin, repo, env, regularPaths)
+	if err != nil {
+		return err
+	}
+	for j, i := range regularAt {
+		objects[i] = hashed[j]
+	}
+	hashed, err = hashGitBlobs(bin, repo, env, linkText)
+	if err != nil {
+		return err
+	}
+	for j, i := range linkAt {
+		objects[i] = hashed[j]
+	}
+	var entries bytes.Buffer
+	for i, file := range files {
+		fmt.Fprintf(&entries, "%o %s\t%s%c", gitFileMode(file.info.Mode()), objects[i], file.name, 0)
 	}
 	cmd := exec.Command(bin, gitArgs(repo, "update-index", "-z", "--index-info")...)
 	cmd.Env = env
@@ -652,6 +702,52 @@ func stageExactTree(bin, repo string, env []string, root string, ignored map[str
 		return fmt.Errorf("stage exact review tree: %s: %w", output, err)
 	}
 	return nil
+}
+
+// hashGitPaths hashes file contents in one git process. Paths are newline-separated,
+// so a path that contains a newline is hashed on its own.
+func hashGitPaths(bin, repo string, env, paths []string) ([]string, error) {
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	cmd := exec.Command(bin, gitArgs(repo, "hash-object", "-w", "--no-filters", "--stdin-paths")...)
+	cmd.Env = env
+	cmd.Stdin = strings.NewReader(strings.Join(paths, "\n") + "\n")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("hash review files: %w", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(output), "\n"), "\n")
+	if len(lines) != len(paths) {
+		return nil, fmt.Errorf("hash review files: got %d objects for %d paths", len(lines), len(paths))
+	}
+	for _, object := range lines {
+		if !commitPattern.MatchString(object) {
+			return nil, fmt.Errorf("invalid review object")
+		}
+	}
+	return lines, nil
+}
+
+// hashGitBlobs writes each byte string as its own blob in one git process.
+// Symlink review objects are the link text, not the target's contents.
+func hashGitBlobs(bin, repo string, env []string, blobs []string) ([]string, error) {
+	if len(blobs) == 0 {
+		return nil, nil
+	}
+	dir, err := os.MkdirTemp("", "microvm-review-blobs-")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(dir)
+	paths := make([]string, len(blobs))
+	for i, blob := range blobs {
+		paths[i] = filepath.Join(dir, fmt.Sprintf("%d", i))
+		if err := os.WriteFile(paths[i], []byte(blob), 0600); err != nil {
+			return nil, err
+		}
+	}
+	return hashGitPaths(bin, repo, env, paths)
 }
 
 func hashGitEntry(bin, repo string, env []string, path string, info os.FileInfo) (string, error) {

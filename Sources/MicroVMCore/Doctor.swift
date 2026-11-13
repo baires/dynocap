@@ -206,7 +206,7 @@ private func doctorRuntime(paths: MicroVMPaths, arch: String, runtimes: [Runtime
         do {
             let artifact = try RuntimeArtifact.resolve(runtimes, directory: directory, arch: arch)
             guard artifact.artifactDigest == directory.lastPathComponent else { throw MicroVMError("runtime catalog and manifest digests disagree") }
-            try RuntimeArtifact.verifyFiles(artifact, directory: directory)
+            try RuntimeArtifact.verifyFiles(artifact, directory: directory, recordIdentity: false)
         } catch {
             let detail = (error as? MicroVMError)?.message ?? "cannot read the runtime artifact"
             throw MicroVMError("Prepared runtime \(label) is damaged or outdated: \(detail).")

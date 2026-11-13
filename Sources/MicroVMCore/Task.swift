@@ -240,6 +240,15 @@ final class TaskManager {
         var sourceRevision: String?
         var credentialEnv: [String] = []
         progress(.importingSource)
+        progress(.creatingWorkspace)
+        let disk = directory.appendingPathComponent("workspace.ext4")
+        let workspaceJob = WorkspaceDiskJob()
+        let makeDisk = hostTree
+        let diskPath = disk.path
+        workspaceJob.start {
+            _ = try makeDisk("microvm-mkruntime", ["workspace", diskPath], nil, nil)
+        }
+        defer { workspaceJob.waitIgnoringError() }
         switch resolved {
         case .directory(let source):
             _ = try hostTree("microvm-workspace", ["pack", source, "project"], nil, input)
@@ -261,10 +270,8 @@ final class TaskManager {
         }
         measured("snapshot")
         try rejectCreationCancellation(cancellation, stage: "import", name: command.name, id: id)
-        progress(.creatingWorkspace)
-        let disk = directory.appendingPathComponent("workspace.ext4")
-        _ = try hostTree("microvm-mkruntime", ["workspace", disk.path], nil, nil)
-        measured("workspaceDisk")
+        timings["workspaceDisk"] = try workspaceJob.wait()
+        mark = ProcessInfo.processInfo.systemUptime
         var record = TaskRecord(
             id: id, name: command.name, runtimes: artifact.runtimes, phase: "starting", runtimeDigest: artifact.artifactDigest,
             createdAtUnix: unixNow(),
@@ -650,6 +657,49 @@ final class TaskManager {
             try? fm.removeItem(at: existing)
         }
         return artifact
+    }
+}
+
+/// Formats the workspace disk while source import runs. `wait` is safe to call twice.
+private final class WorkspaceDiskJob {
+    private let group = DispatchGroup()
+    private let lock = NSLock()
+    private var started = false
+    private var error: Error?
+    private var milliseconds: Double = 0
+
+    func start(_ body: @escaping () throws -> Void) {
+        started = true
+        group.enter()
+        DispatchQueue.global(qos: .userInitiated).async {
+            let began = ProcessInfo.processInfo.systemUptime
+            do {
+                try body()
+            } catch {
+                self.lock.lock()
+                self.error = error
+                self.lock.unlock()
+            }
+            let elapsed = (ProcessInfo.processInfo.systemUptime - began) * 1000
+            self.lock.lock()
+            self.milliseconds = elapsed
+            self.lock.unlock()
+            self.group.leave()
+        }
+    }
+
+    func wait() throws -> Double {
+        guard started else { return 0 }
+        group.wait()
+        lock.lock()
+        defer { lock.unlock() }
+        if let error { throw error }
+        return milliseconds
+    }
+
+    func waitIgnoringError() {
+        guard started else { return }
+        group.wait()
     }
 }
 

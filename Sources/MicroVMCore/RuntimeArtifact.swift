@@ -4,6 +4,12 @@ import Foundation
 import CryptoKit
 #endif
 
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
+
 public struct RuntimePreparation: Equatable {
     public var repo: String
     public var runtimes: [RuntimeSelection]
@@ -112,10 +118,29 @@ public struct RuntimeArtifact: Codable {
         return artifact
     }
 
-    static func verifyFiles(_ artifact: RuntimeArtifact, directory: URL) throws {
-        guard let digest = try? fileDigest(directory.appendingPathComponent("runtime.ext4")), digest == artifact.artifactDigest else {
-            throw MicroVMError(
-                "prepared runtime disk is missing or has a hash mismatch", recovery: preparationInstruction(artifact.runtimes))
+    static func verifyFiles(_ artifact: RuntimeArtifact, directory: URL, recordIdentity: Bool = true) throws {
+        let disk = directory.appendingPathComponent("runtime.ext4")
+        // The disk is hundreds of megabytes. Hash it when its size, inode, or mtime
+        // differs from the last match. The home directory owner can already replace
+        // both the disk and this stamp; the stamp only skips a repeated read.
+        // Doctor stays read-only, so it verifies without writing the stamp.
+        let stampURL = directory.appendingPathComponent("runtime.ext4.identity")
+        let identity = runtimeDiskIdentity(disk)
+        let cached = try? JSONDecoder().decode(RuntimeDiskIdentity.self, from: Data(contentsOf: stampURL))
+        let unchanged = identity.map { id in
+            cached?.digest == artifact.artifactDigest && cached?.size == id.size
+                && cached?.mtimeNanoseconds == id.mtimeNanoseconds && cached?.inode == id.inode
+        } ?? false
+        if !unchanged {
+            guard let digest = try? fileDigest(disk), digest == artifact.artifactDigest else {
+                throw MicroVMError(
+                    "prepared runtime disk is missing or has a hash mismatch", recovery: preparationInstruction(artifact.runtimes))
+            }
+            if recordIdentity, let identity {
+                let stamp = RuntimeDiskIdentity(
+                    digest: digest, size: identity.size, mtimeNanoseconds: identity.mtimeNanoseconds, inode: identity.inode)
+                try? JSONEncoder().encode(stamp).write(to: stampURL, options: .atomic)
+            }
         }
         let bootImagesPresent = ["kernel", "initrd"].allSatisfy { name in
             let file = directory.appendingPathComponent(name)
@@ -129,6 +154,30 @@ public struct RuntimeArtifact: Codable {
 
     /// bash, git and ssh with no language: what a sandbox gets when nothing names a runtime.
     public static let defaultRuntimes = [RuntimeSelection(name: "shell", version: "1")]
+}
+
+private struct RuntimeDiskIdentity: Codable, Equatable {
+    var digest: String
+    var size: Int64
+    var mtimeNanoseconds: Int64
+    var inode: UInt64
+}
+
+private struct DiskFileIdentity {
+    var size: Int64
+    var mtimeNanoseconds: Int64
+    var inode: UInt64
+}
+
+private func runtimeDiskIdentity(_ url: URL) -> DiskFileIdentity? {
+    var info = stat()
+    guard stat(url.path, &info) == 0 else { return nil }
+    #if canImport(Darwin)
+    let mtime = Int64(info.st_mtimespec.tv_sec) * 1_000_000_000 + Int64(info.st_mtimespec.tv_nsec)
+    #else
+    let mtime = Int64(info.st_mtim.tv_sec) * 1_000_000_000 + Int64(info.st_mtim.tv_nsec)
+    #endif
+    return DiskFileIdentity(size: Int64(info.st_size), mtimeNanoseconds: mtime, inode: UInt64(info.st_ino))
 }
 
 func fileDigest(_ url: URL) throws -> String {

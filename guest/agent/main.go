@@ -97,7 +97,10 @@ func handleConn(c net.Conn) {
 		}
 		switch msg.Type {
 		case protocol.TypeStdin:
-			if !deliverStdin(msg, false) {
+			// A frame that does not fit stays parked. A later frame must not jump
+			// that queue: the guest pipe accepts one chunk while an older one is
+			// still parked, and the tar stream arrives out of order.
+			if len(parked) > 0 || !deliverStdin(msg, false) {
 				parked = append(parked, msg)
 			}
 		case protocol.TypeStdinEOF:

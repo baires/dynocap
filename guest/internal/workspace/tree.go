@@ -179,18 +179,21 @@ func names(root string, project, useGit bool) ([]string, error) {
 // Matching uses a temporary Git directory, so project hooks and configuration
 // never run. Paths in keep are included even when ignored, and their parent
 // directories are still walked. Other ignored directories are not walked.
+// Git starts only when a listed path is outside keep. A diff of an unchanged
+// imported tree does not pay for git init.
 func filesRespectingIgnore(root string, keep map[string]bool) ([]string, error) {
-	session, err := openIgnoreSession(root)
-	if err != nil {
-		return nil, err
-	}
-	defer session.close()
 	ancestors := map[string]bool{}
 	for n := range keep {
 		for dir := path.Dir(n); dir != "." && dir != "/"; dir = path.Dir(dir) {
 			ancestors[dir] = true
 		}
 	}
+	var session *ignoreSession
+	defer func() {
+		if session != nil {
+			session.close()
+		}
+	}()
 	var names []string
 	var walk func(string) error
 	walk = func(rel string) error {
@@ -207,7 +210,7 @@ func filesRespectingIgnore(root string, keep map[string]bool) ([]string, error) 
 			entry fs.DirEntry
 		}
 		items := make([]item, 0, len(entries))
-		rels := make([]string, 0, len(entries))
+		var unchecked []string
 		for _, entry := range entries {
 			if entry.Name() == ".git" {
 				continue
@@ -217,11 +220,22 @@ func filesRespectingIgnore(root string, keep map[string]bool) ([]string, error) 
 				child = rel + "/" + entry.Name()
 			}
 			items = append(items, item{child, entry})
-			rels = append(rels, child)
+			if !keep[child] && !ancestors[child] {
+				unchecked = append(unchecked, child)
+			}
 		}
-		ignored, err := session.ignored(rels)
-		if err != nil {
-			return err
+		ignored := map[string]bool{}
+		if len(unchecked) > 0 {
+			if session == nil {
+				session, err = openIgnoreSession(root)
+				if err != nil {
+					return err
+				}
+			}
+			ignored, err = session.ignored(unchecked)
+			if err != nil {
+				return err
+			}
 		}
 		for _, it := range items {
 			if ignored[it.rel] && !keep[it.rel] && !ancestors[it.rel] {
