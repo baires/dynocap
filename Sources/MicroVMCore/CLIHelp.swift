@@ -97,7 +97,9 @@ func helpTopic(from positionals: [String], strict: Bool) throws -> [String] {
 private let networkChoice = """
 Network defaults to none, which attaches no virtual NIC. nat enables unrestricted \
 outbound access. filtered allows HTTPS only to the runtime's package registry \
-(registry.npmjs.org for node) and, for a repository URL, that URL's host. A repository \
+(registry.npmjs.org for node; pypi.org and files.pythonhosted.org for python; \
+proxy.golang.org and sum.golang.org for go; none for shell) and, for a repository URL, \
+that URL's host. A repository \
 URL is cloned inside the guest and requires nat or filtered. An ssh URL requires nat. --git-token-env and --ssh-key are used only for that \
 guest fetch and are not imported. TTL defaults to 1800 seconds, including boot, and must \
 be an integer from 1 to 86400. There is no unlimited lifetime or automatic renewal.
@@ -521,11 +523,11 @@ let cliCommandSpecs: [CLICommandSpec] = [
 /// The repository workflow, shared word for word with the README quick start (checked by a test).
 let quickStart = """
 microvm doctor --fix ./project                     # builds the guest image and the runtime ./project uses
-microvm clone ./project deps --network filtered    # explicit network: HTTPS to the npm registry only
-microvm exec deps --timeout 300 -- npm ci
-microvm finish deps                                # exports the result and saves the npm cache
+microvm clone ./project deps --network filtered    # explicit network: HTTPS to the runtime's registry only
+microvm exec deps --timeout 300 -- npm ci          # a node project; see RUNTIMES for the others
+microvm finish deps                                # exports the result and saves the package cache
 microvm clone ./project demo                       # offline by default: no network device
-microvm exec demo -- npm ci --offline              # installs from the saved npm cache
+microvm exec demo -- npm ci --offline              # installs from the saved package cache
 microvm exec demo -- npm test
 microvm shell demo
 microvm ls
@@ -535,6 +537,17 @@ microvm diff demo
 microvm finish demo                                # exports the patch, then destroys the sandbox
 microvm rm demo
 microvm rm deps
+"""
+
+/// Per-runtime equivalents of the quick start's npm commands.
+let runtimesHelp = """
+The project's files choose the runtime; --runtime overrides it. Filtered egress reaches only its registry.
+  RUNTIME       CHOSEN BY         FILTERED INSTALL    OFFLINE INSTALL
+  node:24       package.json      npm ci              npm ci --offline
+  node:22       --runtime only    npm ci              npm ci --offline
+  python:3.14   pyproject.toml    uv sync --frozen    uv sync --offline --frozen
+  go:1.27       go.mod            go mod download     go mod download
+  shell:1       anything else     bash, git and ssh only; no package manager or cache
 """
 
 private func topLevelHelp() -> String {
@@ -549,6 +562,9 @@ private func topLevelHelp() -> String {
 
     WORKFLOW
     \(quickStart.split(separator: "\n").map { "  " + $0 }.joined(separator: "\n"))
+
+    RUNTIMES
+    \(runtimesHelp.split(separator: "\n").map { "  " + $0 }.joined(separator: "\n"))
 
     COMMANDS
     \(commands)

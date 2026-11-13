@@ -15,7 +15,7 @@ final class CLIQuickStartTests: XCTestCase {
         XCTAssertEqual(String(tail[open.upperBound..<close.lowerBound]), quickStart + "\n")
         let help = commandHelp([])
         let block = lines.map { "  " + $0 }.joined(separator: "\n")
-        XCTAssertTrue(help.contains("WORKFLOW\n" + block + "\n\nCOMMANDS"), help)
+        XCTAssertTrue(help.contains("WORKFLOW\n" + block + "\n\nRUNTIMES"), help)
     }
 
     func testEveryWorkflowLineParses() throws {

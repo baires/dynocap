@@ -34,11 +34,11 @@ is your project, with a `package-lock.json` and `node_modules/` in `.gitignore`.
 
 ```sh
 microvm doctor --fix ./project                     # builds the guest image and the runtime ./project uses
-microvm clone ./project deps --network filtered    # explicit network: HTTPS to the npm registry only
-microvm exec deps --timeout 300 -- npm ci
-microvm finish deps                                # exports the result and saves the npm cache
+microvm clone ./project deps --network filtered    # explicit network: HTTPS to the runtime's registry only
+microvm exec deps --timeout 300 -- npm ci          # a node project; see RUNTIMES for the others
+microvm finish deps                                # exports the result and saves the package cache
 microvm clone ./project demo                       # offline by default: no network device
-microvm exec demo -- npm ci --offline              # installs from the saved npm cache
+microvm exec demo -- npm ci --offline              # installs from the saved package cache
 microvm exec demo -- npm test
 microvm shell demo
 microvm ls
@@ -59,8 +59,9 @@ microvm rm deps
   `doctor` only reports, and says what to run for each failure. `clone` never
   prepares a runtime for you.
 - Sandboxes are offline unless you choose a network. `deps` uses
-  `--network filtered` (HTTPS to `registry.npmjs.org` only) to install packages.
-  Finishing it saves the npm cache, which later sandboxes with the same lockfile
+  `--network filtered` (HTTPS to the runtime's registry only: `registry.npmjs.org`
+  for node) to install packages. Finishing it saves the package cache (npm, uv
+  or Go modules), which later sandboxes with the same lockfile
   restore, so `demo` installs with no network device at all.
 - Each sandbox has a finite TTL (30 minutes by default, `--ttl` up to 24 hours)
   that activity never renews. `shell` and `exec -t` warn before it ends. Expiry
