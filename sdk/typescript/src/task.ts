@@ -31,6 +31,8 @@ export type TaskInfo = {
   network?: "none" | "nat" | "filtered";
   id: string;
   phase: string;
+  /** The runtime the daemon selected. Present on start and finish. */
+  runtimes?: RuntimeSelection[];
   runtimeDigest: string;
   createdAtUnix: number;
   expiresAtUnix: number;
@@ -55,6 +57,7 @@ function taskInfo(value: unknown): TaskInfo {
 export class Task {
   readonly id: string;
   readonly name?: string;
+  readonly runtimes?: RuntimeSelection[];
   readonly sourceUrl?: string;
   readonly sourceRevision?: string;
   readonly #home: string;
@@ -68,6 +71,7 @@ export class Task {
   ) {
     this.id = info.id;
     this.name = info.name;
+    this.runtimes = info.runtimes;
     this.sourceUrl = info.sourceUrl;
     this.sourceRevision = info.sourceRevision;
     this.#home = home;

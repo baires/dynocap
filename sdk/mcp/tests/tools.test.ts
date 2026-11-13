@@ -342,6 +342,24 @@ test("stdio entrypoint only enables filtered networking for the literal value 1"
   }
 });
 
+test("task start reports the runtime the daemon selected", async () => {
+  const { microvmTaskStart } = await import("../src/tools.ts");
+  const daemon = await fakeDaemon();
+  try {
+    const started = await microvmTaskStart(
+      {
+        projectPath: ".",
+        runtimes: [{ name: "python", version: "3.14" }],
+      },
+      { home: daemon.home }
+    );
+    assert.equal(started.isError, undefined);
+    assert.match(started.content[0].text, /"runtime":"python:3.14"/);
+  } finally {
+    await daemon.close();
+  }
+});
+
 test("task tools preserve MCP NAT permission and return retained result references", async () => {
   const { microvmTaskStart, microvmTaskExec, microvmTaskFinish } =
     await import("../src/tools.ts");

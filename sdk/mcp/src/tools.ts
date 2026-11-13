@@ -169,10 +169,14 @@ export async function microvmTaskStart(
       home: options?.home,
       ...permits(options),
     });
+    const runtime = (task.runtimes ?? [])
+      .map((item) => `${item.name}:${item.version}`)
+      .join(", ");
     return ok(
       JSON.stringify({
         id: task.id,
         name: task.name,
+        ...(runtime ? { runtime } : {}),
         sourceUrl: task.sourceUrl,
         sourceRevision: task.sourceRevision,
       })

@@ -14,6 +14,7 @@ test("task defaults, bounded capture, finish and opaque runtime selection", asyn
       requireOffline: true,
     });
     assert.deepEqual(daemon.runs[0]?.runtimes, runtimes);
+    assert.deepEqual(task.runtimes, runtimes);
     assert.equal(daemon.runs[0]?.requireOffline, true);
     let streamed = 0;
     const result = await task.exec("big", {

@@ -219,6 +219,9 @@ function handle(
               id,
               name: request.name,
               phase: request.op === "start" ? "running" : "completed",
+              ...(Array.isArray(request.runtimes)
+                ? { runtimes: request.runtimes }
+                : {}),
               runtimeDigest: "digest",
               createdAtUnix: 1,
               expiresAtUnix: 100,
