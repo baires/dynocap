@@ -93,7 +93,11 @@ final class IsolationPolicyTests: XCTestCase {
         XCTAssertTrue(eventually { (try? fixture.client.ps().isEmpty) == true })
         XCTAssertThrowsError(try fixture.client.exec(ExecCommand(
             name: "short", argv: ["true"], env: [], cwd: "", timeoutSeconds: 5
-        )))
+        ))) { error in
+            let micro = error as? MicroVMError
+            XCTAssertEqual(micro?.code, .invalidPhase)
+            XCTAssertEqual(micro?.message, "sandbox short lifetime expired; its unexported edits are lost")
+        }
     }
 
     func testExpiryDuringBootAndLateCallbacksCannotResurrectOrStopReplacement() throws {

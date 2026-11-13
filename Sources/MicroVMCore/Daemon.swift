@@ -18,6 +18,10 @@ public final class Daemon {
     private var stopped = false
     private var nextExecID: UInt32 = 0
     private var lifecycles: [String: SandboxLifecycle] = [:]
+    private let expiredNamesLock = NSLock()
+    // TTL teardown deletes the VM record, so ps stays empty. The name is remembered
+    // only so a later command can explain that unexported edits were lost.
+    private var expiredNames: Set<String> = []
     private var ttlTimer: DispatchSourceTimer?
     private lazy var tasks = TaskManager(
         paths: paths, arch: guestArch, boot: { try self.boot($0) },
@@ -332,6 +336,7 @@ public final class Daemon {
             switch existing.phase {
             case .stopped, .failed:
                 try store.remove(request.name)
+                forgetExpired(request.name)
             case .booting, .running, .stopping:
                 throw MicroVMError("VM \(request.name) is \(existing.phase.rawValue). Run microvm destroy \(request.name) first.")
             }
@@ -350,6 +355,7 @@ public final class Daemon {
                   \(initrd.path)
                 """)
         }
+        forgetExpired(request.name)
         try FileManager.default.createDirectory(at: paths.vmDir(request.name), withIntermediateDirectories: true)
         _ = FileManager.default.createFile(atPath: paths.consoleLog(request.name).path, contents: nil)
         var record = VMRecord(
@@ -437,6 +443,9 @@ public final class Daemon {
         var locked = true
         defer { if locked { lifecycle.lock.unlock() } }
         guard let record = try store.load(command.name) else {
+            if nameExpired(command.name) {
+                throw sandboxExpiredError(requested)
+            }
             throw MicroVMError("sandbox not found: \(command.name)", code: .notFound)
         }
         guard record.phase == .running else {
@@ -689,7 +698,13 @@ public final class Daemon {
             record.phase = .failed
             record.message = reason
             try store.save(record)
+            if reason != sandboxLifetimeExpired { forgetExpired(name) }
         } else {
+            if reason == sandboxLifetimeExpired {
+                rememberExpired(name)
+            } else {
+                forgetExpired(name)
+            }
             try store.remove(name)
         }
         tasks.stopped(name, reason: reason)
@@ -713,6 +728,24 @@ public final class Daemon {
         tasks.stopped(name, reason: message ?? "guest exited")
         try? store.save(record)
         log("\(name) \(record.phase.rawValue)")
+    }
+
+    private func rememberExpired(_ name: String) {
+        expiredNamesLock.lock()
+        expiredNames.insert(name)
+        expiredNamesLock.unlock()
+    }
+
+    private func forgetExpired(_ name: String) {
+        expiredNamesLock.lock()
+        expiredNames.remove(name)
+        expiredNamesLock.unlock()
+    }
+
+    private func nameExpired(_ name: String) -> Bool {
+        expiredNamesLock.lock()
+        defer { expiredNamesLock.unlock() }
+        return expiredNames.contains(name)
     }
 
     private func reapExpired() {

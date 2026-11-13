@@ -32,6 +32,9 @@ final class DaemonTests: XCTestCase {
         try client.destroy("demo")
         XCTAssertEqual(try client.ps().count, 0)
         XCTAssertNil(backend.booted["demo"])
+        XCTAssertThrowsError(try client.exec(ExecCommand(name: "demo", argv: ["true"], env: [], cwd: "", timeoutSeconds: 5))) { error in
+            XCTAssertEqual((error as? MicroVMError)?.message, "sandbox not found: demo")
+        }
     }
 
     func testNamedExecUsesTaskWorkingDirectoryAndKeepsOverrides() throws {

@@ -204,9 +204,10 @@ final class CLICommandMatrixTests: XCTestCase {
         let listed = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(ps.stdout.utf8)) as? [[String: Any]])
         XCTAssertEqual(listed.map { $0["name"] as? String }, ["raw", "raw2"])
         XCTAssertEqual(Set(listed.map { $0["kind"] as? String }), ["sandbox"])
-        // Relative TTLs can tick across a minute between the two calls; the layout must match.
+        // A minute boundary changes both the text and the column padding, so compare the rows with either removed.
         func layout(_ text: String) -> String {
-            text.replacingOccurrences(of: #"\d+[smhd] left"#, with: "N left", options: .regularExpression)
+            text.replacingOccurrences(of: #"\d+[smhd] left"#, with: "N", options: .regularExpression)
+                .replacingOccurrences(of: #" +"#, with: " ", options: .regularExpression)
         }
         let psHuman = try runCLI(home: harness.home, ["ps"])
         XCTAssertEqual(layout(psHuman.stdout), layout(try runCLI(home: harness.home, ["ls"]).stdout))
