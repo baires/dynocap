@@ -156,16 +156,13 @@ struct Main {
     /// Repairs what the first diagnosis marks fixable, then reports a fresh diagnosis with what was attempted.
     static func doctorFix(_ request: DoctorRequest, _ invocation: CLIInvocation, _ args: [String]) -> DoctorReport {
         let before = diagnose(request, invocation, args)
-        let human = invocation.output == .human
         let executable = CLIExecutable.resolve(argument: args[0])
         let source = locateMicroVMSource(executable: executable, currentDirectory: URL(fileURLWithPath: FileManager.default.currentDirectoryPath))
         let paths = resolve(invocation)
-        if human {
-            let count = before.fixes.count
-            fputs(count == 0 ? "Nothing to repair automatically.\n" : "Repairing \(count) problem\(count == 1 ? "" : "s"):\n", stderr)
-        }
+        // Progress stays on stderr for JSON too, so stdout remains a single JSON document.
+        let count = before.fixes.count
+        fputs(count == 0 ? "Nothing to repair automatically.\n" : "Repairing \(count) problem\(count == 1 ? "" : "s"):\n", stderr)
         let repairs = repairHost(before, progress: { fix, repair in
-            guard human else { return }
             if let repair {
                 fputs("\(repair.status) (\(formatDuration(repair.seconds)))\n", stderr)
             } else {
@@ -200,7 +197,7 @@ struct Main {
                 return DoctorRepairOutput(log: log)
             }
         })
-        if human && !repairs.isEmpty { fputs("\n", stderr) }
+        if !repairs.isEmpty { fputs("\n", stderr) }
         var after = diagnose(request, invocation, args)
         after.repairs = repairs
         return after
