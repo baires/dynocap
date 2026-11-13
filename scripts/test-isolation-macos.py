@@ -138,8 +138,10 @@ def main():
                 project = home / "project"
                 project.mkdir()
                 (project / "hello.txt").write_text("alpha\n")
+                # hello.txt does not name a language, so clone would ask for shell:1. This check
+                # interrupts creation of the runtime prepared above.
                 clone = subprocess.Popen(
-                    prefix + ["clone", str(project), "cancelled", "--memory", "256", "--cpus", "1", "--ttl", "120"],
+                    prefix + ["clone", str(project), "cancelled", "--runtime", "node:24", "--memory", "256", "--cpus", "1", "--ttl", "120"],
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
                 saw_task = False
                 deadline = time.monotonic() + 30

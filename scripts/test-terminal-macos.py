@@ -345,7 +345,9 @@ def main():
                     project = home / "project"
                     project.mkdir()
                     (project / "hello.txt").write_text("alpha\n")
-                    cli("clone", str(project), "proj", "--memory", "512", "--ttl", "600", timeout=180)
+                    # hello.txt does not name a language, so clone would ask for shell:1.
+                    # This check uses the node runtime prepared above.
+                    cli("clone", str(project), "proj", "--runtime", "node:24", "--memory", "512", "--ttl", "600", timeout=180)
                     transcript = Session(prefix, ["exec", "-t", "proj", "--", "sh", "-c", 'printf "a\\tb\\n"; echo err >&2; exit 4'])
                     transcript.read_until("err")
                     assert transcript.finish() == 4, transcript.text
