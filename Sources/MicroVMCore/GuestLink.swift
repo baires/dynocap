@@ -65,6 +65,24 @@ public final class GuestLink {
     }
 }
 
+/// Orders writes on one guest connection. The exec frame is queued and the caller
+/// returns immediately; later stdin, signals, and resize wait behind it.
+public final class GuestWriteOrder: @unchecked Sendable {
+    private let queue: DispatchQueue
+
+    public init(label: String) {
+        queue = DispatchQueue(label: label)
+    }
+
+    public func async(_ work: @escaping () -> Void) {
+        queue.async(execute: work)
+    }
+
+    public func sync(_ work: () throws -> Void) rethrows {
+        try queue.sync(execute: work)
+    }
+}
+
 private func DarwinClose(_ fd: Int32) -> Int32 {
     #if canImport(Darwin)
     return Darwin.close(fd)

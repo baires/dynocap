@@ -11,6 +11,7 @@ public final class VirtualizationBackend: VMBackend {
     public var onGuestExit: ((String, UUID, String?) -> Void)?
     private let lock = NSLock()
     private var machines: [String: LinuxVM] = [:]
+    private var guestWrites: [String: GuestWriteOrder] = [:]
 
     public init() {}
 
@@ -22,7 +23,10 @@ public final class VirtualizationBackend: VMBackend {
         vm.onExit = { [weak self, weak vm] message in
             guard let self = self else { return }
             self.lock.lock()
-            if self.machines[request.name] === vm { self.machines[request.name] = nil }
+            if self.machines[request.name] === vm {
+                self.machines[request.name] = nil
+                self.guestWrites[request.name] = nil
+            }
             self.lock.unlock()
             self.onGuestExit?(request.name, request.generation, message)
         }
@@ -32,52 +36,67 @@ public final class VirtualizationBackend: VMBackend {
     public func exec(_ request: ExecRequest, emit: @escaping (ExecEvent) -> Void) {
         lock.lock()
         let vm = machines[request.name]
+        let writes = guestWriteOrderLocked(request.name)
         lock.unlock()
         guard let vm = vm else {
             emit(.failed("VM \(request.name) is not running"))
             return
         }
-        // Guest I/O must not hold the daemon's lifecycle lock or the VM control queue.
-        DispatchQueue.global().async { vm.exec(request, emit: emit) }
+        // Queued, not run here: the daemon still holds its lifecycle lock. Stdin and
+        // signals sync on the same queue, so they cannot pass this exec frame.
+        writes.async { vm.exec(request, emit: emit) }
     }
 
     public func cancelExec(name: String, id: UInt32) {
         lock.lock()
         let vm = machines[name]
+        let writes = guestWriteOrderLocked(name)
         lock.unlock()
-        DispatchQueue.global().async { vm?.cancelExec(id) }
+        writes.async { vm?.cancelExec(id) }
     }
 
     public func writeStdin(name: String, id: UInt32, data: Data) throws {
         lock.lock()
         let vm = machines[name]
+        let writes = guestWriteOrderLocked(name)
         lock.unlock()
         guard let vm else { throw MicroVMError("VM \(name) is not running") }
-        try vm.writeStdin(id, data)
+        try writes.sync { try vm.writeStdin(id, data) }
     }
 
     public func closeStdin(name: String, id: UInt32) throws {
         lock.lock()
         let vm = machines[name]
+        let writes = guestWriteOrderLocked(name)
         lock.unlock()
         guard let vm else { throw MicroVMError("VM \(name) is not running") }
-        try vm.closeStdin(id)
+        try writes.sync { try vm.closeStdin(id) }
     }
 
     public func signalExec(name: String, id: UInt32, signal: Int32) throws {
         lock.lock()
         let vm = machines[name]
+        let writes = guestWriteOrderLocked(name)
         lock.unlock()
         guard let vm else { throw MicroVMError("VM \(name) is not running") }
-        try vm.signalExec(id, signal)
+        try writes.sync { try vm.signalExec(id, signal) }
     }
 
     public func resizeExec(name: String, id: UInt32, size: TerminalSize) throws {
         lock.lock()
         let vm = machines[name]
+        let writes = guestWriteOrderLocked(name)
         lock.unlock()
         guard let vm else { throw MicroVMError("VM \(name) is not running") }
-        try vm.resizeExec(id, size)
+        try writes.sync { try vm.resizeExec(id, size) }
+    }
+
+    /// Caller holds `lock`.
+    private func guestWriteOrderLocked(_ name: String) -> GuestWriteOrder {
+        if let writes = guestWrites[name] { return writes }
+        let writes = GuestWriteOrder(label: "microvm.guest-io.\(name)")
+        guestWrites[name] = writes
+        return writes
     }
 
     public func destroy(name: String, completion: @escaping (Result<Void, Error>) -> Void) {
