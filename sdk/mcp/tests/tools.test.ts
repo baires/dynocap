@@ -455,10 +455,10 @@ test("task tools preserve MCP NAT permission and return retained result referenc
     assert.equal(terminal.content[0].text.includes("stderr:"), false);
     assert.deepEqual(daemon.execs.at(-1)?.terminal, { rows: 24, cols: 80 });
     assert.equal(daemon.execs.at(-1)?.cwd, "/workspace");
-    assert.equal(
-      (await microvmTaskFinish("task-fake", options)).isError,
-      undefined
-    );
+    const finished = await microvmTaskFinish("task-fake", options);
+    assert.equal(finished.isError, undefined);
+    assert.match(finished.content[0].text, /"resultDirectory":"\/result"/);
+    assert.match(finished.content[0].text, /"patch":"\/result\/changes.patch"/);
     assert.equal(daemon.runs.at(-1)?.requireOffline, true);
   } finally {
     await daemon.close();

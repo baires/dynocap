@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import path from "node:path";
 import {
   Task,
   listManaged,
@@ -216,17 +217,17 @@ export async function microvmTaskFinish(
   id: string,
   options?: ToolOptions
 ): Promise<ToolResult> {
-  return guard(async () =>
-    ok(
-      JSON.stringify(
-        await (
-          id.startsWith("task-")
-            ? Task.connect(id, { home: options?.home, ...permits(options) })
-            : await Task.open(id, { home: options?.home, ...permits(options) })
-        ).finish()
-      )
-    )
-  );
+  return guard(async () => {
+    const finished = await (
+      id.startsWith("task-")
+        ? Task.connect(id, { home: options?.home, ...permits(options) })
+        : await Task.open(id, { home: options?.home, ...permits(options) })
+    ).finish();
+    const patch = finished.resultDirectory
+      ? path.join(finished.resultDirectory, "changes.patch")
+      : undefined;
+    return ok(JSON.stringify({ ...finished, ...(patch ? { patch } : {}) }));
+  });
 }
 
 export async function microvmLs(options?: ToolOptions): Promise<ToolResult> {
