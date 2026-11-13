@@ -283,7 +283,7 @@ public final class Daemon {
     }
 
     private func removeManaged(_ target: String, purge: Bool, force: Bool) throws {
-        if let record = try tasks.records().first(where: { $0.id == target || $0.name == target }) {
+        if let record = try tasks.recordForRemoval(target, purge: purge) {
             try tasks.remove(record.id, purge: purge, force: force)
             try store.remove(record.id)
         } else {

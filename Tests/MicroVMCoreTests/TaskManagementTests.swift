@@ -38,6 +38,8 @@ final class TaskManagementTests: XCTestCase {
         try tasks.remove(original.id, purge: false)
         XCTAssertThrowsError(try tasks.resolve("interview"))
         XCTAssertNil(try tasks.resolve(original.id).name)
+        XCTAssertNil(try tasks.recordForRemoval("interview", purge: false))
+        XCTAssertEqual(try tasks.recordForRemoval("interview", purge: true)?.id, original.id)
         XCTAssertEqual(
             try Data(contentsOf: URL(fileURLWithPath: original.resultDirectory!).appendingPathComponent("changes.patch")),
             Data("patch".utf8))

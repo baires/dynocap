@@ -29,6 +29,14 @@ extension TaskManager {
         throw MicroVMError("project task not found: \(target); diff and finish require a project task", code: .notFound)
     }
 
+    /// A current name or id wins. After `rm` releases the name, `--purge` can still address that result.
+    func recordForRemoval(_ target: String, purge: Bool) throws -> TaskRecord? {
+        let all = try records()
+        if let record = all.first(where: { $0.id == target || $0.name == target }) { return record }
+        guard purge else { return nil }
+        return all.first(where: { $0.releasedName == target })
+    }
+
     func reserveName(_ name: String?) throws {
         guard let name else { return }
         try validateTaskName(name)
@@ -147,6 +155,15 @@ extension TaskManager {
         if purge {
             try fm.removeItem(at: dir(id))
         } else {
+            if let previous = record.name {
+                record.releasedName = previous
+                let entries = (try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
+                for entry in entries {
+                    guard var other = try? load(entry.lastPathComponent), other.id != id, other.releasedName == previous else { continue }
+                    other.releasedName = nil
+                    try save(other)
+                }
+            }
             record.name = nil
             try save(record)
         }

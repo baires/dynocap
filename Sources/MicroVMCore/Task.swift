@@ -44,6 +44,8 @@ public struct TaskCommandRecord: Codable {
 public struct TaskRecord: Codable {
     public var id: String
     public var name: String?
+    /// The name cleared by `rm` without `--purge`, so a later `rm NAME --purge` can still find this result until that name is reused.
+    public var releasedName: String?
     public var runtimes: [RuntimeSelection]?
     public var phase: String
     public var runtimeDigest: String
