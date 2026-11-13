@@ -15,6 +15,11 @@ func shellQuote(_ value: String) -> String {
     "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
 }
 
+/// Suggested commands repeat --home only when a plain command would reach a different home.
+func homeFlag(_ home: URL) -> String {
+    home.standardizedFileURL == MicroVMPaths.resolve(override: nil).home.standardizedFileURL ? "" : " --home " + shellWord(home.path)
+}
+
 private func creationText(_ value: String) -> String {
     String(value.map { $0.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) ? " " : $0 })
 }
@@ -67,7 +72,7 @@ public func formatCreationResult(
         kind: command.repositoryUrl == nil ? "directory" : "repository",
         value: descriptor.sourceUrl ?? command.repositoryUrl ?? command.projectPath ?? "unknown",
         revision: descriptor.sourceRevision)
-    let next = "microvm --home \(shellQuote(home.path)) exec \(shellQuote(descriptor.name ?? descriptor.id)) -- pwd"
+    let next = "microvm\(homeFlag(home)) exec \(shellWord(descriptor.name ?? descriptor.id)) -- pwd"
     if output == .json {
         return try managementJSON(CreationResult(descriptor: descriptor, source: source, nextCommand: next))
     }
@@ -112,7 +117,7 @@ private struct RunResult: Encodable {
 
 /// `run` reports a raw sandbox the way clone reports a project sandbox.
 public func formatRunResult(_ status: StatusResult, home: URL, output: CLIOutput, now: Int64) throws -> String {
-    let next = "microvm --home \(shellQuote(home.path)) exec \(shellQuote(status.name)) -- uname -a"
+    let next = "microvm\(homeFlag(home)) exec \(shellWord(status.name)) -- uname -a"
     if output == .json {
         return try managementJSON(RunResult(status: status, nextCommand: next))
     }

@@ -7,6 +7,10 @@ import CryptoKit
 public struct RuntimePreparation: Equatable {
     public var repo: String
     public var runtimes: [RuntimeSelection]
+    public init(repo: String, runtimes: [RuntimeSelection]) {
+        self.repo = repo
+        self.runtimes = runtimes
+    }
 }
 
 public struct RuntimeSelection: Codable, Equatable {
@@ -49,20 +53,41 @@ public struct RuntimeArtifact: Codable {
         arch + "/" + requested.map { $0.name + "@" + $0.version }.sorted().joined(separator: "+")
     }
     public static func preparationInstruction(_ requested: [RuntimeSelection]?) -> String {
-        let flags = (requested ?? defaultRuntimes).map { "--runtime " + shellQuote($0.name + ":" + $0.version) }.joined(separator: " ")
-        return "Run microvm runtime prepare /path/to/microvm " + flags + " using the same --home before creating a sandbox."
+        let flags = (requested ?? defaultRuntimes).map { " --runtime " + shellWord($0.name + ":" + $0.version) }.joined()
+        return "Run microvm doctor --fix" + flags + " with the same --home (or microvm runtime prepare ." + flags
+            + " in the microvm checkout), then retry."
+    }
+
+    /// Every selection the runtime catalog (guest/internal/runtime/catalog.go) can prepare, as NAME:VERSION.
+    public static let supportedSelections = ["node:24", "node:22", "python:3.14", "go:1.27", "shell:1"]
+
+    static func unpreparedError(_ requested: [RuntimeSelection]?) -> MicroVMError {
+        let selections = (requested ?? defaultRuntimes).map { $0.name + ":" + $0.version }
+        if let unknown = selections.first(where: { !supportedSelections.contains($0) }) {
+            return MicroVMError(
+                "runtime \(unknown) is not supported; versions are never substituted",
+                recovery: "Choose one of \(supportedSelections.joined(separator: ", ")) with --runtime.")
+        }
+        return MicroVMError("runtime \(selections.joined(separator: ", ")) is not prepared yet", recovery: preparationInstruction(requested))
+    }
+
+    /// Selections this home has prepared for an architecture, as NAME:VERSION, in catalog order.
+    public static func preparedSelections(home: URL, arch: String) -> [String] {
+        guard let data = try? Data(contentsOf: home.appendingPathComponent("runtime-catalog.json")),
+              let catalog = try? JSONDecoder().decode([String: String].self, from: data) else { return [] }
+        return catalog.keys.filter { $0.hasPrefix(arch + "/") }.map { String($0.dropFirst(arch.count + 1)).replacingOccurrences(of: "@", with: ":") }
+            .sorted { (supportedSelections.firstIndex(of: $0) ?? .max, $0) < (supportedSelections.firstIndex(of: $1) ?? .max, $1) }
     }
 
     public static func directory(_ requested: [RuntimeSelection]?, home: URL, arch: String) throws -> URL {
         guard let data = try? Data(contentsOf: home.appendingPathComponent("runtime-catalog.json")),
             let catalog = try? JSONDecoder().decode([String: String].self, from: data)
         else {
-            throw MicroVMError("no prepared runtime", recovery: preparationInstruction(requested))
+            throw unpreparedError(requested)
         }
         let key = selectionKey(requested ?? defaultRuntimes, arch: arch)
         guard let digest = catalog[key], digest.count == 64, digest.allSatisfy({ $0.isHexDigit }) else {
-            throw MicroVMError(
-                "unsupported or unprepared runtimes: \(key); no version substitution", recovery: preparationInstruction(requested))
+            throw unpreparedError(requested)
         }
         return home.appendingPathComponent("runtimes").appendingPathComponent(digest)
     }

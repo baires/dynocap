@@ -47,6 +47,7 @@ microvm clone SOURCE NAME [options]
   - `SOURCE`: Path to a local directory / Git checkout, or an HTTPS/SSH Git repository URL.
   - `NAME`: Friendly name for the sandbox (e.g. `agent-fix`, `demo`).
 - **Options:**
+  - `--runtime <name:version>`: Runtime the sandbox uses. For a local directory, the default comes from its files: `package.json` → `node:24`; `pyproject.toml`, `uv.lock`, `requirements.txt`, `setup.py`, or `Pipfile` → `python:3.14`; `go.mod` → `go:1.27`. `clone` prints the runtime it chose. Otherwise, and for repository URLs, the default is `node:24`.
   - `--network <none|filtered|nat>`: Outbound network policy. Default: `none`.
   - `--ttl <seconds>`: Maximum lifetime from creation (30s to 86400s). Default: `1800` (30m).
   - `--cpus <count>`: Number of virtual CPUs. Default: `2`.
@@ -190,14 +191,17 @@ microvm rm NAME_OR_ID [options]
 
 ### `microvm doctor`
 
-Verify host requirements, permissions, and runtime images without starting the daemon.
+Check that this Mac can run sandboxes. Each failed check says what is wrong and what to run next. Without `--fix`, doctor changes nothing.
 
 ```sh
-microvm doctor [options]
+microvm doctor [PROJECT] [options]
 ```
 
+The runtime checked is the one `PROJECT` (default: the current directory) uses, judged by its files as `clone` does. With no project, no runtime is required.
+
 - **Options:**
-  - `--runtime <name:version>`: Check specific runtime (default: `node:24`).
+  - `--fix`: Repair failed checks, then check again. Restarts a daemon from an older build (never one with running sandboxes), builds the guest image, and prepares the runtime. Builds need the microvm checkout and Go.
+  - `--runtime <name:version>`: Check this runtime instead of the project's (`node:24`, `node:22`, `python:3.14`, `go:1.27`, `shell:1`).
   - `--json`: Output diagnostic report as JSON.
 
 ---

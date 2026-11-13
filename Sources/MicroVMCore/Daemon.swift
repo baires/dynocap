@@ -344,7 +344,7 @@ public final class Daemon {
             throw MicroVMError(
                 """
                 Linux image not found for \(guestArch).
-                From the microvm repo on this Mac, run ./scripts/fetch-image.sh
+                From the microvm checkout on this Mac, run microvm doctor --fix
                 Expected:
                   \(kernel.path)
                   \(initrd.path)

@@ -11,8 +11,8 @@ This tutorial guides you from a fresh checkout to booting an isolated Linux micr
 By the end of this lesson, you will:
 
 1. Verify system prerequisites on Apple Silicon.
-2. Build the signed CLI binary and guest artifacts.
-3. Validate your host setup with `microvm doctor`.
+2. Build the signed CLI binary.
+3. Check and repair your setup with `microvm doctor --fix`.
 4. Launch a raw sandbox and execute commands over vsock.
 5. Safely destroy the sandbox.
 
@@ -66,42 +66,49 @@ which microvm
 
 ---
 
-## Step 2: Download the Guest Base Image
+## Step 2: Check Your Setup
 
-MicroVM boots a custom, minimal Linux kernel and Alpine initramfs designed to reach `/init` in less than 50ms.
-
-Run the image fetch script:
+Go to your project and run `microvm doctor`. It checks the platform, code signing, companion binaries, guest image, runtime, and daemon, and changes nothing:
 
 ```sh
-./scripts/fetch-image.sh
-```
-
-This verifies and writes the kernel and initramfs files to `~/.microvm/images/aarch64`.
-
----
-
-## Step 3: Run Diagnostic Checks
-
-Before starting any sandboxes, run `microvm doctor` to check permissions, companion binaries, kernel image hashes, and socket path constraints:
-
-```sh
+cd ~/code/my-app
 microvm doctor
 ```
 
-You should see all required checks passing:
+Doctor reads your project's files to pick its runtime, the same way `clone` does:
+
+| File at the project root                                               | Runtime       |
+| :--------------------------------------------------------------------- | :------------ |
+| `package.json`                                                         | `node:24`     |
+| `pyproject.toml`, `uv.lock`, `requirements.txt`, `setup.py`, `Pipfile` | `python:3.14` |
+| `go.mod`                                                               | `go:1.27`     |
+
+On a fresh install, the guest image and runtime are not built yet. Each failure says what is wrong and what to run:
 
 ```text
-[PASS] platform: macOS 15.x (arm64)
-[PASS] backend: Virtualization.framework available
-[PASS] signing: binary code-signed with com.apple.security.virtualization
-[PASS] home: /Users/username/.microvm is writable
-[PASS] microvm-workspace: companion binary found
-[PASS] microvm-mkruntime: companion binary found
-[PASS] images: verified kernel and initramfs hashes
-[WARN] daemon: daemon is not running (will start on first command)
+ERROR   images             The guest image for aarch64 has not been built yet.
+                           Next: Run microvm doctor --fix to build the guest image (downloads pinned Alpine files; needs Go).
+ERROR   runtime            Runtime python:3.14 is not prepared for aarch64 yet. This project's pyproject.toml needs it.
+                           Next: Run microvm doctor --fix to prepare python:3.14 (downloads verified inputs; takes a few minutes).
+
+2 required checks failed. Run microvm doctor --fix to repair them.
 ```
 
-The warning that the daemon is not running is expected; MicroVM starts the background daemon automatically when needed.
+To prepare a different runtime, pass `--runtime`, for example `microvm doctor --fix --runtime node:22`. Run outside a project, doctor requires no runtime. It lists the prepared ones instead, because raw sandboxes need none.
+
+---
+
+## Step 3: Repair It with `doctor --fix`
+
+```sh
+microvm doctor --fix
+```
+
+`--fix` builds the guest image, prepares your project's runtime, and restarts a daemon left over from an older build. Every download is pinned and verified. It then runs the checks again and ends with `Required checks passed.`
+
+Doctor finds the microvm checkout from the `microvm` binary, so you can run it in any directory. You can also name the project instead of changing directory: `microvm doctor --fix ~/code/my-app`.
+
+> **Tip:** After you rebuild `microvm`, run `microvm doctor --fix` again. It restarts the daemon so it runs the new build.
 
 ---
 

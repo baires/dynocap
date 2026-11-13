@@ -5,7 +5,7 @@ Uses an isolated home, an existing guest image (--images), and the fixture proje
 testdata/journey-project. Runtime preparation is seeded from --cache; missing verified inputs are
 downloaded. The `deps` sandbox needs internet access to registry.npmjs.org.
 
-Checks, in quick-start order: doctor before and after preparation, an explicitly networked install,
+Checks, in quick-start order: doctor before and after doctor --fix, an explicitly networked install,
 finish publishing the npm cache, an offline sandbox with no network that installs from that cache,
 tests, piped input, exit status, Ctrl-C, the command deadline, an interactive shell (editing,
 resize, Ctrl-C of a child, host terminal restoration), ls/inspect/logs, diff, finish, applying the
@@ -106,14 +106,16 @@ def main():
             assert doctor.returncode == 1 and report["ok"] is False and doctor.stderr == "", doctor
             errors = {check["id"]: check for check in report["checks"] if check["status"] == "error"}
             assert set(errors) == {"runtime"}, errors
-            assert "runtime prepare" in errors["runtime"]["recovery"], errors
+            assert errors["runtime"]["fix"] == "prepare-runtime", errors
+            assert "doctor --fix" in errors["runtime"]["recovery"], errors
             print("PASS: doctor exits 1 before preparation, with only the runtime check failing and "
-                  "`runtime prepare` as the recovery", flush=True)
+                  "`doctor --fix` as the recovery", flush=True)
 
-            prepared = cli("runtime", "prepare", ".", "--runtime", args.runtime, timeout=1200, cwd=REPO)
-            assert "Preparing the runtime" in prepared.stderr, prepared.stderr
+            prepared = cli("doctor", "--fix", "--runtime", args.runtime, timeout=1200, cwd=REPO)
+            assert "Preparing runtime" in prepared.stderr, prepared.stderr
+            assert "Required checks passed." in prepared.stdout, prepared.stdout
             assert json.loads(cli("doctor", "--runtime", args.runtime, "--json").stdout)["ok"] is True
-            print(f"PASS: runtime prepare ({prepared.seconds:.0f}s) verifies the runtime; doctor then exits 0", flush=True)
+            print(f"PASS: doctor --fix ({prepared.seconds:.0f}s) prepares and verifies the runtime; doctor then exits 0", flush=True)
 
             deps = cli("clone", "./project", "deps", "--runtime", args.runtime, "--network", "filtered", timeout=300)
             assert "Network: filtered" in deps.stdout and "Booting the sandbox" in deps.stderr, deps

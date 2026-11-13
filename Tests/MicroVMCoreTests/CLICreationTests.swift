@@ -16,7 +16,7 @@ final class CLICreationTests: XCTestCase {
         command.projectPath = "/tmp/project"
         let human = try formatCreationResult(descriptor, command: command, home: home, output: .human, now: now)
         for expected in ["Created sandbox: demo", "Phase: running", "node:24", "Network: none", "TTL: 50s remaining",
-                         "discards unexported", "Source (directory): /tmp/project", "exec 'demo' -- pwd", "'\\''"] {
+                         "discards unexported", "Source (directory): /tmp/project", "exec demo -- pwd", "'\\''"] {
             XCTAssertTrue(human.contains(expected), expected)
         }
         let json = try object(formatCreationResult(descriptor, command: command, home: home, output: .json, now: now))
@@ -32,7 +32,7 @@ final class CLICreationTests: XCTestCase {
         let legacy = try object(formatCreationResult(TaskDescriptor(unnamed), command: command, home: home, output: .json, now: now))
         XCTAssertTrue(legacy["name"] is NSNull)
         XCTAssertTrue(legacy["sandboxExpiresAtUnix"] is NSNull)
-        XCTAssertTrue((legacy["nextCommand"] as? String)?.contains("exec 'task-demo'") == true)
+        XCTAssertTrue((legacy["nextCommand"] as? String)?.contains("exec task-demo") == true)
     }
 
     func testMissingRuntimeDoesNotAllocateOrSubstitute() throws {

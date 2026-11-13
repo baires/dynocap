@@ -19,12 +19,11 @@ workspaces and resume are not implemented.
 
 ## Quick start
 
-Install the [requirements](#requirements), then build the signed CLI and the
-guest image from this checkout:
+Install the [requirements](#requirements), then build the signed CLI from this
+checkout:
 
 ```sh
 ./scripts/build-macos.sh
-./scripts/fetch-image.sh
 export PATH="$PWD/.build/release:$PATH"
 ```
 
@@ -34,8 +33,7 @@ is your project, with a `package-lock.json` and `node_modules/` in `.gitignore`.
 <!-- quick start: kept identical to `microvm help` by CLIQuickStartTests -->
 
 ```sh
-microvm doctor
-microvm runtime prepare . --runtime node:24        # in the microvm checkout; downloads verified inputs
+microvm doctor --fix ./project                     # builds the guest image and the runtime ./project uses
 microvm clone ./project deps --network filtered    # explicit network: HTTPS to the npm registry only
 microvm exec deps --timeout 300 -- npm ci
 microvm finish deps                                # exports the result and saves the npm cache
@@ -52,9 +50,14 @@ microvm rm demo
 microvm rm deps
 ```
 
-- `doctor` checks prerequisites without downloading or repairing anything.
-  Runtime preparation is explicit: it is the only step that downloads, and it
-  verifies every input. `clone` never prepares a runtime for you.
+- `doctor --fix ./project` checks prerequisites and repairs what it can: it
+  restarts a stale daemon, builds the guest image, and prepares the runtime
+  `./project` uses, verifying every download. The project's files choose the
+  runtime: `package.json` is `node:24`, `pyproject.toml` (or `uv.lock`,
+  `requirements.txt`) is `python:3.14`, `go.mod` is `go:1.27`. `clone` picks the
+  same one and says so; pass `--runtime` to either to choose another. Plain
+  `doctor` only reports, and says what to run for each failure. `clone` never
+  prepares a runtime for you.
 - Sandboxes are offline unless you choose a network. `deps` uses
   `--network filtered` (HTTPS to `registry.npmjs.org` only) to install packages.
   Finishing it saves the npm cache, which later sandboxes with the same lockfile

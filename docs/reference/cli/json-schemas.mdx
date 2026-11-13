@@ -123,29 +123,51 @@ Returned by `microvm rm` and `microvm destroy`:
 
 ## 6. Doctor Schema (`microvm doctor --json`)
 
-Diagnostic report of host readiness:
+Diagnostic report of host readiness. Findings go to stdout in both modes; the command exits 1 when a required check fails.
 
 ```json
 {
-  "ok": true,
+  "ok": false,
   "home": "/Users/user/.microvm",
-  "runtime": "node:24",
+  "arch": "aarch64",
+  "runtimes": [{ "name": "node", "version": "24" }],
   "checks": [
     {
       "id": "platform",
-      "status": "pass",
-      "detail": "macOS 15.1 (arm64)"
+      "status": "ok",
+      "message": "macOS 13+; guest architecture aarch64",
+      "recovery": null,
+      "fix": null
     },
     {
-      "id": "signing",
-      "status": "pass",
-      "detail": "valid signature and virtualization entitlement"
-    },
-    {
-      "id": "daemon",
-      "status": "warn",
-      "detail": "daemon is not currently running"
+      "id": "runtime",
+      "status": "error",
+      "message": "Runtime node:24 is not prepared for aarch64 yet.",
+      "recovery": "Run microvm doctor --fix to prepare node:24 (downloads verified inputs; takes a few minutes).",
+      "fix": "prepare-runtime"
     }
   ]
 }
 ```
+
+- `status` is `ok`, `warning`, or `error`. Only `error` makes `ok` false.
+- `runtimes` is the runtime that was checked: `--runtime`, or the one the project's files call for. It is empty when there was no project. The `runtime` check then lists the prepared runtimes and is a `warning` if there are none.
+- `fix` is the repair `doctor --fix` performs for this check on this machine (`restart-daemon`, `build-images`, or `prepare-runtime`), or `null` when the check passes or needs a manual step. When it is set, `recovery` names the exact command.
+
+With `--fix`, the report describes the state after repairs and adds `repairs`, in the order they ran:
+
+```json
+"repairs": [
+  {
+    "fix": "build-images",
+    "status": "fixed",
+    "summary": "Building the guest image for aarch64",
+    "recovery": null,
+    "logPath": "/Users/user/.microvm/image-build-....log",
+    "note": null,
+    "seconds": 20.4
+  }
+]
+```
+
+`status` is `fixed`, `failed`, or `skipped`. A runtime repair is skipped when the daemon restart failed. `note` reports side effects, such as where mismatched image files were moved.

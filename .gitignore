@@ -23,3 +23,5 @@ sdk/mcp/dist/
 *.pem
 *.p12
 validation/
+
+__pycache__/

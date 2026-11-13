@@ -42,12 +42,9 @@ struct Main {
             } else {
                 try replayExecutionLogs(logs, execution: command.execution)
             }
-        case .doctor(let runtimes):
-            let executable = URL(fileURLWithPath: args[0]).standardizedFileURL.resolvingSymlinksInPath()
-            let host = DoctorHost(
-                arch: HostArch.guest, platformSupported: MicroVMInfo.virtualizationAvailable,
-                backend: DoctorVirtualizationSupport.backendCheck(), signing: DoctorVirtualizationSupport.signingCheck(executable: executable))
-            let report = diagnoseHost(paths: resolve(invocation), executable: executable, runtimes: runtimes, host: host)
+        case .doctor(let request):
+            try request.validate()
+            let report = request.fix ? doctorFix(request, invocation, args) : diagnose(request, invocation, args)
             print(try formatDoctorReport(report, output: invocation.output, arguments: args), terminator: "")
             exit(report.ok ? 0 : 1)
         case .ls:
@@ -64,25 +61,8 @@ struct Main {
             try manage(command, invocation, args)
         case .runtimePrepare(let preparation):
             let paths = try ready(invocation)
-            try DaemonClient(socketPath: paths.socket.path).requireTasks()
-            if invocation.output == .human { fputs("Preparing the runtime; verified inputs may be downloaded...\n", stderr) }
-            let executable = URL(fileURLWithPath: args[0]).standardizedFileURL.resolvingSymlinksInPath().deletingLastPathComponent()
-                .appendingPathComponent("microvm-mkruntime")
-            let log = try buildRuntime(preparation, paths: paths, executable: executable) { log in
-                if invocation.output == .human { fputs("Runtime build log: \(log.path)\n", stderr) }
-            }
-            if invocation.output == .human { fputs("Verifying the prepared runtime (offline guest check for new artifacts)...\n", stderr) }
-            var verification = TaskCommand(op: "runtimeVerify")
-            verification.runtimes = preparation.runtimes
-            let artifact: RuntimeArtifact
-            do {
-                let data = try DaemonClient(socketPath: paths.socket.path).task(verification)
-                artifact = try JSONDecoder().decode(RuntimeArtifact.self, from: data)
-            } catch {
-                var failure = error as? MicroVMError ?? MicroVMError("prepared runtime verification failed")
-                failure.recovery += " Runtime build log: \(log.path)."
-                throw failure
-            }
+            let say: (String) -> Void = { if invocation.output == .human { fputs($0 + "\n", stderr) } }
+            let (artifact, log) = try prepareRuntime(preparation, paths: paths, args: args, say: say)
             print(try formatRuntimePreparationResult(artifact, home: paths.home, log: log, output: invocation.output), terminator: "")
         case .help(let topic):
             print(commandHelp(topic))
@@ -127,8 +107,116 @@ struct Main {
         }
     }
 
+    /// Builds and verifies a runtime; `runtime prepare` and `doctor --fix` share it.
+    static func prepareRuntime(
+        _ preparation: RuntimePreparation, paths: MicroVMPaths, args: [String], say: (String) -> Void, onLog: (URL) -> Void = { _ in }
+    ) throws -> (RuntimeArtifact, URL) {
+        try DaemonClient(socketPath: paths.socket.path).requireTasks()
+        say("Preparing the runtime; verified inputs may be downloaded...")
+        let executable = URL(fileURLWithPath: args[0]).standardizedFileURL.resolvingSymlinksInPath().deletingLastPathComponent()
+            .appendingPathComponent("microvm-mkruntime")
+        let log = try buildRuntime(preparation, paths: paths, executable: executable) { log in
+            onLog(log)
+            say("Runtime build log: \(log.path)")
+        }
+        say("Verifying the prepared runtime (offline guest check for new artifacts)...")
+        var verification = TaskCommand(op: "runtimeVerify")
+        verification.runtimes = preparation.runtimes
+        do {
+            let data = try DaemonClient(socketPath: paths.socket.path).task(verification)
+            return (try JSONDecoder().decode(RuntimeArtifact.self, from: data), log)
+        } catch {
+            var failure = error as? MicroVMError ?? MicroVMError("prepared runtime verification failed")
+            failure.recovery += " Runtime build log: \(log.path)."
+            throw failure
+        }
+    }
+
+    static func diagnose(_ request: DoctorRequest, _ invocation: CLIInvocation, _ args: [String]) -> DoctorReport {
+        let executable = URL(fileURLWithPath: args[0]).standardizedFileURL.resolvingSymlinksInPath()
+        let host = DoctorHost(
+            arch: HostArch.guest, platformSupported: MicroVMInfo.virtualizationAvailable,
+            backend: DoctorVirtualizationSupport.backendCheck(), signing: DoctorVirtualizationSupport.signingCheck(executable: executable))
+        let current = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).standardizedFileURL
+        let source = locateMicroVMSource(executable: executable, currentDirectory: current)
+        // --runtime wins; otherwise the project decides. The microvm checkout is where people run doctor, not their project.
+        var runtimes = request.runtimes ?? []
+        var origin: String?
+        let project = request.project.map { URL(fileURLWithPath: $0).standardizedFileURL } ?? (current == source?.standardizedFileURL ? nil : current)
+        if request.runtimes == nil, let project, let detected = ProjectRuntime.detect(project) {
+            runtimes = [detected.runtime]
+            origin = detected.marker
+        }
+        return diagnoseHost(paths: resolve(invocation), executable: executable, runtimes: runtimes, host: host, source: source,
+                            runtimeOrigin: origin, fixCommand: doctorFixCommand(home: invocation.home, runtimes: request.runtimes, project: request.project))
+    }
+
+    /// Repairs what the first diagnosis marks fixable, then reports a fresh diagnosis with what was attempted.
+    static func doctorFix(_ request: DoctorRequest, _ invocation: CLIInvocation, _ args: [String]) -> DoctorReport {
+        let before = diagnose(request, invocation, args)
+        let human = invocation.output == .human
+        let executable = URL(fileURLWithPath: args[0]).standardizedFileURL.resolvingSymlinksInPath()
+        let source = locateMicroVMSource(executable: executable, currentDirectory: URL(fileURLWithPath: FileManager.default.currentDirectoryPath))
+        let paths = resolve(invocation)
+        if human {
+            let count = before.fixes.count
+            fputs(count == 0 ? "Nothing to repair automatically.\n" : "Repairing \(count) problem\(count == 1 ? "" : "s"):\n", stderr)
+        }
+        let repairs = repairHost(before, progress: { fix, repair in
+            guard human else { return }
+            if let repair {
+                fputs("\(repair.status) (\(formatDuration(repair.seconds)))\n", stderr)
+            } else {
+                fputs("  \(fix.action(before))... ", stderr)
+            }
+        }, perform: { fix in
+            switch fix {
+            case .restartDaemon:
+                try stopDaemon(paths)
+                try ensureDaemon(paths: paths, home: invocation.home)
+                let check = probeDoctorDaemon(paths)
+                guard check.status == "ok" else {
+                    throw MicroVMError("the restarted daemon still fails: \(check.message)",
+                                       recovery: "Rebuild with ./scripts/build-macos.sh, then run microvm doctor --fix again.")
+                }
+                return DoctorRepairOutput()
+            case .buildImages:
+                guard let source else { throw MicroVMError("the microvm source checkout was not found") }
+                return try buildGuestImage(paths: paths, arch: before.arch, source: source)
+            case .prepareRuntime:
+                guard let source else { throw MicroVMError("the microvm source checkout was not found") }
+                _ = try requireGo()
+                let ready = try ready(invocation)
+                var log: URL?
+                do {
+                    let preparation = RuntimePreparation(repo: source.path, runtimes: before.runtimes)
+                    _ = try prepareRuntime(preparation, paths: ready, args: args, say: { _ in }, onLog: { log = $0 })
+                } catch let error as MicroVMError {
+                    guard let log else { throw error }
+                    throw DoctorRepairFailure(error, log: log)
+                }
+                return DoctorRepairOutput(log: log)
+            }
+        })
+        if human && !repairs.isEmpty { fputs("\n", stderr) }
+        var after = diagnose(request, invocation, args)
+        after.repairs = repairs
+        return after
+    }
+
+    static func formatDuration(_ seconds: Double) -> String {
+        seconds < 60 ? String(format: "%.0fs", seconds) : "\(Int(seconds) / 60)m\(String(format: "%02d", Int(seconds) % 60))s"
+    }
+
     /// Management operations shared by their primary and advanced forms.
     static func manage(_ command: TaskCommand, _ invocation: CLIInvocation, _ args: [String]) throws {
+        var command = command
+        // A local project without --runtime gets the runtime its files call for, and the choice is shown.
+        if command.op == "start", command.runtimes == nil, let path = command.projectPath,
+           let detected = ProjectRuntime.detect(URL(fileURLWithPath: path)) {
+            command.runtimes = [detected.runtime]
+            if invocation.output == .human { fputs(detected.note + "\n", stderr) }
+        }
         let paths = try ready(invocation)
         let client = DaemonClient(socketPath: paths.socket.path)
         try client.requireTaskManagement()

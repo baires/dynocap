@@ -27,9 +27,7 @@ final class CLIQuickStartTests: XCTestCase {
             commands.append(try parseCommand(args).command)
         }
         // Explicit preparation, an explicitly networked install, then offline work.
-        XCTAssertEqual(commands.first, .doctor(RuntimeArtifact.defaultRuntimes))
-        guard case .runtimePrepare(let preparation) = commands[1] else { return XCTFail("expected runtime prepare") }
-        XCTAssertEqual(preparation.repo, ".")
+        XCTAssertEqual(commands.first, .doctor(DoctorRequest(fix: true, project: "./project")))
         let clones = commands.compactMap { command -> TaskCommand? in
             guard case .managed(let task) = command, task.op == "start" else { return nil }
             return task

@@ -153,7 +153,9 @@ let cliCommandSpecs: [CLICommandSpec] = [
         usage: "microvm clone SOURCE NAME [OPTIONS]",
         flags: [
             CLIFlag(name: "--json", value: nil, summary: "Print a documented success or error object; suppress human progress."),
-            CLIFlag(name: "--runtime", value: "NAME:VERSION", summary: "Runtime the sandbox must use, such as node:24."),
+            CLIFlag(
+                name: "--runtime", value: "NAME:VERSION",
+                summary: "Runtime the sandbox must use. A local project's files choose it otherwise (pyproject.toml is python:3.14)."),
             CLIFlag(name: "--network", value: "none|nat|filtered", summary: "Sandbox network. The default is none."),
             CLIFlag(name: "--ttl", value: "SEC", summary: "Sandbox lifetime in seconds, from 1 to 86400. The default is 1800."),
             CLIFlag(name: "--cpus", value: "N", summary: "Guest CPUs. The default is 2 for a project sandbox."),
@@ -203,18 +205,24 @@ let cliCommandSpecs: [CLICommandSpec] = [
     CLICommandSpec(
         path: ["doctor"],
         group: .primary,
-        summary: "Diagnose host prerequisites without starting or repairing anything.",
-        usage: "microvm doctor [--runtime NAME:VERSION] [--json]",
+        summary: "Check that this Mac can run sandboxes, and repair what it can with --fix.",
+        usage: "microvm doctor [PROJECT] [--fix] [--runtime NAME:VERSION] [--json]",
         flags: [
-            CLIFlag(name: "--runtime", value: "NAME:VERSION", summary: "Check this runtime selection; defaults to node:24."),
+            CLIFlag(name: "--fix", value: nil, summary: "Repair failed checks: restart a stale daemon, build the guest image, prepare the runtime."),
+            CLIFlag(name: "--runtime", value: "NAME:VERSION", summary: "Check this runtime instead of the one PROJECT's files call for."),
             CLIFlag(name: "--json", value: nil, summary: "Print the diagnostic report as JSON on stdout."),
         ],
-        examples: ["microvm doctor", "microvm doctor --runtime node:24 --json"],
+        examples: ["microvm doctor", "microvm doctor --fix ./project", "microvm doctor --fix --runtime python:3.14", "microvm doctor --json"],
         discussion: """
-        Check platform/backend support, signed CLI entitlement, companions, image hashes, selected runtime, home access, and daemon connectivity.
-        A stopped daemon is normal; a broken listener or held daemon lock without a socket is an error.
-        Findings use stdout in both modes. Required check failures exit 1; valid setup with a stopped daemon exits 0.
-        Does not create the home, start a daemon or guest, download, prepare, or repair artifacts. See docs/how-to/troubleshoot-with-doctor.mdx.
+        Check platform/backend support, signed CLI entitlement, companions, image hashes, the runtime, home access, and daemon connectivity.
+        The runtime is the one PROJECT (default: the current directory) uses, judged as clone does: package.json is node:24;
+        pyproject.toml, uv.lock, requirements.txt, setup.py, or Pipfile is python:3.14; go.mod is go:1.27. With no project,
+        doctor lists prepared runtimes and requires none.
+        Each failed check says what is wrong and what to run next. A stopped daemon is normal; a broken or outdated daemon is an error.
+        Without --fix, doctor changes nothing: it does not create the home, start a daemon or guest, or download anything.
+        With --fix, doctor repairs fixable checks, then checks again. Builds need the microvm checkout and Go, and download pinned,
+        verified inputs. It never restarts a daemon that has running sandboxes. Progress goes to stderr; the report goes to stdout.
+        Required check failures exit 1. See docs/how-to/troubleshoot-with-doctor.mdx.
         """,
         allowsJSON: true
     ),
@@ -510,8 +518,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
 
 /// The repository workflow, shared word for word with the README quick start (checked by a test).
 let quickStart = """
-microvm doctor
-microvm runtime prepare . --runtime node:24        # in the microvm checkout; downloads verified inputs
+microvm doctor --fix ./project                     # builds the guest image and the runtime ./project uses
 microvm clone ./project deps --network filtered    # explicit network: HTTPS to the npm registry only
 microvm exec deps --timeout 300 -- npm ci
 microvm finish deps                                # exports the result and saves the npm cache
@@ -549,7 +556,7 @@ private func topLevelHelp() -> String {
 
     \(globalOptions)
 
-    Images are built with scripts/fetch-image.sh and stored under MICROVM_HOME (default ~/.microvm).
+    Run `microvm doctor --fix` to build images and runtimes into MICROVM_HOME (default ~/.microvm).
     Commands that need a daemon start one. Help and invalid usage do not.
 
     """

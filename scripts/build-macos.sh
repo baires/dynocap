@@ -11,4 +11,4 @@ swift build -c release
 bin=".build/release/microvm"
 codesign --sign - --entitlements entitlements/microvm.entitlements --force "$bin"
 echo "signed $bin"
-echo "next: ./scripts/fetch-image.sh"
+echo "next: $bin doctor --fix"

@@ -30,8 +30,8 @@ public func parseCommand(_ args: [String]) throws -> CLIInvocation {
         let command = try parseLogs(commandArgs, &prefix)
         return try finishParse(prefix, ["logs"], .logs(command))
     case "doctor":
-        let runtimes = try parseDoctor(commandArgs, &prefix)
-        return try finishParse(prefix, ["doctor"], .doctor(runtimes))
+        let request = try parseDoctor(commandArgs, &prefix)
+        return try finishParse(prefix, ["doctor"], .doctor(request))
     case "ls":
         try parseLs(commandArgs, &prefix)
         return try finishParse(prefix, ["ls"], .ls)
@@ -373,21 +373,28 @@ func parseEmpty(_ command: String, _ args: [String], _ prefix: inout InvocationP
     }
 }
 
-func parseDoctor(_ args: [String], _ prefix: inout InvocationPrefix) throws -> [RuntimeSelection] {
-    var runtime: String?
+func parseDoctor(_ args: [String], _ prefix: inout InvocationPrefix) throws -> DoctorRequest {
+    var request = DoctorRequest()
     var reader = OptionReader(args: args)
     while let token = try reader.next() {
-        if prefix.help || prefix.version { return RuntimeArtifact.defaultRuntimes }
+        if prefix.help || prefix.version { return DoctorRequest() }
         switch token {
-        case .positional(let value): throw usageError("unexpected argument \(value)")
+        case .positional(let value):
+            guard request.project == nil else { throw usageError("unexpected argument \(value)") }
+            request.project = value
         case .separator: throw usageError("unexpected argument --")
         case .flag(let name, let inline):
             if try consumeGlobal(name, inline, reader: &reader, prefix: &prefix) { continue }
-            guard name == "--runtime" else { throw usageError("unknown flag \(name)") }
-            runtime = try reader.value(name, inline)
+            switch name {
+            case "--runtime": request.runtimes = try runtimeSelections(try reader.value(name, inline))
+            case "--fix":
+                guard inline == nil else { throw usageError("--fix does not take a value") }
+                request.fix = true
+            default: throw usageError("unknown flag \(name)")
+            }
         }
     }
-    return try runtimeSelections(runtime)
+    return request
 }
 
 func parseLogs(_ args: [String], _ prefix: inout InvocationPrefix) throws -> LogsCommand {

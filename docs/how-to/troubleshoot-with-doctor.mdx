@@ -1,133 +1,99 @@
 ---
 title: "Troubleshoot with microvm doctor"
-description: "How to use microvm doctor to verify host readiness, diagnose code-signing and entitlement issues, and resolve daemon socket problems."
+description: "How to use microvm doctor to find what is blocking sandboxes, and microvm doctor --fix to repair it."
 sidebar_position: 6
 ---
 
 # Troubleshoot with microvm doctor
 
-The `microvm doctor` command is a read-only diagnostic tool that verifies your host environment, security entitlements, companion binaries, and kernel images before you run sandboxes.
+`microvm doctor` checks everything a sandbox needs and tells you, for each problem, what is wrong and what to run. `microvm doctor --fix` repairs the problems it can.
 
-Unlike other commands, `doctor`:
+```sh
+microvm doctor                  # report only; changes nothing
+microvm doctor --fix            # repair, then report again
+microvm doctor --fix ./project  # check and prepare the runtime ./project uses
+```
 
-- Never starts a daemon or boots a virtual machine.
-- Never downloads artifacts or modifies files.
-- Writes diagnostic reports directly to `stdout` even on failure (with exit code 1 if required checks fail).
+The runtime doctor checks is the one your project uses: `package.json` means `node:24`; `pyproject.toml`, `uv.lock`, `requirements.txt`, `setup.py`, or `Pipfile` means `python:3.14`; `go.mod` means `go:1.27`. `clone` picks the same way. Pass `--runtime NAME:VERSION` to choose another. With no project (for example, in the microvm checkout), doctor requires no runtime and lists the prepared ones.
+
+`--fix` builds from the microvm checkout, which it finds from the `microvm` binary, so you can run it in any directory.
 
 ---
 
-## Running Diagnostics
-
-Run `doctor` directly from your terminal:
-
-```sh
-microvm doctor
-```
-
-For programmatic checks or integration scripts, request JSON output:
-
-```sh
-microvm doctor --json
-```
-
-To verify a specific runtime or custom home directory:
-
-```sh
-microvm doctor --runtime node:24 --home /tmp/custom-microvm
-```
-
----
-
-## Diagnostic Checks Reference
-
-`doctor` runs nine core checks:
-
-| Check ID                | Description                   | What Causes Failure                                      | How to Resolve                                             |
-| :---------------------- | :---------------------------- | :------------------------------------------------------- | :--------------------------------------------------------- |
-| **`platform`**          | OS & CPU architecture         | Non-macOS or unsupported hardware.                       | Run on Apple Silicon with macOS 13+.                       |
-| **`backend`**           | Virtualization support        | Hypervisor framework disabled or unavailable.            | Ensure your Mac model supports `Virtualization.framework`. |
-| **`signing`**           | Code signature & entitlements | Missing `com.apple.security.virtualization` entitlement. | Run `./scripts/build-macos.sh` to compile and sign.        |
-| **`home`**              | Home directory & socket path  | Non-writable directory or path too long.                 | Socket path must be < 104 chars. Choose shorter `--home`.  |
-| **`microvm-workspace`** | Workspace companion           | Missing Go companion binary beside CLI.                  | Run `./scripts/build-macos.sh` to build companions.        |
-| **`microvm-mkruntime`** | Runtime maker companion       | Missing Go companion binary beside CLI.                  | Run `./scripts/build-macos.sh` to build companions.        |
-| **`images`**            | Kernel & initramfs integrity  | Hash mismatch or missing guest boot files.               | Run `./scripts/fetch-image.sh` to refresh images.          |
-| **`runtime`**           | Project task runtime disk     | Node 24 runtime disk missing or corrupt.                 | Run `microvm runtime prepare . --runtime node:24`.         |
-| **`daemon`**            | Daemon ping & capabilities    | Stale socket or daemon process unresponsive.             | Kill stale daemon (`pkill -f microvm`) or check logs.      |
-
----
-
-## Common Issues and Solutions
-
-### 1. `signing` Check Failed: Code Signature Invalid
-
-**Symptom:**
+## Reading the Report
 
 ```text
-[FAIL] signing: CLI is not signed with com.apple.security.virtualization
+Home: /Users/you/.microvm
+
+OK      platform           macOS 13+; guest architecture aarch64
+OK      signing            CLI signature validates and includes the virtualization entitlement.
+ERROR   images             The guest image for aarch64 does not match its manifest.
+                           Next: Run microvm doctor --fix to build the guest image (downloads pinned Alpine files; needs Go).
+ERROR   daemon             The running daemon started before this microvm binary was rebuilt, so it runs the old build.
+                           Next: Run microvm doctor --fix to restart the daemon with this microvm build.
+
+2 required checks failed. Run microvm doctor --fix to repair them.
 ```
 
-**Cause:** On macOS, binaries that call `Virtualization.framework` require Apple's virtualization entitlement. Swift compiler outputs (`swift build`) are not entitled by default.  
-**Fix:** Always build via the repository script:
+- `OK` passed; a stopped daemon or a home that does not exist yet is normal. `WARNING` is worth knowing but does not block sandboxes, such as having no runtime prepared outside a project. `ERROR` blocks sandboxes, and the command exits 1.
+- `Next:` is the one thing to do. When it names `microvm doctor --fix`, the command already includes any `--home` or `--runtime` you passed, so you can paste it as printed.
+- The last line says whether `--fix` can repair everything, some of it, or nothing.
 
-```sh
-./scripts/build-macos.sh
-```
+For scripts, `microvm doctor --json` prints the same report. Each check has a `fix` field naming its automatic repair. See [JSON Schemas](../reference/cli/json-schemas.mdx).
 
 ---
 
-### 2. `home` Check Failed: Socket Path Length Exceeded
+## What `--fix` Repairs
 
-**Symptom:**
+| Check     | Repair                                                                                             | Needs                               |
+| :-------- | :------------------------------------------------------------------------------------------------- | :---------------------------------- |
+| `daemon`  | Stops a broken daemon, or one from an older build, and starts one from this binary.                | No running sandboxes                |
+| `images`  | Builds the guest kernel and initrd. Mismatched files are moved to `replaced-<time>/`, not deleted. | Checkout, Go, network               |
+| `runtime` | Prepares and verifies the runtime in an offline guest, like `microvm runtime prepare`.             | Checkout, Go, network, a signed CLI |
 
-```text
-[FAIL] home: socket path ~/.microvm/daemon.sock exceeds maximum length (104 bytes)
-```
+Repairs run in that order, and progress goes to stderr. Each repair prints a build log path, so a failure shows what to read. `--fix` then runs every check again and reports the result.
 
-**Cause:** macOS UNIX domain sockets have a strict 104-byte path limit. If your user home directory or custom `--home` path is very deep, the socket cannot be bound.  
-**Fix:** Specify a shorter path using the `MICROVM_HOME` environment variable or `--home` flag:
+`--fix` never:
 
-```sh
-export MICROVM_HOME="/tmp/mvm"
-microvm doctor
-```
-
----
-
-### 3. `runtime` Check Failed: Catalog or Disk Missing
-
-**Symptom:**
-
-```text
-[FAIL] runtime: runtime node:24 is not prepared in /Users/username/.microvm
-```
-
-**Cause:** Project tasks (`microvm clone`) require pre-built runtime artifacts that have not been prepared yet.  
-**Fix:** Run explicit preparation from the `microvm` source checkout:
-
-```sh
-microvm runtime prepare . --runtime node:24
-```
+- restarts a daemon that has running sandboxes. Instead it names them, so you can `finish` or `rm` them first;
+- deletes image files. It moves them aside;
+- re-signs the CLI or rebuilds companions. Run `./scripts/build-macos.sh` for those.
 
 ---
 
-### 4. Stale or Unresponsive Daemon
+## Checks That Need You
 
-**Symptom:**
+| Check                                    | Cause                                                       | What to do                                                   |
+| :--------------------------------------- | :---------------------------------------------------------- | :----------------------------------------------------------- |
+| `platform`, `backend`                    | Not a Mac with Virtualization.framework, or macOS < 13.     | Use a supported Mac.                                         |
+| `signing`                                | Built with `swift build` instead of the script.             | Run `./scripts/build-macos.sh`.                              |
+| `microvm-workspace`, `microvm-mkruntime` | Companions missing beside the `microvm` binary.             | Run `./scripts/build-macos.sh` and keep them beside the CLI. |
+| `home`                                   | Home not writable, or `daemon.sock` would exceed 104 bytes. | Use a shorter writable `--home` or `MICROVM_HOME`.           |
 
-```text
-[WARN] daemon: daemon ping timed out
+---
+
+## Common Situations
+
+### I rebuilt microvm and now commands fail
+
+The daemon keeps running the old build until it is restarted. `doctor` reports this as an `ERROR daemon`. Run:
+
+```sh
+microvm doctor --fix
 ```
 
-**Cause:** An old daemon process is hanging or its UNIX domain socket `daemon.sock` is orphaned.  
-**Fix:**
+### `--fix` says Go is missing
 
-1. Check daemon logs:
-   ```sh
-   cat ~/.microvm/daemon.log
-   ```
-2. Terminate any running daemon:
-   ```sh
-   pkill -f "microvm daemon"
-   rm -f ~/.microvm/daemon.sock
-   ```
-   The next `microvm` command will automatically spawn a fresh, healthy daemon.
+The guest agent is compiled during image and runtime builds. Install Go 1.22 or newer (`brew install go`), then run `microvm doctor --fix` again.
+
+### `--fix` cannot find the source checkout
+
+`--fix` looks beside the `microvm` binary and above the current directory. If you copied the binary elsewhere, run it from inside your microvm clone with the project path: `microvm doctor --fix ~/code/my-app`.
+
+### `clone` picked the wrong runtime
+
+`clone` prints the runtime it chose and the file it chose by, such as `Using runtime node:24 (detected from package.json)`. Pass `--runtime` to `clone` and to `doctor --fix` to choose another.
+
+### A repair failed
+
+The repair line shows the error, a `Log:` path, and a `Next:` step. The build log has the full download or compile output.

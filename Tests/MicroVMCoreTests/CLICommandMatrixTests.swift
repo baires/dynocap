@@ -183,7 +183,7 @@ final class CLICommandMatrixTests: XCTestCase {
         XCTAssertTrue(human.stdout.hasPrefix("Created raw sandbox: raw\nPhase: running\nNetwork: none\nTTL: "), human.stdout)
         XCTAssertTrue(human.stdout.contains("remaining ("), human.stdout)
         XCTAssertTrue(human.stdout.contains("expiration or removal discards everything in it"), human.stdout)
-        XCTAssertTrue(human.stdout.contains("Next: microvm --home '\(harness.home.path)' exec 'raw' -- uname -a"), human.stdout)
+        XCTAssertTrue(human.stdout.contains("Next: microvm --home \(shellWord(harness.home.path)) exec raw -- uname -a"), human.stdout)
         XCTAssertEqual(human.stderr, "Booting the sandbox...\n")
         let json = try runCLI(home: harness.home, ["run", "--name", "raw2", "--network", "none", "--json"])
         XCTAssertEqual(json.status, 0, json.stderr)

@@ -174,7 +174,7 @@ public enum CLICommand: Equatable {
     case daemon
     case ps
     case ls
-    case doctor([RuntimeSelection])
+    case doctor(DoctorRequest)
     case logs(LogsCommand)
     case managed(TaskCommand)
     case run(RunRequest)
@@ -199,6 +199,28 @@ public struct CLIInvocation: Equatable {
         self.output = output
         self.verbose = verbose
         self.command = command
+    }
+}
+
+/// `doctor [PROJECT] [--runtime NAME:VERSION] [--fix]`. Without --runtime, the project's files choose the runtime.
+public struct DoctorRequest: Equatable {
+    public var runtimes: [RuntimeSelection]?
+    public var fix: Bool
+    public var project: String?
+
+    public init(runtimes: [RuntimeSelection]? = nil, fix: Bool = false, project: String? = nil) {
+        self.runtimes = runtimes
+        self.fix = fix
+        self.project = project
+    }
+
+    /// A mistyped PROJECT is a usage error, not a report about some other directory.
+    public func validate() throws {
+        guard let project else { return }
+        var directory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: project, isDirectory: &directory), directory.boolValue else {
+            throw usageError("project directory not found: \(project)")
+        }
     }
 }
 
