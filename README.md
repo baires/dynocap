@@ -1,8 +1,8 @@
 # microvm
 
-A local Linux microVM runtime for AI agents on macOS. One CLI boots an
-isolated Linux guest with Apple's Virtualization.framework, runs a command
-inside it, and tears it down.
+Local Linux sandboxes for AI agents on macOS. One CLI boots an isolated
+Linux guest with Apple's Virtualization.framework, runs a command inside it,
+and tears the sandbox down.
 
 For project work, start with the **[Agent task workflow tutorial](docs/tutorials/agent-task-workflow.mdx)**:
 clone a local directory or repository into a named task on a Node, Python, Go or
@@ -14,8 +14,8 @@ See the complete **[Documentation Portal](docs/index.mdx)** for tutorials,
 how-to guides, reference schemas, and architectural explanations.
 
 The tool is local-first: one user and one machine, with no hosted account,
-cluster, or host filesystem share. Tasks have finite lifetimes; persistent
-workspaces and resume are not implemented.
+cluster, or host filesystem share. A task's lifetime is finite. A machine you
+sleep and resume later is not part of this release.
 
 ## Install
 
@@ -401,7 +401,7 @@ runtime that had already been verified:
 | `microvm exec NAME -- true`                        |  12 ms |    3 |
 
 The first clone after a runtime disk changes also reads that disk (about 270 ms
-for the 512 MB `shell:1` image). Preparation, `npm ci`, and a cold Mac are not
+for the 512 MB `shell:1` runtime). That disk is not the boot image. Preparation, `npm ci`, and a cold Mac are not
 in the table. The method, the earlier 185 ms kernel (it cannot mount a task
 disk), and the before/after breakdown are in
 [docs/research/boot-time.md](docs/research/boot-time.md).

@@ -33,7 +33,7 @@ Imports a project tree or Git repository into an isolated task sandbox.
 - `repositoryUrl` _(string, optional)_: HTTPS or SSH Git URL.
 - `name` _(string, optional)_: Friendly name for the task.
 - `network` _(string, optional)_: `"none"`, `"filtered"`, or `"nat"`. Defaults to `"none"`.
-- `ttlSeconds` _(number, optional)_: Sandbox lifetime (30–86400s). Default: 1800.
+- `ttlSeconds` _(number, optional)_: Sandbox lifetime, from 30 to 86400 seconds. Default: 1800.
 - `cpus` _(number, optional)_: Number of vCPUs. Default: 2.
 - `memoryMB` _(number, optional)_: RAM in MB. Default: 1024.
 
@@ -88,7 +88,7 @@ Releases a task name or purges retained results.
 
 **Parameters:**
 
-- `target` _(string, required)_: Task name or immutable ID.
+- `target` _(string, required)_: Task name or immutable ID to release.
 - `force` _(boolean, optional)_: Force removal of an actively running sandbox. Default: `false`.
 - `purge` _(boolean, optional)_: Delete retained logs and result directories. Default: `false`.
 
@@ -102,11 +102,11 @@ Boots an ephemeral minimal Linux sandbox.
 
 **Parameters:**
 
-- `name` _(string, required)_: Name of the sandbox.
-- `network` _(string, optional)_: `"none"`, `"filtered"`, or `"nat"`. Default: `"none"`.
+- `name` _(string, required)_: Name of the raw sandbox.
+- `network` _(string, optional)_: Choose `"none"`, `"filtered"`, or `"nat"`. The raw sandbox defaults to `"none"`.
 - `ttlSeconds` _(number, optional)_: Lifetime in seconds. Default: 1800.
 - `cpus` _(number, optional)_: vCPUs. Default: 1.
-- `memoryMB` _(number, optional)_: RAM in MB. Default: 1024.
+- `memoryMB` _(number, optional)_: RAM for this sandbox, in MB. Default: 1024.
 
 ---
 

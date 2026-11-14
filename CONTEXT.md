@@ -5,16 +5,16 @@ Local Linux sandboxes for agents. One daemon on a host owns them. Callers boot a
 ## The sandbox
 
 **Sandbox**:
-A named Linux guest with its own CPU, memory, and disk, owned by one daemon.
+A named Linux guest with its own CPU and memory, owned by one daemon.
 _Avoid_: VM, container, box, instance
+
+**Task**:
+A sandbox working on one copied project. It has a workspace and a runtime, and finish can leave a result after the sandbox is gone.
+_Avoid_: job, session, environment
 
 **Phase**:
 Where a sandbox is in its life: booting, running, stopping, stopped, or failed.
 _Avoid_: status, state
-
-**Disk**:
-A sandbox's root filesystem.
-_Avoid_: volume, drive, image
 
 **Dev box**:
 A sandbox whose disk outlives the running guest, and which sleeps while idle.
@@ -22,7 +22,7 @@ _Avoid_: persistent VM, sleeping container
 
 **Snapshot**:
 A saved guest that can become a running sandbox without a cold boot.
-_Avoid_: checkpoint, image
+_Avoid_: checkpoint, image, the import of a project
 
 **Warm pool**:
 Sandboxes already booted and waiting to be claimed.
@@ -45,8 +45,8 @@ A prepared, read-only language toolchain disk a task boots with, selected as NAM
 _Avoid_: image, language, stack
 
 **Dependency seed**:
-A host copy of a runtime's package-manager cache, keyed by the project's lockfile, restored into later sandboxes.
-_Avoid_: npm cache, artifact
+The host copy of one runtime's package cache, keyed by the project's lockfile, restored into later tasks.
+_Avoid_: npm cache, artifact, image
 
 **Image**:
 The kernel and initramfs a sandbox boots, one per host architecture.
@@ -64,15 +64,19 @@ _Avoid_: garbage collection, cleanup
 
 **Exec**:
 One command running inside a sandbox, with its own arguments, working directory, environment, and deadline.
-_Avoid_: job, task, process
+_Avoid_: job, process
 
 **TTL**:
-A sandbox’s finite lifetime, counted from creation and including boot. Activity does not renew it.
+A sandbox’s finite lifetime, counted from creation and including boot. Activity does not renew it. An exec deadline is a different clock.
 _Avoid_: timeout, lease
 
 **Workspace**:
-The file tree a sandbox works on.
-_Avoid_: home, repo, volume
+The copied project tree a task works on. It is not the checkout on the host.
+_Avoid_: home, repo, volume, mount
+
+**Result**:
+What finish keeps on the host after the sandbox is destroyed. Its clock starts when the task is created.
+_Avoid_: snapshot, artifact, the sandbox itself
 
 **Fork**:
 A copy-on-write clone of a workspace.
@@ -83,8 +87,9 @@ An address that reaches one port of a sandbox.
 _Avoid_: tunnel, ingress
 
 **Network mode**:
-Whether a sandbox is offline, filtered to the install and public-clone allowlist, or unrestricted.
+Which NIC a sandbox gets: `none` (no NIC), `filtered` (HTTPS only to that runtime's registry, plus the Git host of a URL clone), or `nat` (unrestricted outbound).
+_Avoid_: offline, unrestricted, and allowlist as names of the mode
 
 **Egress**:
-Which outbound destinations a sandbox may open.
-_Avoid_: firewall, NAT
+Which outbound destinations a filtered sandbox may open.
+_Avoid_: firewall, calling that list NAT

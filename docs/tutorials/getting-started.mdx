@@ -6,9 +6,9 @@ sidebar_position: 1
 
 # Getting Started with MicroVM
 
-This tutorial guides you from a fresh checkout to booting an isolated Linux microVM on macOS and running your first command inside it.
+Build the signed CLI on an Apple Silicon Mac, boot one sealed Linux guest, and run a command inside it.
 
-By the end of this lesson, you will:
+You will:
 
 1. Verify system prerequisites on Apple Silicon.
 2. Build the signed CLI binary.
@@ -148,7 +148,7 @@ NAME/ID       KIND     PHASE    RUNTIME  NETWORK  TTL    RETENTION
 my-first-box  sandbox  running  minimal  none     29m    -
 ```
 
-Notice that `NETWORK` is `none`. The sandbox is completely offline—no network interface exists inside the guest.
+Notice that `NETWORK` is `none`. The sandbox is completely offline. No network interface exists inside the guest.
 
 ---
 
@@ -205,5 +205,5 @@ Because `my-first-box` was actively running, `--force` explicitly confirms disca
 
 Now that you know how to build MicroVM and run raw Linux commands, proceed to:
 
-- **[End-to-End Agent Task Workflow](/tutorials/agent-task-workflow)**: Learn how to mount project trees, manage dependencies, and extract verified diffs.
+- **[End-to-End Agent Task Workflow](/tutorials/agent-task-workflow)**: Copy a project into a task, install from a dependency seed, and export a verified diff. The host checkout is never mounted.
 - **[Interactive Shells & Terminal Sessions](/how-to/interactive-shells-and-terminal)**: Learn how to attach interactive TTY sessions for live debugging.

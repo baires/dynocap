@@ -48,7 +48,7 @@ microvm: left the shell; my-sandbox is still running until its TTL. Export with 
 
 ## Single Terminal Commands: `microvm exec -t`
 
-When you want to run a single command that requires a pseudo-terminal (PTY)—such as an interactive test runner, a progress bar, or a cursor-positioned tool—use `microvm exec -t`:
+When you want to run a single command that requires a pseudo-terminal (PTY), such as an interactive test runner, a progress bar, or a cursor-positioned tool, use `microvm exec -t`:
 
 ```sh
 microvm exec my-sandbox -t -- npm test -- --watch
@@ -76,7 +76,7 @@ When attached to a terminal session in MicroVM:
 
 ### 2. Window Resizing (SIGWINCH)
 
-When you resize your macOS terminal window (e.g. Terminal.app, iTerm2, Alacritty, Ghostty), the MicroVM CLI intercepts `SIGWINCH` on the host, reads the new row and column dimensions, and transmits a control packet over vsock. The guest agent issues an `ioctl(TIOCSWINSZ)` on the guest PTY, allowing full-screen tools (such as `nano`, `less`, or `htop`) to resize seamlessly.
+When you resize your macOS terminal window (e.g. Terminal.app, iTerm2, Alacritty, Ghostty), the MicroVM CLI intercepts `SIGWINCH` on the host, reads the new row and column dimensions, and transmits a control packet over vsock. The guest agent issues an `ioctl(TIOCSWINSZ)` on the guest PTY, so full-screen tools (such as `nano`, `less`, or `htop`) match the new size.
 
 ### 3. Terminating from the Host
 
