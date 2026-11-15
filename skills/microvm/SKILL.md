@@ -2,9 +2,14 @@
 name: microvm
 description: >
   Run work in a local MicroVM Linux sandbox on macOS. Use when the user wants a
-  disposable guest, a copied project, a verified patch, or when the MicroVM CLI,
-  @microvm/sdk, or MicroVM MCP tools (microvm_task_start, microvm_task_exec,
-  microvm_diff, microvm_task_finish) are available.
+  disposable guest, a copied project, a verified patch, or to run untrusted
+  commands, tests, or installs away from the host checkout, or when the MicroVM
+  CLI, @microvm/sdk, or MicroVM MCP tools (microvm_task_start,
+  microvm_task_exec, microvm_diff, microvm_task_finish) are available.
+license: Apache-2.0
+compatibility: >
+  macOS 13 or newer with Virtualization.framework; project tasks need Apple
+  Silicon. Needs the microvm CLI on PATH or the MicroVM MCP server connected.
 ---
 
 # MicroVM
@@ -39,6 +44,13 @@ microvm finish demo
 `doctor --fix` prepares the guest image and the runtime the project already uses: `package.json` is `node:24`, `pyproject.toml` (or `uv.lock`, `requirements.txt`) is `python:3.14`, `go.mod` is `go:1.27`, otherwise `shell:1`. `clone` does not prepare a runtime by itself.
 
 `clone` is offline unless you pass `--network filtered` or `--network nat`. After a filtered install is finished, a later clone with the same lockfile can install with no network device.
+
+For each task:
+
+1. Run `doctor --fix` on the project. Fix what it reports and run it again until it passes.
+2. `clone`, then `exec` the work. A non-zero exit is the guest command failing. Read stderr before retrying.
+3. `diff` and read the patch. If it is wrong, `exec` again in the same task and diff again.
+4. `finish` before the TTL runs out. Give the user the patch path it prints.
 
 Also: `microvm shell NAME`, `microvm ls`, `microvm inspect NAME`, `microvm logs NAME`. Discard a live guest with `microvm rm NAME --force`. Delete a kept result with `microvm rm NAME --purge`.
 

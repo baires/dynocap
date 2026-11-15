@@ -62,6 +62,21 @@ export PATH="$PWD/.build/release:$PATH"
 checkout. A source tree has no bundled guest image, so `microvm doctor --fix`
 builds one with Go. See [Build and run](#build-and-run) for a raw sandbox.
 
+### Agent skill
+
+[`skills/microvm`](skills/microvm/SKILL.md) is an [Agent Skills](https://agentskills.io)
+skill that teaches a coding agent the task workflow, the network rules, and when
+to prefer MCP. It works with the CLI alone; MCP is optional.
+
+```sh
+npx skills add OWNER/microvm
+```
+
+Or copy the `skills/microvm` folder into a skills directory your agent scans:
+`.agents/skills/` in a project or `~/.agents/skills/` for every project (Claude
+Code reads `.claude/skills/` and `~/.claude/skills/`). `npm run lint` checks
+the skill against the specification with `scripts/validate-skills.mjs`.
+
 ## Quick start
 
 After `microvm` is on your PATH, the repository workflow below is the same one
