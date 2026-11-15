@@ -20,7 +20,10 @@ jobs:
       - name: SwiftLint
         run: brew install swiftlint
       - name: Install
-        run: npm ci
+        run: |
+          npm ci
+          npm ci --prefix sdk/typescript
+          npm ci --prefix sdk/mcp
       - name: Lint
         run: npm run lint
       - name: Typecheck
