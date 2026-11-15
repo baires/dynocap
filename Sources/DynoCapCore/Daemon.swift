@@ -1088,7 +1088,8 @@ public struct DaemonClient {
                 // A terminal keeps taking keystrokes after a forwarded signal, like a local shell job.
                 if command.terminal == nil { control?.stop() }
                 guard canSignal else {
-                    fputs("dynocap: daemon cannot forward guest signals; rebuild and restart it\n", stderr)
+                    // This function later stores guest stderr in a Data named stderr, which hides the C stream.
+                    FileHandle.standardError.write(Data("dynocap: daemon cannot forward guest signals; rebuild and restart it\n".utf8))
                     return
                 }
                 fdLock.lock()
