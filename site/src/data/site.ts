@@ -19,8 +19,8 @@ export const site = {
 };
 
 export const hero = {
-  title: "Give your code agent a Linux sandbox.",
-  lede: "Copy in a project. Run code in an isolated Linux guest on your Mac. Review the patch before it touches your checkout.",
+  title: "Give your coding agent its own Linux machine.",
+  lede: "Each task gets a fresh microVM on your Mac, with its own kernel, no network, and no host folders mounted. It is ready in 299 ms, sized to the job, and hands back a patch you review before anything touches your checkout.",
 };
 
 export const workflow = [
@@ -46,6 +46,21 @@ export const workflow = [
   },
 ];
 
+// The commands in site/demo/workflow.tape, in order. Keep the two in sync.
+export const demo = {
+  video: "/demo/microvm-workflow",
+  duration: "20-second",
+  commands: [
+    "cat README.md",
+    "microvm clone . demo",
+    "microvm exec demo -- uname -sr",
+    "microvm exec demo -- sed -i 's/from the host/from a microVM/' README.md",
+    "microvm diff demo",
+    "microvm finish demo",
+    "cat README.md",
+  ],
+};
+
 export const installation = {
   brew: "brew install microvm/tap/microvm",
   curl: "curl -fsSL https://microvm.dev/install.sh | sh",
@@ -67,25 +82,37 @@ export const setup = [
   },
 ];
 
+// `at` places each median on a 0 to 1000 ms scale.
 export const measurements = [
+  {
+    value: "11",
+    unit: "ms",
+    at: 1.1,
+    label: "Next command in a running microVM",
+    command: "microvm exec",
+    sample: "Median, after run returned",
+  },
   {
     value: "299",
     unit: "ms",
-    label: "Raw sandbox ready",
+    at: 29.9,
+    label: "Fresh microVM, ready for commands",
     command: "microvm run",
     sample: "Median of 6 runs",
   },
   {
     value: "491",
     unit: "ms",
-    label: "Small project copied and ready",
+    at: 49.1,
+    label: "Small project copied in and ready",
     command: "microvm clone",
     sample: "One-file directory, shell:1, 3 runs",
   },
   {
     value: "989",
     unit: "ms",
-    label: "This repository copied and ready",
+    at: 98.9,
+    label: "This repository copied in and ready",
     command: "microvm clone",
     sample: "387 files, shell:1, 2 runs",
   },
@@ -106,36 +133,65 @@ export const doors = [
   },
 ];
 
-export const guarantees = [
+export const boundary = [
   {
-    title: "Offline by default",
-    text: "The default sandbox has no network device. Opt into filtered registry access or NAT when the task needs it.",
+    host: "Your checkout",
+    guest:
+      "A copy in a disposable workspace. Your directory is never mounted into the guest.",
   },
   {
-    title: "Your checkout stays on the host",
-    text: "The workspace is imported. The host directory is never mounted into the guest.",
+    host: "Your network",
+    guest:
+      "No network device at all, unless you choose filtered registry access or NAT for that task.",
   },
   {
-    title: "A fixed lifetime",
-    text: "The default TTL is 30 minutes from creation, including boot. Work inside the guest does not extend it.",
+    host: "Your kernel",
+    guest:
+      "A separate Linux kernel under Apple’s Virtualization framework, not a container sharing yours.",
   },
   {
-    title: "A patch you can read",
-    text: "finish writes the patch and the logs, then destroys the guest. Apply the patch when you choose.",
+    host: "Your decision",
+    guest:
+      "finish exports a patch and logs, then destroys the microVM. Nothing is applied until you apply it.",
+  },
+];
+
+export const controls = [
+  {
+    flag: "--runtime node:24",
+    title: "Toolchain",
+    text: "Node, Python, Go, or a plain shell, detected from your project files and attached read-only.",
+  },
+  {
+    flag: "--cpus 4 --memory 4096",
+    title: "Resources",
+    text: "Virtual CPUs and RAM for each task, so a heavy build gets room and a quick check stays small.",
+  },
+  {
+    flag: "--network filtered",
+    title: "Network",
+    text: "Off by default. Filtered allows HTTPS to the runtime’s registry and Git host only. NAT opens outbound access when a task truly needs it.",
+  },
+  {
+    flag: "--ttl 900",
+    title: "Lifetime",
+    text: "30 seconds to 24 hours, counted from creation. Activity never extends it, so nothing lingers.",
   },
 ];
 
 export const runtimes = [
   { name: "node", version: "24" },
+  { name: "node", version: "22" },
   { name: "python", version: "3.14" },
   { name: "go", version: "1.27" },
   { name: "shell", version: "1" },
 ];
 
 export const nav = [
+  { href: "/#speed", label: "Speed" },
+  { href: "/#isolation", label: "Isolation" },
+  { href: "/#agents", label: "Agents" },
   { href: "/#install", label: "Get started" },
-  { href: "/#agents", label: "MCP and skills" },
-  { href: "/#performance", label: "Performance" },
   { href: "/docs", label: "Docs" },
 ];
 

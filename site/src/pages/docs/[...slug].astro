@@ -13,7 +13,8 @@ export async function getStaticPaths() {
 }
 
 const { entry } = Astro.props;
-const { Content } = await render(entry);
+const { Content, headings } = await render(entry);
+const outline = headings.filter((heading) => heading.depth === 2 || heading.depth === 3);
 const { groups, flat } = await loadDocs();
 const title = docTitle(entry);
 const description = docDescription(entry);
@@ -24,10 +25,7 @@ const markdown = docMarkdownHref(entry.id);
 <Base title={title} description={description}>
   <div class="docs-shell">
     <DocsSidebar groups={groups} current={docHref(entry.id)} />
-    <article class="prose" id="content" tabindex="-1">
-      <p class="docs-md">
-        <a href={markdown}>View as Markdown</a>
-      </p>
+    <article class="prose">
       <Content />
       <nav class="docs-turn" aria-label="Continue">
         {
@@ -47,6 +45,26 @@ const markdown = docMarkdownHref(entry.id);
           )
         }
       </nav>
+      <p class="docs-md">
+        This page is also <a href={markdown}>plain Markdown</a>, for agents and for you.
+      </p>
     </article>
+    <aside class="docs-outline" aria-labelledby="outline-title">
+      {
+        outline.length > 1 && (
+          <>
+            <p id="outline-title">On this page</p>
+            <ol>
+              {outline.map((heading) => (
+                <li class={`depth-${heading.depth}`}>
+                  <a href={`#${heading.slug}`}>{heading.text}</a>
+                </li>
+              ))}
+            </ol>
+          </>
+        )
+      }
+      <a class="docs-outline__md" href={markdown}>View as Markdown</a>
+    </aside>
   </div>
 </Base>

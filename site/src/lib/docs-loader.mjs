@@ -4,6 +4,10 @@ import { pathToFileURL } from "node:url";
 
 const ROOT = path.resolve(process.cwd(), "../docs");
 const DIRS = ["tutorials", "how-to", "reference", "explanation"];
+// Rendered HTML also depends on the Markdown pipeline, so a change there must re-render every page.
+const PIPELINE = ["rehype-docs.mjs", "shiki-theme.mjs"]
+  .map((name) => fs.readFileSync(new URL(name, import.meta.url), "utf8"))
+  .join("\n");
 
 function files() {
   const found = [];
@@ -76,7 +80,7 @@ async function loadFile(file, context) {
     body,
     filePath: path.relative(process.cwd(), file),
     rendered,
-    digest: context.generateDigest(raw),
+    digest: context.generateDigest(raw + PIPELINE),
   });
 }
 

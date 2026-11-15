@@ -12,12 +12,15 @@ interface Props {
 }
 const { groups, current } = Astro.props;
 const currentPage = groups.flatMap((group) => group.pages).find((page) => docHref(page.id) === current);
-const summary = currentPage ? docTitle(currentPage) : "Guide";
+const summary = currentPage ? docTitle(currentPage) : "Docs home";
 ---
 
 <nav class="docs-nav" aria-label="Documentation">
   <details class="docs-disclosure">
-    <summary>{summary}</summary>
+    <summary>
+      <span>All docs</span>
+      <b>{summary}</b>
+    </summary>
   </details>
   <div class="docs-tree">
     <p class="docs-nav__home">

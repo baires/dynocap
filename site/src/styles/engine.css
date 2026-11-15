@@ -136,34 +136,10 @@ html.lenis body {
   text-indent: inherit;
 }
 
-#curtain {
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-curtain);
-  pointer-events: none;
-  visibility: hidden;
-  overflow: hidden;
-}
-.curtain__panel {
-  position: absolute;
-  inset: 0;
-  background: var(--c-curtain);
-}
-.curtain__seam {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 50%;
-  height: 2px;
-  background: var(--c-accent);
-  transform-origin: center;
-}
-
 @media (forced-colors: active) {
   :where(a, button, summary):focus-visible {
     outline: 2px solid Highlight;
   }
-  .curtain__seam,
   .seam,
   .seal-link i,
   .draw {

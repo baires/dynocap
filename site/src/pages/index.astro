@@ -1,8 +1,10 @@
 ---
 import Base from "../layouts/Base.astro";
 import {
+  boundary,
+  controls,
+  demo,
   doors,
-  guarantees,
   hero,
   installation,
   measurements,
@@ -11,15 +13,15 @@ import {
   site,
   workflow,
 } from "../data/site";
+
+// Each measurement label spans this many of the scale's 100 columns.
+const labelSpan = 19;
 ---
 
 <Base>
   <div class="band">
     <section class="hero hero--workflow" aria-labelledby="content">
       <div class="hero__intro">
-        <p class="platform">
-          Local Linux sandboxes · Apple Silicon · macOS 13+
-        </p>
         <h1 id="content" tabindex="-1">
           {hero.title}
         </h1>
@@ -46,6 +48,10 @@ import {
             <i aria-hidden="true"></i>
           </a>
         </div>
+        <p class="hero__claim">
+          299 ms is the median warm boot on one Apple Silicon Mac, after setup.{" "}
+          <a href="#measurement-notes">How we measured</a>
+        </p>
       </div>
       <div
         id="workflow"
@@ -75,6 +81,273 @@ import {
       </div>
     </section>
 
+    <section class="section demo" aria-labelledby="demo-title">
+      <div class="section-intro">
+        <h2 id="demo-title">One task, start to finish.</h2>
+        <p class="lede">
+          Recorded in real time on an Apple Silicon Mac with MicroVM already set
+          up. The typing is scripted; every pause after Enter is the command
+          running. Watch the last line: the file on your Mac never changed.
+        </p>
+      </div>
+      <figure class="demo__frame">
+        <video
+          data-demo
+          muted
+          loop
+          playsinline
+          preload="none"
+          width="1440"
+          height="820"
+          data-poster={`${demo.video}.png`}
+          aria-label={`A ${demo.duration} terminal recording of one MicroVM task`}
+        >
+          <source src={`${demo.video}.webm`} type="video/webm" />
+          <source src={`${demo.video}.mp4`} type="video/mp4" />
+        </video>
+        <figcaption class="demo__controls">
+          <button class="seal-link" type="button" data-demo-toggle>
+            <span>Play recording</span>
+            <i aria-hidden="true"></i>
+          </button>
+          <details class="demo__transcript">
+            <summary>Show the commands</summary>
+            <ol>
+              {demo.commands.map((command) => (
+                <li>
+                  <code>{command}</code>
+                </li>
+              ))}
+            </ol>
+          </details>
+        </figcaption>
+      </figure>
+      <div class="demo__phone">
+        <ol>
+          {demo.commands.map((command) => (
+            <li>
+              <code>{command}</code>
+            </li>
+          ))}
+        </ol>
+        <a class="seal-link" href={`${demo.video}.mp4`}>
+          <span>Watch the {demo.duration} recording</span>
+          <i aria-hidden="true"></i>
+        </a>
+      </div>
+    </section>
+
+    <section
+      class="section speed-section"
+      id="speed"
+      aria-labelledby="speed-title"
+    >
+      <div class="section-intro">
+        <h2 id="speed-title">Fast enough to throw away.</h2>
+        <p class="lede">
+          A clean microVM for every task costs less than a third of a second,
+          so there is no reason to reuse a dirty one. Copying a whole repository
+          in takes about one.
+        </p>
+      </div>
+      <div class="scale">
+        <p class="scale__axis" aria-hidden="true">
+          <span>0 ms</span>
+          <span>500 ms</span>
+          <span>1 s</span>
+        </p>
+        <ol class="measurements">
+          {measurements.map((item) => {
+            const start = Math.min(Math.floor(item.at), 100 - labelSpan);
+            const tick = ((item.at - start) / labelSpan) * 100;
+            return (
+            <li
+              style={`--at: ${item.at}%; --col: ${start + 1}; --tick: ${tick}%`}
+            >
+              <p class="measurement">
+                <span>{item.value}</span>
+                <span class="measurement__unit">{item.unit}</span>
+              </p>
+              <h3>{item.label}</h3>
+              <code>{item.command}</code>
+              <p class="note">{item.sample}</p>
+            </li>
+            );
+          })}
+        </ol>
+      </div>
+      <div id="measurement-notes" class="measurement-notes">
+        <h3>Warm starts, measured on one Mac.</h3>
+        <p>
+          Measured on one Apple Silicon Mac on 13 November 2026, with the daemon
+          already running and artifacts prepared. The raw microVM used 1 vCPU,
+          1024 MB RAM, and a warm page cache, after one warmup. Project
+          measurements used a prepared shell:1 runtime. These are observed
+          medians, not guarantees. First installation, runtime preparation, and
+          dependency installation are excluded.
+        </p>
+      </div>
+    </section>
+
+    <section
+      class="section isolation-section"
+      id="isolation"
+      aria-labelledby="isolation-title"
+    >
+      <div class="section-intro">
+        <h2 id="isolation-title">
+          A separate kernel between the agent and your Mac.
+        </h2>
+        <div>
+          <p class="lede">
+            Let the agent install, delete, and run whatever it needs. It is
+            working on a copy, inside a virtual machine, with the doors closed.
+          </p>
+          <a class="seal-link" href="/docs/explanation/security-and-isolation">
+            <span>Read the security boundary</span>
+            <i aria-hidden="true"></i>
+          </a>
+        </div>
+      </div>
+      <div class="boundary" role="table" aria-label="What stays on your Mac and what the microVM gets">
+        <div class="boundary__head" role="row">
+          <span role="columnheader">On your Mac</span>
+          <span role="columnheader">Inside the microVM</span>
+        </div>
+        {boundary.map((row) => (
+          <div class="boundary__row" role="row">
+            <h3 role="rowheader">{row.host}</h3>
+            <p role="cell">{row.guest}</p>
+          </div>
+        ))}
+      </div>
+      <p class="note">
+        These are concrete isolation features, not a claim of absolute security.
+        Files you import can still contain secrets, and filtered or NAT access
+        reaches real systems.
+      </p>
+    </section>
+
+    <section
+      class="section control-section"
+      id="control"
+      aria-labelledby="control-title"
+    >
+      <div class="section-intro">
+        <h2 id="control-title">Every limit is a flag.</h2>
+        <p class="lede">
+          Pick the toolchain, resources, network, and lifetime for each task.
+          The same options work from the CLI, the TypeScript SDK, and MCP.
+        </p>
+      </div>
+      <pre class="control__command"><code>microvm clone . fix-auth{controls.map((item) => <>{" "}<span>{item.flag}</span></>)}</code></pre>
+      <ul class="controls">
+        {controls.map((item, index) => (
+          <li>
+            <code>{item.flag}</code>
+            <h3>{item.title}</h3>
+            <p>{item.text}</p>
+            {index === 0 && (
+              <ul class="runtimes" aria-label="Supported runtimes">
+                {runtimes.map((runtime) => (
+                  <li>
+                    {runtime.name} {runtime.version}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </li>
+        ))}
+      </ul>
+      <a class="seal-link" href="/docs/reference/cli/commands">
+        <span>Every option in the CLI reference</span>
+        <i aria-hidden="true"></i>
+      </a>
+    </section>
+
+    <section class="section" id="agents" aria-labelledby="agents-title">
+      <div class="section-intro">
+        <h2 id="agents-title">
+          Tools for the agent.
+          <br />A skill for the workflow.
+        </h2>
+        <p class="lede">
+          Connect your coding assistant through MCP, then give it the MicroVM
+          skill. The server hands it a machine. The skill tells it how to behave
+          inside one.
+        </p>
+      </div>
+      <div class="agent-paths">
+        <div>
+          <h3>MCP gives it the tools.</h3>
+          <p>
+            Let Claude Desktop, Cursor, or Cline start a task, run commands,
+            inspect the diff, and export the result through the local daemon.
+            The agent cannot turn on networking unless you allow it on the
+            host.
+          </p>
+          <ul class="agent-tools">
+            <li>
+              <code>microvm_task_start</code>
+            </li>
+            <li>
+              <code>microvm_task_exec</code>
+            </li>
+            <li>
+              <code>microvm_diff</code>
+            </li>
+            <li>
+              <code>microvm_task_finish</code>
+            </li>
+          </ul>
+          <a class="seal-link" href="/docs/how-to/configure-mcp-server">
+            <span>Connect the MCP server</span>
+            <i aria-hidden="true"></i>
+          </a>
+        </div>
+        <div>
+          <h3>The skill teaches it the rules.</h3>
+          <p>
+            Give your agent the repository’s MicroVM skill: prefer MCP when
+            connected, work in the copied workspace, ask before enabling network
+            access, and finish before the TTL expires.
+          </p>
+          <p class="skill-path">
+            <code>skills/microvm/SKILL.md</code>
+          </p>
+          <p class="note">
+            Save the skill in your agent’s supported skills directory. It works
+            with the CLI too; MCP is optional.
+          </p>
+          <a class="seal-link" href="/skill.md">
+            <span>Read the MicroVM skill</span>
+            <i aria-hidden="true"></i>
+          </a>
+        </div>
+      </div>
+      <p class="agent-alternatives">
+        Working directly? Use the CLI or build MicroVM into your own agent loop
+        with the TypeScript SDK.
+      </p>
+      <ol class="can">
+        {doors.map((item) => (
+          <li>
+            <h3>{item.title}</h3>
+            <p>{item.text}</p>
+            <a class="seal-link" href={item.href}>
+              <span>{item.command}</span>
+              <i aria-hidden="true"></i>
+            </a>
+          </li>
+        ))}
+      </ol>
+      <p class="note">
+        The TypeScript SDK and MCP server are built from this repository. Their
+        guides include the local setup; a public npm install is not available
+        yet.
+      </p>
+    </section>
+
     <section
       class="section setup-section"
       id="install"
@@ -84,7 +357,7 @@ import {
         <h2 id="install-title">
           Set up once.
           <br />
-          Then start with a command.
+          Then every task is one command.
         </h2>
         <div>
           <p class="lede">
@@ -98,8 +371,8 @@ import {
         </div>
       </div>
       <p class="requirements">
-        For project tasks: Apple Silicon and macOS 13 or newer. Check the
-        installation guide for preparation requirements.
+        Project tasks need an Apple Silicon Mac with macOS 13 or newer. The
+        installation guide lists everything doctor prepares.
       </p>
       <ol class="setup-list">
         {setup.map((step, index) => (
@@ -166,185 +439,6 @@ import {
       </a>
     </section>
 
-    <section class="section" id="agents" aria-labelledby="agents-title">
-      <div class="section-intro">
-        <h2 id="agents-title">
-          Tools for the agent.
-          <br />A skill for the workflow.
-        </h2>
-        <p class="lede">
-          Connect your coding assistant through MCP, then give it the MicroVM
-          skill. The server exposes the actions. The skill explains when and how
-          to use them.
-        </p>
-      </div>
-      <div class="agent-paths">
-        <div>
-          <h3>MCP gives it the tools.</h3>
-          <p>
-            Let Claude Desktop, Cursor, or Cline start a task, run commands,
-            inspect the diff, and export the result through the local daemon.
-          </p>
-          <ul class="agent-tools">
-            <li>
-              <code>microvm_task_start</code>
-            </li>
-            <li>
-              <code>microvm_task_exec</code>
-            </li>
-            <li>
-              <code>microvm_diff</code>
-            </li>
-            <li>
-              <code>microvm_task_finish</code>
-            </li>
-          </ul>
-          <a class="seal-link" href="/docs/how-to/configure-mcp-server">
-            <span>Connect the MCP server</span>
-            <i aria-hidden="true"></i>
-          </a>
-        </div>
-        <div>
-          <h3>The skill teaches it the rules.</h3>
-          <p>
-            Give your agent the repository’s MicroVM skill: prefer MCP when
-            connected, work in the copied workspace, ask before enabling network
-            access, and finish before the TTL expires.
-          </p>
-          <p class="skill-path">
-            <code>skills/microvm/SKILL.md</code>
-          </p>
-          <p class="note">
-            Save the skill in your agent’s supported skills directory. It works
-            with the CLI too; MCP is optional.
-          </p>
-          <a class="seal-link" href="/skill.md">
-            <span>Read the MicroVM skill</span>
-            <i aria-hidden="true"></i>
-          </a>
-        </div>
-      </div>
-      <p class="agent-alternatives">
-        Working directly? Use the CLI or build MicroVM into your own agent loop
-        with the TypeScript SDK.
-      </p>
-      <ol class="can">
-        {doors.map((item) => (
-          <li>
-            <h3>{item.title}</h3>
-            <p>{item.text}</p>
-            <a class="seal-link" href={item.href}>
-              <span>{item.command}</span>
-              <i aria-hidden="true"></i>
-            </a>
-          </li>
-        ))}
-      </ol>
-      <p class="note">
-        The TypeScript SDK and MCP server are built from this repository. Their
-        guides include the local setup; a public npm install is not available
-        yet.
-      </p>
-    </section>
-
-    <section class="section boundary-section" aria-labelledby="boundary-title">
-      <div class="boundary-intro">
-        <h2 id="boundary-title">
-          Let the agent work.
-          <br />
-          Keep the boundary.
-        </h2>
-        <p class="lede">
-          Every sandbox runs a separate Linux kernel through Apple’s
-          Virtualization framework. Code runs in a copied workspace. You decide
-          which changes to keep.
-        </p>
-        <a class="seal-link" href="/docs/explanation/security-and-isolation">
-          <span>Understand the isolation</span>
-          <i aria-hidden="true"></i>
-        </a>
-      </div>
-      <ul class="guarantees">
-        {guarantees.map((item) => (
-          <li>
-            <h3>{item.title}</h3>
-            <p>{item.text}</p>
-          </li>
-        ))}
-      </ul>
-    </section>
-
-    <section class="section" aria-labelledby="runtimes-title">
-      <div class="section-intro">
-        <h2 id="runtimes-title">
-          Bring the project.
-          <br />
-          Keep its toolchain.
-        </h2>
-        <p class="lede">
-          MicroVM detects Node, Python, and Go projects from their files. Doctor
-          prepares the matching runtime; each task attaches it as a read-only
-          disk alongside its disposable workspace.
-        </p>
-      </div>
-      <ul class="ticks">
-        {runtimes.map((runtime) => (
-          <li>
-            <span>{runtime.name}</span>
-            <b>{runtime.version}</b>
-          </li>
-        ))}
-      </ul>
-      <a class="seal-link" href="/docs/how-to/manage-dependencies-and-caching">
-        <span>Runtimes and dependency caching</span>
-        <i aria-hidden="true"></i>
-      </a>
-    </section>
-
-    <section
-      class="section performance-section"
-      id="performance"
-      aria-labelledby="performance-title"
-    >
-      <div class="section-intro">
-        <h2 id="performance-title">Ready for the next task.</h2>
-        <div>
-          <p class="lede">
-            Once the image and runtime are prepared, starting another sandbox is
-            a short step in your workflow.
-          </p>
-          <a class="seal-link" href="#measurement-notes">
-            <span>Read the measurement conditions</span>
-            <i aria-hidden="true"></i>
-          </a>
-        </div>
-      </div>
-      <ul class="measurements">
-        {measurements.map((item) => (
-          <li>
-            <h3>{item.label}</h3>
-            <p class="measurement">
-              <span>{item.value}</span>
-              <span class="measurement__unit">{item.unit}</span>
-            </p>
-            <code>{item.command}</code>
-            <p class="note">{item.sample}</p>
-          </li>
-        ))}
-      </ul>
-      <div id="measurement-notes" class="measurement-notes">
-        <h3>Warm starts, measured on one Mac.</h3>
-        <p>
-          Measured on one Apple Silicon Mac on 13 November 2026, with the daemon
-          already running and artifacts prepared. The raw sandbox measurement
-          used 1 vCPU, 1024 MB RAM, and a warm page cache, after one warmup.
-          Project measurements used a prepared shell:1 runtime. These are
-          observed medians, not guarantees. First installation, runtime
-          preparation, and dependency installation are excluded.
-        </p>
-      </div>
-    </section>
-
     <section class="close">
       <h2>Your next task starts here.</h2>
       <div>
@@ -353,7 +447,8 @@ import {
           <i aria-hidden="true"></i>
         </a>
         <p class="lede">
-          Install MicroVM. Prepare your project. Start a sandbox.
+          Install MicroVM. Prepare your project. Give the next task its own
+          machine.
           <br />
           {site.name} is {site.license} and runs locally on your Mac.
         </p>

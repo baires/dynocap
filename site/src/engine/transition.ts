@@ -43,7 +43,14 @@ export const setTransition = (t: Transition) => {
   current = t;
 };
 const pick = () => (prefersReducedMotion() ? reduced : current);
-const curtain = () => document.getElementById("curtain") as HTMLElement;
+const curtain = () => document.getElementById("curtain");
 
-export const playLeave = () => Promise.resolve(pick().leave(curtain()));
-export const playEnter = () => Promise.resolve(pick().enter(curtain()));
+// Without a #curtain in the layout, navigation swaps the page with no transition.
+export const playLeave = () => {
+  const c = curtain();
+  return c ? Promise.resolve(pick().leave(c)) : Promise.resolve();
+};
+export const playEnter = () => {
+  const c = curtain();
+  return c ? Promise.resolve(pick().enter(c)) : Promise.resolve();
+};

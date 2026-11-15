@@ -19,13 +19,13 @@ const { groups } = await loadDocs();
         {
           guides.map((guide, index) => (
             <li>
-              <p class="docs-guides__step">{index + 1}</p>
-              <div>
-                <h2>
-                  <a href={guide.href}>{guide.title}</a>
-                </h2>
-                <p>{guide.text}</p>
-              </div>
+              <a href={guide.href}>
+                <span class="docs-guides__step" aria-hidden="true">
+                  0{index + 1}
+                </span>
+                <span class="docs-guides__title">{guide.title}</span>
+                <span class="docs-guides__text">{guide.text}</span>
+              </a>
             </li>
           ))
         }
@@ -45,11 +45,8 @@ const { groups } = await loadDocs();
         }
       </ul>
       <p class="docs-md">
-        Each page is also Markdown, for agents and for you.
-        <a href="/llms.txt">llms.txt</a>
-        lists them.
-        <a href="/llms-full.txt">llms-full.txt</a>
-        is the set in one file.
+        Each page is also Markdown, for agents and for you. <a href="/llms.txt">llms.txt</a> lists them, and{" "}
+        <a href="/llms-full.txt">llms-full.txt</a> is the whole set in one file.
       </p>
     </article>
   </div>

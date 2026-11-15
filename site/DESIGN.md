@@ -15,7 +15,7 @@ Anchor: MicroVM copies a project into a disposable workspace, executes commands 
 
 Audience: experienced developers and frequent coding-agent users. The page is a product introduction with a short tutorial path, not a replacement for CLI reference.
 
-Approved narrative: outcome → everyday workflow → initial setup → MCP + skill → CLI/SDK → isolation → runtimes → qualified measurements → get started.
+Approved narrative (revised 15 Nov 2026): outcome + qualified 299 ms claim → speed → isolation → control → MCP + skill → CLI/SDK → setup → get started. Speed, isolation, and control each get their own composition so the page sells why before asking for an install.
 
 User steering: lead installation with Homebrew, show curl and source as alternatives, even before publishing the release channels.
 
@@ -25,7 +25,7 @@ Concept alternatives (originality / fit / feasibility / portability, lower porta
 - Guest boundary, from the isolation architecture: 4 / 5 / 3 / 2. A host/guest dividing line could explain separation but would delay the first useful action. Signature would be commands crossing the boundary; emotion is control.
 - Command grammar, from the CLI's formal system: 3 / 4 / 5 / 3. A page organized by verbs would be concise but too close to reference documentation. Signature would be a command index; emotion is precision.
 
-Idle: the caret only, driven by the existing GSAP clock and paused off screen. Docs and the 404 stay still. Native scrolling. No loader, progress bar, pinned chapters, or figure.
+Idle: the caret, and the demo recording, which plays only while half on screen and never autoplays under reduced motion. Docs and the 404 stay still. Native scrolling. No loader, progress bar, pinned chapters, or figure.
 
 ## Palette
 
@@ -57,32 +57,48 @@ One easing family from the engine (`expo.out`, `expo.inOut`, `power3.out`). Larg
 
 - Primary targets (nav, copy, command links, CTAs): the label snaps 4px right and a 2px rule locks from the left. Press shifts 1px down. Under reduced motion the rule is already there and nothing translates.
 - Utility links (license, docs in the footer): color only.
-- Inline links in docs: underline at rest. The guide sidebar uses color and a 2px current rule, with no hover draw.
-- Page transition: an accent rule draws across the page that is already on screen, then draws back off the next page. The panel stays clear, so type never disappears into a black frame.
+- Inline links in docs: muted underline at rest, accent underline on hover. The guide sidebar and the page outline share one treatment: a 1px line rail, a 2px accent rule on the current page or section.
+
+## Docs
+
+Read mode. Three columns at 1200px and wider: guide (15rem), article (70ch), outline (13rem, "On this page", h2 and h3, scroll-spied, plus the Markdown link). Below 1200px the outline hides and the Markdown link stays at the end of the article. Below 768px the guide collapses into an "All docs" disclosure.
+
+- Headings h2 to h4 link to themselves; hover draws a 2px accent underline. Each h2 opens with a 1px rule; Markdown `---` separators are hidden so rules never double.
+- Code blocks: `#0B0B0A` surface, 1px line border, a caption bar with the language and a Copy button (the site's `data-copy` handler). Lines never wrap; the block scrolls. The Shiki theme (`src/lib/shiki-theme.mjs`) uses ink, muted comments, and one warm literal `#E6CB8E`; the accent stays out of code.
+- Inline code: `#161615` chip, no border; plain inside links and headings.
+- Tables scroll inside `.table-scroll`; headers are muted Plex Mono. Below 768px rows stack with labels.
+- The docs content cache keys on the Markdown source plus the rehype pipeline and theme, so pipeline edits re-render every page.
+- Page transition: none. Navigation swaps the page instantly; there is no curtain, seam, or loading line (removed 15 Nov 2026 at the user's request).
 - Reduced motion: native scroll, no caret blink, no intro. Every section is in document flow.
 
 ## Composition
 
 ```
-HERO       [outcome + explanation + start link | annotated task lifecycle]
+HERO       [outcome + lede + install + qualified claim | annotated task lifecycle]
+DEMO       [claim                             | recording conditions]
+           [real VHS recording, full width, hairlines above and below, no window chrome]
+           [play/pause | "Show the commands" transcript]
+SPEED      [claim                             | lede]
+           [0 to 1 s scale: 11 · 299 · 491 · 989 ms placed at true positions]
+           [method and exclusions]
+ISOLATION  [claim                             | lede + security link]
+           [On your Mac | accent boundary line | Inside the microVM], then caveat
+CONTROL    [claim                             | lede]
+           [one real clone command, flags underlined in accent]
+           [runtime | resources | network | lifetime]
+AGENTS     [MCP tools + setup                 | skill rules + source file]
+           [terminal | purpose | reference link], then SDK
 SETUP      [initial preparation explanation   | installation guide]
            [01 Homebrew install             | copyable brew + curl/source alternatives]
            [02 prepare description           | copyable doctor commands]
-AGENTS     [MCP tools + setup                 | skill rules + source file]
-           [terminal | purpose | reference link], then SDK
-BOUNDARY   [guest kernel and isolation        | concrete guarantees]
-RUNTIMES   [project detection explanation], then compact runtime scale
-EVIDENCE   [qualified claim                   | measurement conditions link]
-           [raw boot        | tiny project   | repository clone]
-           [method and exclusions]
 CLOSE      [your next task                    | get started + docs]
 ```
 
-Phone at 390px: the headline, explanation and primary start action precede the workflow. Setup descriptions precede their code. Measurements become rows with values to the right. Code wraps within its own surface. Display type uses mixed rem/viewport clamp values with bounds below a 2.5 ratio so zoom can enlarge text.
+Phone at 390px: the headline, explanation and primary start action precede the workflow. The speed scale becomes rows, each with a 2px accent bar whose width is its share of one second. The boundary stacks host above guest; the control command breaks one flag per line. Setup descriptions precede their code. Measurements become rows with values to the right. Code wraps within its own surface. Display type uses mixed rem/viewport clamp values with bounds below a 2.5 ratio so zoom can enlarge text.
 
 ## Genericness test
 
-Preserve the existing black/amber, Switzer/Plex identity. Replace the giant benchmark hero with the actual lifecycle. No terminal window chrome, fake output, gradient, feature-card kit, or new animation system. The numbers support the argument after readers understand the workflow.
+Preserve the existing black/amber, Switzer/Plex identity. Keep the lifecycle in the hero; the numbers appear once there as a qualified claim, then as a measured scale. No terminal window chrome, fake output, gradient, feature-card kit, or new animation system. The numbers support the argument after readers understand the workflow.
 
 ## Copy limits and evidence
 
@@ -103,3 +119,7 @@ Two visual QA passes covered desktop, throttled mobile, reduced motion, keyboard
 Fresh critic estimate: Design 8.0, Usability 8.5, Creativity 7.2, Content 8.5; weighted 8.04/10. Remaining opportunities: vary one lower section's split composition, and show a real agent change becoming a patch. Preserve the approved restrained identity rather than adding spectacle for originality alone.
 
 Astro check still reports the pre-existing GSAP callback return-type error in src/engine/reveal.ts:109. That file is outside this change. Production compilation succeeds.
+
+## Demo recording
+
+`site/demo/workflow.tape` drives the real CLI through clone, exec, diff, and finish on a one-file project, with `cat README.md` before and after to show the host file unchanged. `site/demo/record.sh` records it in a throwaway `MICROVM_HOME` (APFS clones of the prepared image and runtime), so no personal paths reach the published video. Output: `public/demo/microvm-workflow.{webm,mp4,png}`, about 0.5 MB each. Typing is scripted; every wait after Enter is the real command, and the timings are never edited. Theme: black ground, ink text, amber cursor, Plex Mono when installed (Menlo otherwise). Keep `demo.commands` in `src/data/site.ts` in step with the tape. Below 768px the video and its poster are not loaded; the commands list and a link to the MP4 take their place.

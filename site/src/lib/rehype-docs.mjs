@@ -66,6 +66,126 @@ function rewrite(href, sourcePath) {
   return `/docs/${rel.split(path.sep).join("/")}${hash}`;
 }
 
+const LANGUAGES = {
+  sh: "Shell",
+  bash: "Shell",
+  shell: "Shell",
+  zsh: "Shell",
+  ts: "TypeScript",
+  typescript: "TypeScript",
+  js: "JavaScript",
+  javascript: "JavaScript",
+  json: "JSON",
+  jsonc: "JSON",
+  go: "Go",
+  swift: "Swift",
+  python: "Python",
+  py: "Python",
+  yaml: "YAML",
+  toml: "TOML",
+  text: "Text",
+  plaintext: "Text",
+};
+
+const el = (tagName, properties, children = []) => ({
+  type: "element",
+  tagName,
+  properties,
+  children,
+});
+
+// Wrap each heading's content in a link to its own id, so any section can be shared.
+function linkHeadings(tree) {
+  walk(tree, (node) => {
+    if (!/^h[2-4]$/.test(node.tagName) || !node.properties?.id) return;
+    node.children = [
+      el(
+        "a",
+        { className: ["heading-link"], href: `#${node.properties.id}` },
+        node.children
+      ),
+    ];
+  });
+}
+
+const ENTITIES = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  "#39": "'",
+  "#x27": "'",
+};
+
+// Shiki hands rehype each code block as raw HTML, so read the text back out of the markup.
+function codeText(html) {
+  return html
+    .replace(/<\/span><span class="line">/g, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&(amp|lt|gt|quot|#39|#x27);/g, (_, name) => ENTITIES[name])
+    .replace(/\n$/, "");
+}
+
+// Give each code block a label and a copy button. The button reuses the site's data-copy handler.
+function frameCode(parent) {
+  const children = parent.children || [];
+  for (let index = 0; index < children.length; index += 1) {
+    const node = children[index];
+    if (node.type === "element" && !["figure", "pre"].includes(node.tagName))
+      frameCode(node);
+    const isPre = node.type === "element" && node.tagName === "pre";
+    const isRawPre = node.type === "raw" && /^\s*<pre/.test(node.value);
+    if (!isPre && !isRawPre) continue;
+    const language = isPre
+      ? String(node.properties?.dataLanguage ?? "")
+      : (node.value.match(/data-language="([^"]+)"/)?.[1] ?? "");
+    const label = LANGUAGES[language] ?? "";
+    children[index] = el("figure", { className: ["code-frame"] }, [
+      el("figcaption", {}, [
+        el("span", {}, [{ type: "text", value: label }]),
+        el(
+          "button",
+          {
+            type: "button",
+            className: ["code-copy"],
+            dataCopy: isPre
+              ? textOf(node).replace(/\n$/, "")
+              : codeText(node.value),
+            ariaLabel: label ? `Copy ${label} code` : "Copy code",
+          },
+          [
+            el("span", { ariaLive: "polite" }, [
+              { type: "text", value: "Copy" },
+            ]),
+          ]
+        ),
+      ]),
+      node,
+    ]);
+  }
+}
+
+// Wide reference tables scroll inside their own frame instead of widening the page.
+function scrollTables(parent) {
+  const children = parent.children || [];
+  for (let index = 0; index < children.length; index += 1) {
+    const node = children[index];
+    if (node.type !== "element") continue;
+    if (node.tagName === "table") {
+      children[index] = el(
+        "div",
+        {
+          className: ["table-scroll"],
+          tabIndex: 0,
+          role: "region",
+          ariaLabel: "Table",
+        },
+        [node]
+      );
+    } else if (!["figure", "pre"].includes(node.tagName)) scrollTables(node);
+  }
+}
+
 export function rehypeDocs() {
   return (tree, file) => {
     let seenH1 = false;
@@ -85,5 +205,8 @@ export function rehypeDocs() {
       }
     });
     labelTables(tree);
+    linkHeadings(tree);
+    frameCode(tree);
+    scrollTables(tree);
   };
 }
