@@ -85,7 +85,7 @@ const labelSpan = 19;
       <div class="section-intro">
         <h2 id="demo-title">One task, start to finish.</h2>
         <p class="lede">
-          Recorded in real time on an Apple Silicon Mac with MicroVM already set
+          Recorded in real time on an Apple Silicon Mac with DynoCap already set
           up. The typing is scripted; every pause after Enter is the command
           running. Watch the last line: the file on your Mac never changed.
         </p>
@@ -100,7 +100,7 @@ const labelSpan = 19;
           width="1440"
           height="820"
           data-poster={`${demo.video}.png`}
-          aria-label={`A ${demo.duration} terminal recording of one MicroVM task`}
+          aria-label={`A ${demo.duration} terminal recording of one DynoCap task`}
         >
           <source src={`${demo.video}.webm`} type="video/webm" />
           <source src={`${demo.video}.mp4`} type="video/mp4" />
@@ -240,7 +240,7 @@ const labelSpan = 19;
           The same options work from the CLI, the TypeScript SDK, and MCP.
         </p>
       </div>
-      <pre class="control__command"><code>microvm clone . fix-auth{controls.map((item) => <>{" "}<span>{item.flag}</span></>)}</code></pre>
+      <pre class="control__command"><code>dynocap clone . fix-auth{controls.map((item) => <>{" "}<span>{item.flag}</span></>)}</code></pre>
       <ul class="controls">
         {controls.map((item, index) => (
           <li>
@@ -272,7 +272,7 @@ const labelSpan = 19;
           <br />A skill for the workflow.
         </h2>
         <p class="lede">
-          Connect your coding assistant through MCP, then give it the MicroVM
+          Connect your coding assistant through MCP, then give it the DynoCap
           skill. The server hands it a machine. The skill tells it how to behave
           inside one.
         </p>
@@ -288,16 +288,16 @@ const labelSpan = 19;
           </p>
           <ul class="agent-tools">
             <li>
-              <code>microvm_task_start</code>
+              <code>dynocap_task_start</code>
             </li>
             <li>
-              <code>microvm_task_exec</code>
+              <code>dynocap_task_exec</code>
             </li>
             <li>
-              <code>microvm_diff</code>
+              <code>dynocap_diff</code>
             </li>
             <li>
-              <code>microvm_task_finish</code>
+              <code>dynocap_task_finish</code>
             </li>
           </ul>
           <a class="seal-link" href="/docs/how-to/configure-mcp-server">
@@ -308,25 +308,25 @@ const labelSpan = 19;
         <div>
           <h3>The skill teaches it the rules.</h3>
           <p>
-            Give your agent the repository’s MicroVM skill: prefer MCP when
+            Give your agent the repository’s DynoCap skill: prefer MCP when
             connected, work in the copied workspace, ask before enabling network
             access, and finish before the TTL expires.
           </p>
           <p class="skill-path">
-            <code>skills/microvm/SKILL.md</code>
+            <code>skills/dynocap/SKILL.md</code>
           </p>
           <p class="note">
             Copy the folder into <code>.agents/skills/</code> or your agent’s
             own skills directory. It works with the CLI too; MCP is optional.
           </p>
           <a class="seal-link" href="/skill.md">
-            <span>Read the MicroVM skill</span>
+            <span>Read the DynoCap skill</span>
             <i aria-hidden="true"></i>
           </a>
         </div>
       </div>
       <p class="agent-alternatives">
-        Working directly? Use the CLI or build MicroVM into your own agent loop
+        Working directly? Use the CLI or build DynoCap into your own agent loop
         with the TypeScript SDK.
       </p>
       <ol class="can">
@@ -411,7 +411,7 @@ const labelSpan = 19;
                     </button>
                     <h4>Build from source</h4>
                     <p>
-                      From your MicroVM source checkout, with the{" "}
+                      From your DynoCap source checkout, with the{" "}
                       <a href="/docs/tutorials/getting-started">
                         build prerequisites installed
                       </a>
@@ -431,7 +431,7 @@ const labelSpan = 19;
       </ol>
       <p class="note">
         First preparation downloads verified inputs and can take a few minutes.
-        Run <code>microvm doctor</code> whenever you need to check your setup.
+        Run <code>dynocap doctor</code> whenever you need to check your setup.
       </p>
       <a class="seal-link" href="/docs/tutorials/agent-task-workflow">
         <span>Next: run your first project task</span>
@@ -447,7 +447,7 @@ const labelSpan = 19;
           <i aria-hidden="true"></i>
         </a>
         <p class="lede">
-          Install MicroVM. Prepare your project. Give the next task its own
+          Install DynoCap. Prepare your project. Give the next task its own
           machine.
           <br />
           {site.name} is {site.license} and runs locally on your Mac.

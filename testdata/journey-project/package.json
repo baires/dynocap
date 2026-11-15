@@ -1,5 +1,5 @@
 {
-  "name": "microvm-journey-fixture",
+  "name": "dynocap-journey-fixture",
   "version": "1.0.0",
   "private": true,
   "description": "Fixture project for scripts/test-journey-macos.py.",

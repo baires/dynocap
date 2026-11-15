@@ -1,6 +1,6 @@
-# microvm
+# DynoCap
 
-Local Linux sandboxes for AI agents on macOS. One CLI boots an isolated
+Local Linux sandboxes for AI agents on macOS. One CLI, `dynocap`, boots an isolated
 Linux guest with Apple's Virtualization.framework, runs a command inside it,
 and tears the sandbox down.
 
@@ -28,25 +28,25 @@ Runtime preparation still needs `mke2fs` from `e2fsprogs`.
 ### Curl
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/OWNER/microvm/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/OWNER/dynocap/main/scripts/install.sh | sh
 ```
 
 The script downloads the latest GitHub release, checks its sha256, unpacks it
-to `~/.local/microvm`, and symlinks `~/.local/bin/microvm`. If `mke2fs` is
+to `~/.local/dynocap`, and symlinks `~/.local/bin/dynocap`. If `mke2fs` is
 missing it tells you to run `brew install e2fsprogs`. Its last step is
-`microvm doctor --fix`.
+`dynocap doctor --fix`.
 
 ### Homebrew
 
-`packaging/homebrew/microvm.rb` is the formula for a tap named
+`packaging/homebrew/dynocap.rb` is the formula for a tap named
 `OWNER/homebrew-tap`. Copy it into that tap, replace `OWNER`, and set `url`
-and `sha256` from the published `microvm-<tag>-darwin-arm64.tar.gz` and its
+and `sha256` from the published `dynocap-<tag>-darwin-arm64.tar.gz` and its
 `.sha256` file. `brew trust` is required because this third-party formula runs
 `codesign`.
 
 ```sh
-brew trust --formula OWNER/tap/microvm
-brew install OWNER/tap/microvm
+brew trust --formula OWNER/tap/dynocap
+brew install OWNER/tap/dynocap
 ```
 
 The formula depends on macOS Ventura and `e2fsprogs`, and it refuses Intel.
@@ -59,48 +59,48 @@ export PATH="$PWD/.build/release:$PATH"
 ```
 
 `./scripts/build-macos.sh` is still the way to compile and ad-hoc sign from a
-checkout. A source tree has no bundled guest image, so `microvm doctor --fix`
+checkout. A source tree has no bundled guest image, so `dynocap doctor --fix`
 builds one with Go. See [Build and run](#build-and-run) for a raw sandbox.
 
 ### Agent skill
 
-[`skills/microvm`](skills/microvm/SKILL.md) is an [Agent Skills](https://agentskills.io)
+[`skills/dynocap`](skills/dynocap/SKILL.md) is an [Agent Skills](https://agentskills.io)
 skill that teaches a coding agent the task workflow, the network rules, and when
 to prefer MCP. It works with the CLI alone; MCP is optional.
 
 ```sh
-npx skills add OWNER/microvm
+npx skills add OWNER/dynocap
 ```
 
-Or copy the `skills/microvm` folder into a skills directory your agent scans:
+Or copy the `skills/dynocap` folder into a skills directory your agent scans:
 `.agents/skills/` in a project or `~/.agents/skills/` for every project (Claude
 Code reads `.claude/skills/` and `~/.claude/skills/`). `npm run lint` checks
 the skill against the specification with `scripts/validate-skills.mjs`.
 
 ## Quick start
 
-After `microvm` is on your PATH, the repository workflow below is the same one
-`microvm help` prints. `./project` is your project, with a `package-lock.json`
+After `dynocap` is on your PATH, the repository workflow below is the same one
+`dynocap help` prints. `./project` is your project, with a `package-lock.json`
 and `node_modules/` in `.gitignore`.
 
-<!-- quick start: kept identical to `microvm help` by CLIQuickStartTests -->
+<!-- quick start: kept identical to `dynocap help` by CLIQuickStartTests -->
 
 ```sh
-microvm doctor --fix ./project                     # builds the guest image and the runtime ./project uses
-microvm clone ./project deps --network filtered    # explicit network: HTTPS to the runtime's registry only
-microvm exec deps --timeout 300 -- npm ci          # a node project; see RUNTIMES for the others
-microvm finish deps                                # exports the result and saves the package cache
-microvm clone ./project demo                       # offline by default: no network device
-microvm exec demo -- npm ci --offline              # installs from the saved package cache
-microvm exec demo -- npm test
-microvm shell demo
-microvm ls
-microvm inspect demo
-microvm logs demo
-microvm diff demo
-microvm finish demo                                # exports the patch, then destroys the sandbox
-microvm rm demo
-microvm rm deps
+dynocap doctor --fix ./project                     # builds the guest image and the runtime ./project uses
+dynocap clone ./project deps --network filtered    # explicit network: HTTPS to the runtime's registry only
+dynocap exec deps --timeout 300 -- npm ci          # a node project; see RUNTIMES for the others
+dynocap finish deps                                # exports the result and saves the package cache
+dynocap clone ./project demo                       # offline by default: no network device
+dynocap exec demo -- npm ci --offline              # installs from the saved package cache
+dynocap exec demo -- npm test
+dynocap shell demo
+dynocap ls
+dynocap inspect demo
+dynocap logs demo
+dynocap diff demo
+dynocap finish demo                                # exports the patch, then destroys the sandbox
+dynocap rm demo
+dynocap rm deps
 ```
 
 - `doctor --fix ./project` checks prerequisites and repairs what it can: it
@@ -142,27 +142,27 @@ transcripts, and interface changes. Raw sandboxes without a project
 ## Architecture
 
 ```
-microvm CLI  --unix socket-->  microvm daemon (same binary)
+dynocap CLI  --unix socket-->  dynocap daemon (same binary)
                                     |
                                     |  VZLinuxBootLoader
-                                    |  virtio-console  -> ~/.microvm/vms/<name>/console.log
+                                    |  virtio-console  -> ~/.dynocap/vms/<name>/console.log
                                     |  virtio-net      -> absent by default; NAT opt-in
                                     |  virtio-vsock    -> guest port 5252
                                     v
                                Linux guest (Alpine minirootfs initramfs)
                                     PID 1  /init
-                                    microvm-agent (static Go) listens on vsock
+                                    dynocap-agent (static Go) listens on vsock
                                     exec streams stdout, stderr, and the exit code
 ```
 
 The daemon is one per user. Each VM is a `VZVirtualMachine` on its own serial
 queue inside that process. If the daemon exits, the kernel destroys the VMs
-with it. The next `microvm` command starts a new daemon, which marks those
+with it. The next `dynocap` command starts a new daemon, which marks those
 records stopped so nothing is left looking alive. There is no host-side
 `AF_VSOCK`; the file descriptor comes from `VZVirtioSocketDevice.connect`.
 
 The guest wire protocol is version 1, big-endian, and shared by
-`Sources/MicroVMCore/GuestProtocol.swift` and `guest/internal/protocol`.
+`Sources/DynoCapCore/GuestProtocol.swift` and `guest/internal/protocol`.
 Golden frames live in `testdata/protocol-vectors.json`. No authentication:
 the vsock exists only inside this VM, and the daemon socket is mode `0600`.
 
@@ -185,21 +185,21 @@ compile time and will only boot that image.
 
 ```sh
 git clone <this repo>
-cd microvm
+cd dynocap
 ./scripts/build-macos.sh
 ./scripts/fetch-image.sh
-.build/release/microvm run --name demo --cpus 2 --memory 1024
-.build/release/microvm exec demo -- uname -a
-echo hello | .build/release/microvm exec demo -- cat
-.build/release/microvm exec demo -- sh -c 'echo hello'
-.build/release/microvm ps
-.build/release/microvm destroy demo --force
+.build/release/dynocap run --name demo --cpus 2 --memory 1024
+.build/release/dynocap exec demo -- uname -a
+echo hello | .build/release/dynocap exec demo -- cat
+.build/release/dynocap exec demo -- sh -c 'echo hello'
+.build/release/dynocap ps
+.build/release/dynocap destroy demo --force
 ```
 
 `build-macos.sh` runs `swift build -c release` and then:
 
 ```sh
-codesign --sign - --entitlements entitlements/microvm.entitlements --force .build/release/microvm
+codesign --sign - --entitlements entitlements/dynocap.entitlements --force .build/release/dynocap
 ```
 
 Re-sign after every rebuild. An unsigned binary fails inside
@@ -208,7 +208,7 @@ Re-sign after every rebuild. An unsigned binary fails inside
 Optional, so the commands above match a normal shell:
 
 ```sh
-sudo install -m 755 .build/release/microvm /usr/local/bin/microvm
+sudo install -m 755 .build/release/dynocap /usr/local/bin/dynocap
 ```
 
 `run` returns when the guest agent answers on vsock, not when you destroy
@@ -283,7 +283,7 @@ This release changes omitted networking to `none` and omitted/null TTL to
 1800 seconds; explicit TTL must be an integer from 1 through 86400. There is
 no unlimited lifetime or automatic renewal. Restart the daemon after upgrading:
 stop its foreground process with Ctrl-C, or send SIGTERM to its PID from
-`$MICROVM_HOME/daemon.json` (default `~/.microvm/daemon.json`), then let the next
+`$DYNOCAP_HOME/daemon.json` (default `~/.dynocap/daemon.json`), then let the next
 CLI command start the rebuilt binary. Stopping the daemon stops its sandboxes.
 There is no live migration or automatic restart of an existing daemon.
 
@@ -294,38 +294,38 @@ historical records is reported as `unknown`, never as offline.
 Cache and state:
 
 ```
-~/.microvm/daemon.sock
-~/.microvm/cache/                 downloaded apk and minirootfs
-~/.microvm/images/<arch>/kernel
-~/.microvm/images/<arch>/initrd   gzip newc cpio
-~/.microvm/images/<arch>/manifest.json
-~/.microvm/vms/<name>/state.json
-~/.microvm/vms/<name>/console.log
-~/.microvm/daemon.log
+~/.dynocap/daemon.sock
+~/.dynocap/cache/                 downloaded apk and minirootfs
+~/.dynocap/images/<arch>/kernel
+~/.dynocap/images/<arch>/initrd   gzip newc cpio
+~/.dynocap/images/<arch>/manifest.json
+~/.dynocap/vms/<name>/state.json
+~/.dynocap/vms/<name>/console.log
+~/.dynocap/daemon.log
 ```
 
-Override the root with `--home` or `MICROVM_HOME`.
+Override the root with `--home` or `DYNOCAP_HOME`.
 
 ## Flags
 
 ```
-microvm run --name demo --cpus 2 --memory 1024 --ttl 3600 --network none --boot-timeout 60
+dynocap run --name demo --cpus 2 --memory 1024 --ttl 3600 --network none --boot-timeout 60
 # Opt in to unrestricted outbound networking:
-microvm run --name online --network nat
-microvm exec demo --timeout 30 --cwd /tmp --env FOO=bar -- uname -a
-microvm shell demo
+dynocap run --name online --network nat
+dynocap exec demo --timeout 30 --cwd /tmp --env FOO=bar -- uname -a
+dynocap shell demo
 ```
 
 `shell` opens the guest's shell on a terminal, in `/workspace` for project
 sandboxes, with no command deadline; leaving it keeps the sandbox running until
 `finish`, `rm --force`, or its TTL. See [interactive shells guide](docs/how-to/interactive-shells-and-terminal.mdx).
 
-`microvm help run` and `microvm run --help` show the same command help. Top-level help
-teaches the repository workflow; `microvm help advanced` lists raw sandboxes, task
+`dynocap help run` and `dynocap run --help` show the same command help. Top-level help
+teaches the repository workflow; `dynocap help advanced` lists raw sandboxes, task
 commands, and the daemon. `--home`, `--verbose`, `--help`, and `--version` work
 before or after the subcommand. Valued options accept `--flag value` and
 `--flag=value`. Arguments after `exec`'s `--` are the guest command, unchanged,
-even when they look like microvm flags. Invalid usage exits 2 and names the
+even when they look like dynocap flags. Invalid usage exits 2 and names the
 offending argument. Help and invalid usage do not start the daemon.
 
 `--memory` is megabytes. `--ttl` defaults to 1800 seconds and accepts 1–86400.
@@ -340,7 +340,7 @@ If boot fails, the error includes the tail of `console.log`.
 
 ## Cleanup
 
-`microvm destroy demo --force` (or `microvm rm demo --force`) terminates active execs and calls
+`dynocap destroy demo --force` (or `dynocap rm demo --force`) terminates active execs and calls
 `VZVirtualMachine.stop` on the host. It deletes the sandbox directory only
 after confirmed teardown. Failures remain visible as `stopping` and are retried.
 
@@ -350,8 +350,8 @@ a new token and rewrites stale `running` records to `stopped` with the message
 failed VM of that name. A second daemon refuses to start while the lock file
 is held.
 
-`microvm daemon` runs in the foreground for debugging. The CLI otherwise
-spawns it detached (`MICROVM_DETACH=1`) and waits until the socket answers.
+`dynocap daemon` runs in the foreground for debugging. The CLI otherwise
+spawns it detached (`DYNOCAP_DETACH=1`) and waits until the socket answers.
 
 ## Tests
 
@@ -386,7 +386,7 @@ every exit path. `test-journey-macos.py` follows the [quick start](#quick-start)
 with `testdata/journey-project`: doctor, preparation, a networked install, an
 offline sandbox, exec, shell, logs, diff, finish, applying the patch, and
 cleanup, checking that the source checkout is unchanged. Both prepare a node:24
-runtime (seeded from `~/.microvm/cache`) and need internet for verified inputs
+runtime (seeded from `~/.dynocap/cache`) and need internet for verified inputs
 and the npm registry. `validate-runtime-task.py` prepares each runtime, warms
 its dependency seed under filtered egress, checks that only that runtime's
 registry resolves, installs and tests offline from the seed, and clones a
@@ -409,11 +409,11 @@ runtime that had already been verified:
 
 | Command                                            | Median | Runs |
 | -------------------------------------------------- | -----: | ---: |
-| `microvm run`                                      | 299 ms |    6 |
-| `microvm clone` of a one-file directory, `shell:1` | 491 ms |    3 |
-| `microvm clone` of this repository (387 files)     | 989 ms |    2 |
-| `microvm diff` of that clone                       | 882 ms |    2 |
-| `microvm exec NAME -- true`                        |  12 ms |    3 |
+| `dynocap run`                                      | 299 ms |    6 |
+| `dynocap clone` of a one-file directory, `shell:1` | 491 ms |    3 |
+| `dynocap clone` of this repository (387 files)     | 989 ms |    2 |
+| `dynocap diff` of that clone                       | 882 ms |    2 |
+| `dynocap exec NAME -- true`                        |  12 ms |    3 |
 
 The first clone after a runtime disk changes also reads that disk (about 270 ms
 for the 512 MB `shell:1` runtime). That disk is not the boot image. Preparation, `npm ci`, and a cold Mac are not
@@ -422,20 +422,20 @@ disk), and the before/after breakdown are in
 [docs/research/boot-time.md](docs/research/boot-time.md).
 
 The unit tests still do not boot a VM. If `run` times out, read
-`~/.microvm/vms/<name>/console.log` and `~/.microvm/daemon.log`.
+`~/.dynocap/vms/<name>/console.log` and `~/.dynocap/daemon.log`.
 
 ## Layout
 
 ```
 Package.swift                 SwiftPM (CLI + portable core + macOS backend)
-Sources/MicroVMCore           protocol, CLI, daemon, state
-Sources/MicroVMVZ             Virtualization.framework
-Sources/microvm               main
+Sources/DynoCapCore           protocol, CLI, daemon, state
+Sources/DynoCapVZ             Virtualization.framework
+Sources/dynocap               main
 guest/agent                   static Linux agent
 guest/mkimage                 kernel/initrd builder
 guest/internal/protocol       guest wire codec
 guest/internal/image          pins, cpio, zboot unwrap
-entitlements/microvm.entitlements
+entitlements/dynocap.entitlements
 scripts/build-macos.sh
 scripts/fetch-image.sh
 testdata/protocol-vectors.json

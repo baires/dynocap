@@ -15,7 +15,7 @@ import (
 )
 
 func TestPrivateHTTPSFetchSendsBearerAndLeavesNoToken(t *testing.T) {
-	token := "microvm-private-fetch-token-9f3c1e7a"
+	token := "dynocap-private-fetch-token-9f3c1e7a"
 	repo := bareRepo(t)
 	console := ""
 	var gotAuth []string
@@ -34,7 +34,7 @@ func TestPrivateHTTPSFetchSendsBearerAndLeavesNoToken(t *testing.T) {
 	url := srv.URL + "/repo.git"
 
 	dest := filepath.Join(t.TempDir(), "guest")
-	wrongToken := "microvm-wrong-bearer-token-0000aaaa"
+	wrongToken := "dynocap-wrong-bearer-token-0000aaaa"
 	_, wrongConsole, err := fetchObserved(dest, url, "main", wrongToken, "", fetchOptions{caFile: ca})
 	if err == nil {
 		t.Fatal("wrong token cloned")

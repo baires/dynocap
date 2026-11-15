@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Real-VM developer journey: follows the README quick start (`microvm help`) with the release CLI.
+"""Real-VM developer journey: follows the README quick start (`dynocap help`) with the release CLI.
 
 Uses an isolated home, an existing guest image (--images), and the fixture project in
 testdata/journey-project. Runtime preparation is seeded from --cache; missing verified inputs are
@@ -54,9 +54,9 @@ def tree_digest(root):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runtime", default="node:24", help="Node runtime selection to prepare and use")
-    parser.add_argument("--binary", type=pathlib.Path, default=REPO / ".build/release/microvm")
-    parser.add_argument("--images", type=pathlib.Path, default=pathlib.Path.home() / ".microvm/images")
-    parser.add_argument("--cache", type=pathlib.Path, default=pathlib.Path.home() / ".microvm/cache",
+    parser.add_argument("--binary", type=pathlib.Path, default=REPO / ".build/release/dynocap")
+    parser.add_argument("--images", type=pathlib.Path, default=pathlib.Path.home() / ".dynocap/images")
+    parser.add_argument("--cache", type=pathlib.Path, default=pathlib.Path.home() / ".dynocap/cache",
                         help="verified inputs copied into the isolated home before runtime preparation")
     args = parser.parse_args()
     if platform.system() != "Darwin":
@@ -68,7 +68,7 @@ def main():
             parser.error(f"missing {image / name}; build an image first")
     binary = str(args.binary.resolve())
 
-    with tempfile.TemporaryDirectory(prefix="microvm-journey-", dir="/tmp") as scratch:
+    with tempfile.TemporaryDirectory(prefix="dynocap-journey-", dir="/tmp") as scratch:
         scratch = pathlib.Path(scratch)
         home = scratch / "home"
         (home / "images").mkdir(parents=True)

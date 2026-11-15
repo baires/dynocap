@@ -6,7 +6,7 @@ sidebar_position: 4
 
 # CLI Error Contracts
 
-When a command fails, `microvm` sends error details to `stderr` and preserves standard output.
+When a command fails, `dynocap` sends error details to `stderr` and preserves standard output.
 
 ---
 
@@ -19,7 +19,7 @@ When `--json` is used on a management command, any validation or operational fai
   "error": {
     "code": "live_sandbox_refusal",
     "message": "sandbox 'demo' is running; unexported changes would be lost",
-    "recovery": "Export with 'microvm finish demo' or discard with 'microvm rm demo --force'.",
+    "recovery": "Export with 'dynocap finish demo' or discard with 'dynocap rm demo --force'.",
     "exitCode": 1
   }
 }
@@ -35,8 +35,8 @@ When `--json` is used on a management command, any validation or operational fai
 Without `--json`, failures write clean, human-readable diagnostics to `stderr` without stack traces or global help dumps:
 
 ```text
-microvm: rm: sandbox 'demo' is running; unexported changes would be lost
-Next: Export with 'microvm finish demo' or discard with 'microvm rm demo --force'.
+dynocap: rm: sandbox 'demo' is running; unexported changes would be lost
+Next: Export with 'dynocap finish demo' or discard with 'dynocap rm demo --force'.
 ```
 
 ---
@@ -50,7 +50,7 @@ Next: Export with 'microvm finish demo' or discard with 'microvm rm demo --force
 | `already_exists`           | `1`       | A sandbox or task already exists with the requested friendly name.             |
 | `live_sandbox_refusal`     | `1`       | Attempted to delete an active sandbox without `--force`.                       |
 | `command_timeout`          | `124`     | Guest command exceeded `--timeout` deadline.                                   |
-| `daemon_unreachable`       | `1`       | Unable to connect to `~/.microvm/daemon.sock` after startup timeout.           |
+| `daemon_unreachable`       | `1`       | Unable to connect to `~/.dynocap/daemon.sock` after startup timeout.           |
 | `unsupported_platform`     | `1`       | Running on unsupported OS (non-macOS) or unsupported architecture.             |
 | `entitlement_missing`      | `1`       | Binary lacks `com.apple.security.virtualization` code signature.               |
 | `runtime_not_prepared`     | `1`       | Requested runtime rootfs has not been prepared with `runtime prepare`.         |

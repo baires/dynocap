@@ -19,9 +19,9 @@ relevant docs when behavior or contracts change.
 
 ## Project Structure & Boundaries
 
-`Sources/microvm` is the CLI entry point. `Sources/MicroVMCore` owns the CLI,
+`Sources/dynocap` is the CLI entry point. `Sources/DynoCapCore` owns the CLI,
 daemon, task lifecycle, runtime admission, dependency seeds, and protocols;
-`Sources/MicroVMVZ` implements the macOS Virtualization.framework backend.
+`Sources/DynoCapVZ` implements the macOS Virtualization.framework backend.
 `guest/agent` runs guest commands; `guest/internal` holds protocol, image,
 runtime, and workspace code. `guest/mkimage`, `guest/mkruntime`, and
 `guest/workspace` provide the image builder and host companion tools.
@@ -36,7 +36,7 @@ keep package-manager knowledge there rather than in the daemon or egress code.
 
 - Install tooling with `npm ci`, then `npm ci --prefix sdk/typescript` and `npm ci --prefix sdk/mcp` for the SDK packages.
 - `./scripts/build-macos.sh`: build the release CLI and Go companions, then sign the CLI with the virtualization entitlement. Re-run after rebuilding before booting guests.
-- `.build/release/microvm doctor --fix`: build missing guest images, prepare the detected project runtime, and restart an outdated daemon. Pass `--runtime NAME:VERSION` to override detection. See [getting started](docs/tutorials/getting-started.mdx).
+- `.build/release/dynocap doctor --fix`: build missing guest images, prepare the detected project runtime, and restart an outdated daemon. Pass `--runtime NAME:VERSION` to override detection. See [getting started](docs/tutorials/getting-started.mdx).
 - Project workflow: `clone SOURCE NAME`, `exec NAME -- COMMAND`, `diff NAME`, then `finish NAME` to export results and destroy the sandbox. See the [task tutorial](docs/tutorials/agent-task-workflow.mdx); use the same release binary throughout.
 - Raw sandbox workflow: `run --name demo`, `exec demo -- uname -a`, then `rm demo --force`.
 - `npm run lint`: run SwiftLint and check Go formatting.
@@ -54,7 +54,7 @@ Follow `.editorconfig`: four spaces for Swift, tabs for Go, and two spaces for T
 
 ## Testing Guidelines
 
-Swift tests live in `Tests/MicroVMCoreTests`; Go tests live alongside guest code;
+Swift tests live in `Tests/DynoCapCoreTests`; Go tests live alongside guest code;
 TypeScript tests live in each SDK package's `tests/` directory and use Node's test
 runner. Add regression coverage for behavior changes. Protocol changes must keep
 Swift, Go, and `testdata/protocol-vectors.json` aligned.

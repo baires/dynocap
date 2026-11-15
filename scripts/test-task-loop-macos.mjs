@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Requires an entitled CLI, prepared runtime, and a dedicated MICROVM_HOME.
+// Requires an entitled CLI, prepared runtime, and a dedicated DYNOCAP_HOME.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -8,11 +8,11 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { Task, Sandbox } from "../sdk/typescript/dist/index.js";
 
-const home = process.env.MICROVM_HOME;
-assert(home, "use a dedicated MICROVM_HOME with a prepared runtime");
+const home = process.env.DYNOCAP_HOME;
+assert(home, "use a dedicated DYNOCAP_HOME with a prepared runtime");
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const binary = path.join(repo, ".build/release/microvm");
-const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "microvm-task-smoke-"));
+const binary = path.join(repo, ".build/release/dynocap");
+const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "dynocap-task-smoke-"));
 const project = path.join(scratch, "project");
 fs.mkdirSync(project);
 fs.writeFileSync(path.join(project, "before.txt"), "before\n");
@@ -33,7 +33,7 @@ try {
   assert.equal(
     (
       await task.exec(
-        "! touch /usr/microvm-should-be-readonly && ! mount -o remount,rw /"
+        "! touch /usr/dynocap-should-be-readonly && ! mount -o remount,rw /"
       )
     ).exitCode,
     0

@@ -5,14 +5,14 @@ import path from "node:path";
 import test from "node:test";
 
 import { admitProjectPath, admitRepositoryUrl } from "../src/lib/access.ts";
-import { microvmTaskStart } from "../src/tools.ts";
+import { dynocapTaskStart } from "../src/tools.ts";
 
 test("project paths stay inside the configured roots", async () => {
   const root = await fs.realpath(
-    await fs.mkdtemp(path.join(os.tmpdir(), "microvm-roots-"))
+    await fs.mkdtemp(path.join(os.tmpdir(), "dynocap-roots-"))
   );
   const outside = await fs.realpath(
-    await fs.mkdtemp(path.join(os.tmpdir(), "microvm-outside-"))
+    await fs.mkdtemp(path.join(os.tmpdir(), "dynocap-outside-"))
   );
   try {
     await fs.mkdir(path.join(root, "app"));
@@ -48,7 +48,7 @@ test("the home directory and its dot directories are never importable", async ()
   if (await fs.stat(ssh).catch(() => undefined))
     await assert.rejects(admitProjectPath(ssh, policy), /dot directory/);
   const project = await fs.realpath(
-    await fs.mkdtemp(path.join(os.tmpdir(), "microvm-project-"))
+    await fs.mkdtemp(path.join(os.tmpdir(), "dynocap-project-"))
   );
   try {
     await assert.rejects(
@@ -71,7 +71,7 @@ test("repository hosts and ssh keys need the server's permission", async () => {
   admitRepositoryUrl("https://git.acme.internal/x.git", {
     gitHosts: ["git.acme.internal"],
   });
-  const keyed = await microvmTaskStart(
+  const keyed = await dynocapTaskStart(
     {
       repositoryUrl: "git@github.com:acme/app.git",
       sshKeyPath: path.join(os.homedir(), ".aws", "credentials"),
@@ -80,8 +80,8 @@ test("repository hosts and ssh keys need the server's permission", async () => {
     { allowNat: true }
   );
   assert.equal(keyed.isError, true);
-  assert.match(keyed.content[0].text, /MICROVM_MCP_ALLOW_SSH_KEY/);
-  const home = await microvmTaskStart({ projectPath: os.homedir() }, {});
+  assert.match(keyed.content[0].text, /DYNOCAP_MCP_ALLOW_SSH_KEY/);
+  const home = await dynocapTaskStart({ projectPath: os.homedir() }, {});
   assert.equal(home.isError, true);
   assert.match(home.content[0].text, /home directory/);
 });

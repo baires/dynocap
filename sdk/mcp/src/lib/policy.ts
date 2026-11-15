@@ -1,4 +1,4 @@
-import type { Sandbox } from "@microvm/sdk";
+import type { Sandbox } from "@dynocap/sdk";
 
 export const EXEC_TIMEOUT_SECONDS = 30;
 export const OUTPUT_CAP_BYTES = 64 * 1024;

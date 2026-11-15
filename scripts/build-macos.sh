@@ -1,5 +1,5 @@
 #!/bin/sh
-# Build and ad-hoc sign the microvm CLI. Run this on the Mac that will boot VMs.
+# Build and ad-hoc sign the dynocap CLI. Run this on the Mac that will boot VMs.
 set -eu
 cd "$(dirname "$0")/.."
 if [ "$(uname -s)" != "Darwin" ]; then
@@ -7,8 +7,8 @@ if [ "$(uname -s)" != "Darwin" ]; then
     exit 1
 fi
 swift build -c release
-(cd guest && go build -o ../.build/release/microvm-workspace ./workspace && go build -o ../.build/release/microvm-mkruntime ./mkruntime)
-bin=".build/release/microvm"
-codesign --sign - --entitlements entitlements/microvm.entitlements --force "$bin"
+(cd guest && go build -o ../.build/release/dynocap-workspace ./workspace && go build -o ../.build/release/dynocap-mkruntime ./mkruntime)
+bin=".build/release/dynocap"
+codesign --sign - --entitlements entitlements/dynocap.entitlements --force "$bin"
 echo "signed $bin"
 echo "next: $bin doctor --fix"

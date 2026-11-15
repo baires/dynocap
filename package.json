@@ -1,5 +1,5 @@
 {
-  "name": "microvm",
+  "name": "dynocap",
   "private": true,
   "engines": {
     "node": ">=20"

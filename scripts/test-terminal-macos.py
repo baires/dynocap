@@ -127,9 +127,9 @@ class Session:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     repo = pathlib.Path(__file__).resolve().parent.parent
-    parser.add_argument("--binary", type=pathlib.Path, default=repo / ".build/release/microvm")
-    parser.add_argument("--images", type=pathlib.Path, default=pathlib.Path.home() / ".microvm/images")
-    parser.add_argument("--cache", type=pathlib.Path, default=pathlib.Path.home() / ".microvm/cache",
+    parser.add_argument("--binary", type=pathlib.Path, default=repo / ".build/release/dynocap")
+    parser.add_argument("--images", type=pathlib.Path, default=pathlib.Path.home() / ".dynocap/images")
+    parser.add_argument("--cache", type=pathlib.Path, default=pathlib.Path.home() / ".dynocap/cache",
                         help="verified inputs copied into the isolated home before runtime preparation")
     parser.add_argument("--skip-project", action="store_true", help="skip the project task and runtime preparation")
     args = parser.parse_args()
@@ -141,7 +141,7 @@ def main():
         if not (image / name).is_file():
             parser.error(f"missing {image / name}; build an image first")
     binary = str(args.binary.resolve())
-    with tempfile.TemporaryDirectory(prefix="microvm-terminal-", dir="/tmp") as scratch:
+    with tempfile.TemporaryDirectory(prefix="dynocap-terminal-", dir="/tmp") as scratch:
         home = pathlib.Path(scratch)
         (home / "images").mkdir()
         (home / "images" / arch).symlink_to(image, target_is_directory=True)
@@ -294,7 +294,7 @@ def main():
                 cli("run", "--name", "warned", "--ttl", "75")
                 warned = Session(prefix, ["shell", "warned"])
                 warned.read_count(" UTC);", 1)
-                match = re.search(r"\r\nmicrovm: warned expires in ([0-9ms ]+) \(([0-9-]+ [0-9:]+) UTC\)", warned.text)
+                match = re.search(r"\r\ndynocap: warned expires in ([0-9ms ]+) \(([0-9-]+ [0-9:]+) UTC\)", warned.text)
                 assert match, warned.text
                 deadline = datetime.datetime.strptime(match.group(2), "%Y-%m-%d %H:%M:%S").replace(
                     tzinfo=datetime.timezone.utc).timestamp()
@@ -328,7 +328,7 @@ def main():
                 lost_shell = Session(prefix, ["shell", "lost"])
                 lost_shell.read_until("/ ")
                 # This exec is served by the agent it kills, so it fails too.
-                cli("exec", "lost", "--", "sh", "-c", "kill -9 $(pidof microvm-agent)", check=False)
+                cli("exec", "lost", "--", "sh", "-c", "kill -9 $(pidof dynocap-agent)", check=False)
                 assert lost.finish(timeout=30) == 1, lost.text
                 assert lost_shell.finish(timeout=30) == 1 and "left the shell" not in lost_shell.text, lost_shell.text
                 assert cli("exec", "term", "--", "echo", "usable").stdout == "usable\n", "another sandbox was affected"

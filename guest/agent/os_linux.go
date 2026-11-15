@@ -6,9 +6,9 @@ import (
 	"log"
 	"os"
 
+	"dynocap.dev/guest/internal/protocol"
 	"github.com/mdlayher/vsock"
 	"golang.org/x/sys/unix"
-	"microvm.dev/guest/internal/protocol"
 )
 
 func osChdirRoot() error { return os.Chdir("/") }
@@ -18,7 +18,7 @@ func serve() error {
 	if err != nil {
 		return err
 	}
-	log.Printf("microvm-agent listening on vsock port %d", protocol.Port)
+	log.Printf("dynocap-agent listening on vsock port %d", protocol.Port)
 	for {
 		conn, err := ln.Accept()
 		if err != nil {

@@ -78,7 +78,7 @@ func fetchObserved(dest, rawURL, ref, token, sshKey string, opts fetchOptions) (
 	if closeIdentity != nil {
 		defer closeIdentity()
 	}
-	scripts, err := os.MkdirTemp("", "microvm-fetch-")
+	scripts, err := os.MkdirTemp("", "dynocap-fetch-")
 	if err != nil {
 		return "", "", err
 	}
@@ -112,8 +112,8 @@ func fetchObserved(dest, rawURL, ref, token, sshKey string, opts fetchOptions) (
 		}
 		// identity is a path or a memfd. The key bytes are not in this environment.
 		extra["GIT_SSH_COMMAND"] = wrapper
-		extra["MICROVM_SSH_KEY"] = identity
-		extra["MICROVM_KNOWN_HOSTS"] = known
+		extra["DYNOCAP_SSH_KEY"] = identity
+		extra["DYNOCAP_KNOWN_HOSTS"] = known
 	}
 	env := cleanEnv(scripts, extra)
 	if err := os.MkdirAll(filepath.Dir(dest), 0700); err != nil {
@@ -379,12 +379,12 @@ func cleanEnv(home string, extra map[string]string) []string {
 }
 
 func writeAskPass(path string) error {
-	script := "#!/bin/sh\ncase \"$1\" in\n*Username*) printf '%s\\n' git ;;\n*Password*) printf '%s\\n' \"$MICROVM_GIT_TOKEN\" ;;\n*) exit 1 ;;\nesac\n"
+	script := "#!/bin/sh\ncase \"$1\" in\n*Username*) printf '%s\\n' git ;;\n*Password*) printf '%s\\n' \"$DYNOCAP_GIT_TOKEN\" ;;\n*) exit 1 ;;\nesac\n"
 	return os.WriteFile(path, []byte(script), 0700)
 }
 
 func writeSSHWrapper(path string) error {
-	script := "#!/bin/sh\nexec ssh -F /dev/null -i \"$MICROVM_SSH_KEY\" -o IdentitiesOnly=yes -o IdentityAgent=none -o ForwardAgent=no -o BatchMode=yes -o UserKnownHostsFile=\"$MICROVM_KNOWN_HOSTS\" -o StrictHostKeyChecking=accept-new \"$@\"\n"
+	script := "#!/bin/sh\nexec ssh -F /dev/null -i \"$DYNOCAP_SSH_KEY\" -o IdentitiesOnly=yes -o IdentityAgent=none -o ForwardAgent=no -o BatchMode=yes -o UserKnownHostsFile=\"$DYNOCAP_KNOWN_HOSTS\" -o StrictHostKeyChecking=accept-new \"$@\"\n"
 	return os.WriteFile(path, []byte(script), 0700)
 }
 
@@ -947,7 +947,7 @@ func pruneHistory(root string, mode History) error {
 	if err != nil {
 		return err
 	}
-	home, err := os.MkdirTemp("", "microvm-prune-")
+	home, err := os.MkdirTemp("", "dynocap-prune-")
 	if err != nil {
 		return err
 	}
@@ -1036,7 +1036,7 @@ func materializeLocalHistory(sourceGit, root string) error {
 	if err != nil {
 		return err
 	}
-	home, err := os.MkdirTemp("", "microvm-materialize-")
+	home, err := os.MkdirTemp("", "dynocap-materialize-")
 	if err != nil {
 		return err
 	}
@@ -1159,7 +1159,7 @@ func importLinkedCheckout(src, dest string) error {
 	if err != nil {
 		return err
 	}
-	home, err := os.MkdirTemp("", "microvm-import-")
+	home, err := os.MkdirTemp("", "dynocap-import-")
 	if err != nil {
 		return err
 	}

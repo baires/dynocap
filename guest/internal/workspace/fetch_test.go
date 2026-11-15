@@ -44,7 +44,7 @@ func TestAskPassAnswersPrompts(t *testing.T) {
 		t.Fatal(err)
 	}
 	username := exec.Command(path, "Username for 'https://github.com'")
-	username.Env = []string{"MICROVM_GIT_TOKEN=secret-token", "PATH=" + os.Getenv("PATH")}
+	username.Env = []string{"DYNOCAP_GIT_TOKEN=secret-token", "PATH=" + os.Getenv("PATH")}
 	out, err := username.Output()
 	if err != nil || string(out) != "git\n" {
 		t.Fatalf("username %q %v", out, err)

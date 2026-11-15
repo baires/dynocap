@@ -1,6 +1,6 @@
 # Boot time
 
-Measured 9 Nov 2026 on an Apple Silicon Mac, macOS 27.0.1 (26A434). The number is wall-clock time for `microvm run` to return, with the daemon already up and the kernel and initrd already in the page cache. `run` returns when the guest agent sends hello on vsock, which is when `exec` can start. Each sample is one sandbox, then `destroy`. Memory is 1024 MB and the guest has 1 vCPU unless a row says otherwise.
+Measured 9 Nov 2026 on an Apple Silicon Mac, macOS 27.0.1 (26A434). The number is wall-clock time for `dynocap run` to return, with the daemon already up and the kernel and initrd already in the page cache. `run` returns when the guest agent sends hello on vsock, which is when `exec` can start. Each sample is one sandbox, then `destroy`. Memory is 1024 MB and the guest has 1 vCPU unless a row says otherwise.
 
 ## Result
 
@@ -10,7 +10,7 @@ Measured 9 Nov 2026 on an Apple Silicon Mac, macOS 27.0.1 (26A434). The number i
 | Same kernel, 10 ms retry, pruned initrd                         | 290 ms | 282 ms | 304 ms |                 6 |
 | Linux 6.12.46, virtio built in, pruned initrd, 10 ms retry      | 185 ms | 179 ms | 197 ms |                 8 |
 
-On 9 November the 185 ms image was what `~/.microvm/images/aarch64` booted. `./scripts/fetch-image.sh` writes the Alpine kernel back, and that path measured about 290 ms. It is the image again; the 13 November section below is the current measurement.
+On 9 November the 185 ms image was what `~/.dynocap/images/aarch64` booted. `./scripts/fetch-image.sh` writes the Alpine kernel back, and that path measured about 290 ms. It is the image again; the 13 November section below is the current measurement.
 
 A single sample of daemon startup, before any sandbox, was 13 ms until the socket accepted a connection. The first `exec true` after `run` returned was about 10 ms.
 
@@ -65,13 +65,13 @@ Built locally from linux 6.12.46 with `ARCH=arm64 LLVM=1`. Virtio-pci, virtio-ne
 
 On this kernel, a script whose interpreter is a symlink fails with `ENOEXEC` (`Failed to execute /init (error -8)`). `/bin/sh` is a symlink to busybox. The shebang is `#!/bin/busybox sh`, and `/bin/busybox` is a regular file. `date -u` inside the guest matched the host clock.
 
-The initrd still lists the Alpine 6.18 modules. `insmod` fails because those objects do not match this kernel, then the agent starts. The devices are already built in. `fetch-image.sh` does not build this kernel. The source tree used for it is `/tmp/microvm-kbuild`.
+The initrd still lists the Alpine 6.18 modules. `insmod` fails because those objects do not match this kernel, then the agent starts. The devices are already built in. `fetch-image.sh` does not build this kernel. The source tree used for it is `/tmp/dynocap-kbuild`.
 
 ## 13 November 2026, same Mac
 
-The image in `~/.microvm/images/aarch64` is Alpine 6.18.62 again (35 MB kernel, 2.9 MB initrd). The 6.12.46 `Image` is still at `/tmp/microvm-kbuild/linux-6.12.46/arch/arm64/boot/Image`, and its config has virtio-vsock, virtio-net, and virtio-console built in. It does not have `EXT4_FS` or `VIRTIO_BLK`, so it cannot mount a task workspace. It was not put back on the task path.
+The image in `~/.dynocap/images/aarch64` is Alpine 6.18.62 again (35 MB kernel, 2.9 MB initrd). The 6.12.46 `Image` is still at `/tmp/dynocap-kbuild/linux-6.12.46/arch/arm64/boot/Image`, and its config has virtio-vsock, virtio-net, and virtio-console built in. It does not have `EXT4_FS` or `VIRTIO_BLK`, so it cannot mount a task workspace. It was not put back on the task path.
 
-Raw `microvm run` (daemon already up, 1 vCPU, 1024 MB, page cache warm), six runs after one warmup: median **299 ms**, min 291, max 306. The next `exec true` median was 11 ms. The guest clock reached `/init` at 86 ms and the agent logged listening at about 99 ms. That matches the earlier Alpine row, not the 185 ms kernel.
+Raw `dynocap run` (daemon already up, 1 vCPU, 1024 MB, page cache warm), six runs after one warmup: median **299 ms**, min 291, max 306. The next `exec true` median was 11 ms. The guest clock reached `/init` at 86 ms and the agent logged listening at about 99 ms. That matches the earlier Alpine row, not the 185 ms kernel.
 
 A prepared `shell:1` task is a different number, because clone also checks the runtime disk, builds a workspace image, and imports the tree. Before the changes below, a one-file directory on this Mac (three runs):
 
@@ -103,7 +103,7 @@ The runtime disk is hashed when its size, inode, or mtime differs from the last 
 
 Boot is the largest remaining piece of a small clone, about 320 ms, and it did not move. The open 140 ms inside `VZVirtualMachine.start` is still there. A further kernel build only pays off for tasks if ext4 and virtio-blk are built in; the 6.12.46 config is not that kernel.
 
-These task numbers use a private `MICROVM_HOME` and a copy of the prepared `shell:1` disk with the rebuilt agent written into it. The copy is not `~/.microvm`. A runtime prepared before this change still has the previous agent until it is prepared again.
+These task numbers use a private `DYNOCAP_HOME` and a copy of the prepared `shell:1` disk with the rebuilt agent written into it. The copy is not `~/.dynocap`. A runtime prepared before this change still has the previous agent until it is prepared again.
 
 ## 15 November 2026, same Mac
 
@@ -150,6 +150,6 @@ Snapshot restore and a warm pool are not measured. The ~140 ms before the guest 
 
 ## Sources
 
-- Firecracker specification, boot-time clause: <https://github.com/firecracker-microvm/firecracker/blob/main/SPECIFICATION.md>
+- Firecracker specification, boot-time clause: <https://github.com/firecracker-dynocap/firecracker/blob/main/SPECIFICATION.md>
 - Apple containerization, sub-second start and `vminitd`: <https://github.com/apple/containerization>
 - WWDC25 session 346, shell in a few hundred milliseconds: <https://developer.apple.com/videos/play/wwdc2025/346/>

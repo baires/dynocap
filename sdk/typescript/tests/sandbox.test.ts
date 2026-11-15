@@ -113,7 +113,7 @@ test("boot deadline stays a timeout with the daemon's exit code", async () => {
 });
 
 test("a silent home is a daemon error", async () => {
-  const home = fs.mkdtempSync(path.join("/tmp", "microvm-empty-"));
+  const home = fs.mkdtempSync(path.join("/tmp", "dynocap-empty-"));
   try {
     await assert.rejects(Sandbox.list({ home }), (error: unknown) => {
       assert.ok(error instanceof SandboxError);

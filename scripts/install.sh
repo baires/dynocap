@@ -1,18 +1,18 @@
 #!/bin/sh
-# Install the latest darwin-arm64 release into ~/.local/microvm and re-sign it
+# Install the latest darwin-arm64 release into ~/.local/dynocap and re-sign it
 # on this Mac. Replace OWNER with the GitHub account that publishes releases.
 set -eu
 set -o pipefail
 
-OWNER="${MICROVM_GITHUB_OWNER:-OWNER}"
-REPO="${MICROVM_GITHUB_REPO:-microvm}"
+OWNER="${DYNOCAP_GITHUB_OWNER:-OWNER}"
+REPO="${DYNOCAP_GITHUB_REPO:-dynocap}"
 
 if [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then
-  echo "microvm installs on Apple Silicon (darwin-arm64) only." >&2
+  echo "dynocap installs on Apple Silicon (darwin-arm64) only." >&2
   exit 1
 fi
 if [ "$OWNER" = "OWNER" ]; then
-  echo "Replace OWNER in this script with the GitHub account that publishes microvm releases." >&2
+  echo "Replace OWNER in this script with the GitHub account that publishes dynocap releases." >&2
   exit 1
 fi
 
@@ -36,7 +36,7 @@ if [ -z "$tag" ]; then
   exit 1
 fi
 
-name="microvm-${tag}-darwin-arm64.tar.gz"
+name="dynocap-${tag}-darwin-arm64.tar.gz"
 base="https://github.com/${OWNER}/${REPO}/releases/download/${tag}"
 workdir=$(mktemp -d)
 trap 'rm -rf "$workdir"' EXIT
@@ -54,28 +54,28 @@ if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
     echo "The archive has no valid build attestation from ${OWNER}/${REPO}. Not installing." >&2
     exit 1
   fi
-elif [ "${MICROVM_REQUIRE_ATTESTATION:-0}" = "1" ]; then
-  echo "MICROVM_REQUIRE_ATTESTATION=1 needs the GitHub CLI (gh), logged in, to verify the archive." >&2
+elif [ "${DYNOCAP_REQUIRE_ATTESTATION:-0}" = "1" ]; then
+  echo "DYNOCAP_REQUIRE_ATTESTATION=1 needs the GitHub CLI (gh), logged in, to verify the archive." >&2
   exit 1
 else
   echo "warning: gh is not installed or not logged in, so the build attestation was not verified." >&2
-  echo "         Install gh, run gh auth login, and rerun, or set MICROVM_REQUIRE_ATTESTATION=1 to refuse unverified installs." >&2
+  echo "         Install gh, run gh auth login, and rerun, or set DYNOCAP_REQUIRE_ATTESTATION=1 to refuse unverified installs." >&2
 fi
 
-prefix="${HOME}/.local/microvm"
+prefix="${HOME}/.local/dynocap"
 rm -rf "$prefix"
 mkdir -p "$prefix" "${HOME}/.local/bin"
 tar -xzf "$workdir/$name" -C "$prefix"
-ln -sfn "$prefix/bin/microvm" "${HOME}/.local/bin/microvm"
+ln -sfn "$prefix/bin/dynocap" "${HOME}/.local/bin/dynocap"
 xattr -dr com.apple.quarantine "$prefix" 2>/dev/null || true
-codesign --sign - --entitlements "$prefix/entitlements/microvm.entitlements" --force "$prefix/bin/microvm"
+codesign --sign - --entitlements "$prefix/entitlements/dynocap.entitlements" --force "$prefix/bin/dynocap"
 
 if ! mke2fs_present; then
   echo "mke2fs is missing. Install it with: brew install e2fsprogs" >&2
 fi
 case ":${PATH}:" in
   *":${HOME}/.local/bin:"*) ;;
-  *) echo "Add ${HOME}/.local/bin to PATH to run microvm by name." >&2 ;;
+  *) echo "Add ${HOME}/.local/bin to PATH to run dynocap by name." >&2 ;;
 esac
 
-"$prefix/bin/microvm" doctor --fix
+"$prefix/bin/dynocap" doctor --fix

@@ -1,6 +1,6 @@
 ---
 title: "Configure the Model Context Protocol (MCP) Server"
-description: "How to connect MicroVM's MCP server to Claude Desktop, Cursor, and Cline to empower LLMs with safe, local sandboxes."
+description: "How to connect DynoCap's MCP server to Claude Desktop, Cursor, and Cline to empower LLMs with safe, local sandboxes."
 sidebar_position: 5
 ---
 
@@ -8,14 +8,14 @@ sidebar_position: 5
 
 The **Model Context Protocol (MCP)** enables AI coding assistants like Claude Desktop, Cursor, and Cline to call local tools.
 
-MicroVM includes a first-party MCP server package (`@microvm/mcp`) that exposes tools for starting tasks, executing commands in an isolated Linux microVM, inspecting diffs, and exporting patches.
+DynoCap includes a first-party MCP server package (`@dynocap/mcp`) that exposes tools for starting tasks, executing commands in an isolated Linux microVM, inspecting diffs, and exporting patches.
 
 ---
 
 ## Prerequisites
 
-1. MicroVM CLI built and signed (`./scripts/build-macos.sh`).
-2. The runtime your projects use, prepared with `microvm doctor --fix ./project` (or `--runtime python:3.14`, for example). When a task omits `runtimes`, microvm picks one from the project's files, the same way `clone` does, and falls back to `shell:1` (bash, git, ssh). The task result reports the runtime used.
+1. DynoCap CLI built and signed (`./scripts/build-macos.sh`).
+2. The runtime your projects use, prepared with `dynocap doctor --fix ./project` (or `--runtime python:3.14`, for example). When a task omits `runtimes`, DynoCap picks one from the project's files, the same way `clone` does, and falls back to `shell:1` (bash, git, ssh). The task result reports the runtime used.
 3. Build the TypeScript packages:
    ```sh
    npm run typecheck
@@ -26,14 +26,14 @@ MicroVM includes a first-party MCP server package (`@microvm/mcp`) that exposes 
 
 ## MCP Server Security Policies
 
-By default, `@microvm/mcp` enforces strict security boundaries:
+By default, `@dynocap/mcp` enforces strict security boundaries:
 
 - **Offline Only by Default:** The LLM cannot allocate network interfaces or connect to external hosts.
 - **Opt-in Network Modes:** You must explicitly enable network flags via environment variables when launching the server:
-  - `MICROVM_MCP_ALLOW_FILTERED=1`: Permits HTTPS access to the task runtime's package registry (`registry.npmjs.org` for node, `pypi.org` and `files.pythonhosted.org` for python, `proxy.golang.org` and `sum.golang.org` for go, and none for `shell:1`) and, for a repository URL, that URL's host.
-  - `MICROVM_MCP_ALLOW_NAT=1`: Permits unrestricted outbound NAT connectivity.
-- **Server-chosen host paths:** `projectPath` must be inside `MICROVM_MCP_ROOTS` (default: the server's working directory) and is never the home directory or a dot directory in it. Desktop clients often start servers from `/` or `~`, which leaves no default root, so set `MICROVM_MCP_ROOTS` to your project directories.
-- **Repository hosts and keys:** `repositoryUrl` must name a host in `MICROVM_MCP_GIT_HOSTS` (default `github.com,gitlab.com,bitbucket.org`), and `sshKeyPath` needs `MICROVM_MCP_ALLOW_SSH_KEY=1`.
+  - `DYNOCAP_MCP_ALLOW_FILTERED=1`: Permits HTTPS access to the task runtime's package registry (`registry.npmjs.org` for node, `pypi.org` and `files.pythonhosted.org` for python, `proxy.golang.org` and `sum.golang.org` for go, and none for `shell:1`) and, for a repository URL, that URL's host.
+  - `DYNOCAP_MCP_ALLOW_NAT=1`: Permits unrestricted outbound NAT connectivity.
+- **Server-chosen host paths:** `projectPath` must be inside `DYNOCAP_MCP_ROOTS` (default: the server's working directory) and is never the home directory or a dot directory in it. Desktop clients often start servers from `/` or `~`, which leaves no default root, so set `DYNOCAP_MCP_ROOTS` to your project directories.
+- **Repository hosts and keys:** `repositoryUrl` must name a host in `DYNOCAP_MCP_GIT_HOSTS` (default `github.com,gitlab.com,bitbucket.org`), and `sshKeyPath` needs `DYNOCAP_MCP_ALLOW_SSH_KEY=1`.
 
 Filtered egress limits destinations, not what leaves: the registries and Git hosts it allows accept uploads. See [What filtered egress does not stop](../explanation/security-and-isolation.mdx#what-filtered-egress-does-not-stop).
 
@@ -41,39 +41,39 @@ Filtered egress limits destinations, not what leaves: the registries and Git hos
 
 ## Connecting to Claude Desktop
 
-Add MicroVM to your Claude Desktop configuration file:
+Add DynoCap to your Claude Desktop configuration file:
 
 📁 `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
-    "microvm": {
+    "dynocap": {
       "command": "node",
-      "args": ["/Users/YOUR_USER/playground/microvm/sdk/mcp/dist/bin.js"],
+      "args": ["/Users/YOUR_USER/playground/dynocap/sdk/mcp/dist/bin.js"],
       "env": {
-        "MICROVM_MCP_ALLOW_FILTERED": "1",
-        "MICROVM_MCP_ROOTS": "/Users/YOUR_USER/code"
+        "DYNOCAP_MCP_ALLOW_FILTERED": "1",
+        "DYNOCAP_MCP_ROOTS": "/Users/YOUR_USER/code"
       }
     }
   }
 }
 ```
 
-Restart Claude Desktop. You will see the MicroVM tools appear in the hammer icon list.
+Restart Claude Desktop. You will see the DynoCap tools appear in the hammer icon list.
 
 ---
 
 ## Connecting to Cursor
 
-To configure Cursor to use MicroVM:
+To configure Cursor to use DynoCap:
 
 1. Open **Cursor Settings** -> **Features** -> **MCP Servers**.
 2. Click **+ Add New MCP Server**.
 3. Set:
-   - **Name:** `microvm`
+   - **Name:** `dynocap`
    - **Type:** `command`
-   - **Command:** `node /Users/YOUR_USER/playground/microvm/sdk/mcp/dist/bin.js`
+   - **Command:** `node /Users/YOUR_USER/playground/dynocap/sdk/mcp/dist/bin.js`
 
 ---
 
@@ -84,11 +84,11 @@ In Cline/Roo-Code MCP settings:
 ```json
 {
   "mcpServers": {
-    "microvm": {
+    "dynocap": {
       "command": "node",
-      "args": ["/Users/YOUR_USER/playground/microvm/sdk/mcp/dist/bin.js"],
+      "args": ["/Users/YOUR_USER/playground/dynocap/sdk/mcp/dist/bin.js"],
       "env": {
-        "MICROVM_MCP_ALLOW_FILTERED": "1"
+        "DYNOCAP_MCP_ALLOW_FILTERED": "1"
       }
     }
   }
@@ -103,15 +103,15 @@ Once connected, your AI assistant can use the following tools:
 
 | MCP Tool              | Purpose                                                                 |
 | :-------------------- | :---------------------------------------------------------------------- |
-| `microvm_task_start`  | Imports a project tree or Git URL into an isolated task sandbox.        |
-| `microvm_task_exec`   | Runs a shell command inside the task's `/workspace`. Streams output.    |
-| `microvm_diff`        | Previews unified Git diffs of modifications made by the agent.          |
-| `microvm_task_finish` | Shuts down the sandbox and saves the verified patch and execution logs. |
-| `microvm_ls`          | Lists active sandboxes and retained task records.                       |
-| `microvm_rm`          | Destroys sandboxes or purges retained task directories.                 |
-| `microvm_run`         | Boots a raw Linux sandbox without a project tree.                       |
-| `microvm_exec`        | Executes a command inside a raw sandbox.                                |
-| `microvm_destroy`     | Destroys a raw sandbox.                                                 |
+| `dynocap_task_start`  | Imports a project tree or Git URL into an isolated task sandbox.        |
+| `dynocap_task_exec`   | Runs a shell command inside the task's `/workspace`. Streams output.    |
+| `dynocap_diff`        | Previews unified Git diffs of modifications made by the agent.          |
+| `dynocap_task_finish` | Shuts down the sandbox and saves the verified patch and execution logs. |
+| `dynocap_ls`          | Lists active sandboxes and retained task records.                       |
+| `dynocap_rm`          | Destroys sandboxes or purges retained task directories.                 |
+| `dynocap_run`         | Boots a raw Linux sandbox without a project tree.                       |
+| `dynocap_exec`        | Executes a command inside a raw sandbox.                                |
+| `dynocap_destroy`     | Destroys a raw sandbox.                                                 |
 
 ---
 
@@ -119,6 +119,6 @@ Once connected, your AI assistant can use the following tools:
 
 You can prompt your assistant like this:
 
-> _"Clone `./my-web-app` into a MicroVM sandbox named `feature-auth`. Run `npm test` inside the sandbox to make sure it's green. Then implement OAuth token validation in `src/auth.js`, verify the tests pass, show me the diff preview, and finish the task."_
+> _"Clone `./my-web-app` into a DynoCap sandbox named `feature-auth`. Run `npm test` inside the sandbox to make sure it's green. Then implement OAuth token validation in `src/auth.js`, verify the tests pass, show me the diff preview, and finish the task."_
 
-The assistant will autonomously invoke `microvm_task_start`, `microvm_task_exec`, `microvm_diff`, and `microvm_task_finish` safely within the Linux microVM.
+The assistant will autonomously invoke `dynocap_task_start`, `dynocap_task_exec`, `dynocap_diff`, and `dynocap_task_finish` safely within the Linux microVM.

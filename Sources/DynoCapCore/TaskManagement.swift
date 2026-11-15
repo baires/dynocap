@@ -1,0 +1,235 @@
+import Foundation
+
+public struct ManagedEntry: Codable {
+    public var id: String
+    public var name: String?
+    public var kind: String
+    public var phase: String
+    public var runtime: String
+    public var network: NetworkMode?
+    public var expiresAtUnix: Int64?
+    public var resultDirectory: String?
+    public var sandboxExpiresAtUnix: Int64?
+    public var resultExpiresAtUnix: Int64?
+}
+
+extension TaskManager {
+    func records(now: Int64 = unixNow()) throws -> [TaskRecord] {
+        condition.lock()
+        defer { condition.unlock() }
+        return try fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).compactMap { entry in
+            guard let record = try? load(entry.lastPathComponent), record.expiresAtUnix > now else { return nil }
+            return current?.id == record.id ? current : record
+        }.sorted { $0.id < $1.id }
+    }
+
+    func resolve(_ target: String) throws -> TaskRecord {
+        try validateVMName(target)
+        if let record = try records().first(where: { $0.id == target || $0.name == target }) { return record }
+        throw DynoCapError("project task not found: \(target); diff and finish require a project task", code: .notFound)
+    }
+
+    /// A current name or id wins. After `rm` releases the name, `--purge` can still address that result.
+    func recordForRemoval(_ target: String, purge: Bool) throws -> TaskRecord? {
+        let all = try records()
+        if let record = all.first(where: { $0.id == target || $0.name == target }) { return record }
+        guard purge else { return nil }
+        return all.first(where: { $0.releasedName == target })
+    }
+
+    func reserveName(_ name: String?) throws {
+        guard let name else { return }
+        try validateTaskName(name)
+        namespace.lock()
+        defer { namespace.unlock() }
+        guard !reservedNames.contains(name), !(try records()).contains(where: { $0.name == name }),
+            !(try StateStore(paths: paths).list()).contains(where: { $0.name == name })
+        else {
+            throw DynoCapError(
+                "name already exists: \(name)",
+                recovery: "Choose another name; run dynocap ls to inspect the existing sandbox or retained result.")
+        }
+        reservedNames.insert(name)
+    }
+
+    func releaseNameReservation(_ name: String?) {
+        guard let name else { return }
+        namespace.lock()
+        reservedNames.remove(name)
+        namespace.unlock()
+    }
+
+    func checkRawName(_ name: String) throws {
+        try validateTaskName(name)
+        guard !reservedNames.contains(name), !(try records()).contains(where: { $0.name == name }) else {
+            throw DynoCapError("name belongs to a project task: \(name)")
+        }
+    }
+
+    @discardableResult
+    func cleanupFailedStart(_ id: String) -> Bool {
+        let command = cleanupCommand(id)
+        do {
+            try destroy(id)
+            if fm.fileExists(atPath: dir(id).path) {
+                try fm.removeItem(at: dir(id))
+            }
+            release()
+            return true
+        } catch {
+            condition.lock()
+            defer { condition.unlock() }
+            let message = "startup failed; teardown must be retried: \(error). Run `\(command)` to discard it."
+            if var record = current, record.id == id {
+                record.phase = "interrupted"
+                record.message = message
+                current = record
+                try? save(record)
+                // Keep admission occupied until explicit removal or TTL teardown succeeds.
+                return false
+            }
+            if fm.fileExists(atPath: dir(id).path), var record = try? load(id) {
+                record.phase = "interrupted"
+                record.message = message
+                try? save(record)
+                busy = false
+                condition.broadcast()
+                return false
+            }
+            busy = false
+            condition.broadcast()
+            return !fm.fileExists(atPath: dir(id).path)
+        }
+    }
+
+    func cleanupCommand(_ id: String) -> String {
+        let name = (current?.id == id ? current?.name : nil) ?? (try? load(id))?.name ?? id
+        return "dynocap rm \(name) --force"
+    }
+
+    func ensureStarting(_ id: String) throws {
+        condition.lock()
+        defer { condition.unlock() }
+        guard current?.id == id, current?.phase == "starting" else {
+            throw DynoCapError("task was removed during startup")
+        }
+    }
+
+    static func discardsUnexportedWork(_ phase: String?) -> Bool {
+        ["starting", "running", "finalizing"].contains(phase ?? "")
+    }
+
+    func remove(_ id: String, purge: Bool, force: Bool = false) throws {
+        condition.lock()
+        let loaded = try? load(id)
+        let phase = (current?.id == id ? current?.phase : nil) ?? loaded?.phase
+        let target = (current?.id == id ? current?.name : nil) ?? loaded?.name ?? id
+        if Self.discardsUnexportedWork(phase), !force {
+            condition.unlock()
+            throw DynoCapError(
+                "refusing to remove live sandbox \(target)",
+                code: .invalidPhase,
+                recovery: "Run `dynocap finish \(target)` to export work, or `dynocap rm \(target) --force` to discard it. "
+                    + "--purge does not authorize discarding a live sandbox.")
+        }
+        condition.unlock()
+        var duringStartup = false
+        do {
+            // Serialize cancellation with boot's record registration.
+            namespace.lock()
+            defer { namespace.unlock() }
+            duringStartup = (try? load(id))?.phase == "starting"
+            try destroy(id)  // Failed teardown must keep the alias, disk and record.
+            stopped(id, reason: "sandbox removed")
+        }
+        condition.lock()
+        while reviewing || (duringStartup && busy && current == nil) { condition.wait() }
+        condition.unlock()
+        namespace.lock()
+        defer { namespace.unlock() }
+        condition.lock()
+        defer { condition.unlock() }
+        // Cancelled startup may already have removed its unpublished record.
+        guard fm.fileExists(atPath: dir(id).path) else { return }
+        var record = try load(id)
+        if purge {
+            try fm.removeItem(at: dir(id))
+        } else {
+            if let previous = record.name {
+                record.releasedName = previous
+                let entries = (try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
+                for entry in entries {
+                    guard var other = try? load(entry.lastPathComponent), other.id != id, other.releasedName == previous else { continue }
+                    other.releasedName = nil
+                    try save(other)
+                }
+            }
+            record.name = nil
+            try save(record)
+        }
+    }
+}
+
+func validateTaskName(_ name: String) throws {
+    try validateVMName(name)
+    guard !name.hasPrefix("task-"), !name.hasPrefix("runtime-") else {
+        throw DynoCapError("name is reserved: \(name)")
+    }
+}
+
+public struct TaskPreview: Codable {
+    public var directory: String
+    public var patchPath: String
+    public var reviewPath: String
+    public var changesPath: String
+    init(_ directory: URL) {
+        self.directory = directory.path
+        patchPath = directory.appendingPathComponent("changes.patch").path
+        reviewPath = directory.appendingPathComponent("review.txt").path
+        changesPath = directory.appendingPathComponent("changes.json").path
+    }
+}
+
+extension TaskManager {
+    func preview(_ id: String, requireOffline: Bool, permitFiltered: Bool?) throws -> TaskPreview {
+        let record = try load(id)
+        if let result = record.resultDirectory { return TaskPreview(URL(fileURLWithPath: result)) }
+        condition.lock()
+        guard !reviewing, current?.id == id, current?.phase == "running", active == 0 else {
+            condition.unlock()
+            throw DynoCapError("diff requires an idle running task; commands or another review may be active")
+        }
+        if let rejection = NetworkAdmission.rejection(
+            network: record.network, requireOffline: requireOffline,
+            permitFiltered: permitFiltered, offlineMessage: "task requires offline networking") {
+            condition.unlock()
+            throw DynoCapError(rejection)
+        }
+        reviewing = true
+        condition.unlock()
+        let directory = dir(id)
+        let preview = directory.appendingPathComponent("preview")
+        let stage = directory.appendingPathComponent("preview.partial")
+        let archive = directory.appendingPathComponent("preview-export.tar")
+        let final = directory.appendingPathComponent("preview-tree")
+        defer {
+            for path in [stage, archive, final] { try? fm.removeItem(at: path) }
+            condition.lock()
+            reviewing = false
+            condition.broadcast()
+            condition.unlock()
+        }
+        try? fm.removeItem(at: preview)
+        try fm.createDirectory(at: stage, withIntermediateDirectories: true)
+        _ = try execute(id, ["/usr/local/bin/dynocap-agent", "task-pack", "/workspace"], [], nil, archive, 256 << 20)
+        _ = try hostTree("dynocap-workspace", ["unpack", final.path], archive, nil)
+        _ = try hostTree(
+            "dynocap-workspace", ["result", directory.appendingPathComponent("baseline").path, final.path, stage.path], nil, nil)
+        guard try treeSize(stage) <= 256 << 20 else { throw DynoCapError("diff exceeds 256 MiB export limit") }
+        condition.lock()
+        defer { condition.unlock() }
+        guard current?.id == id, current?.phase == "running" else { throw DynoCapError("task stopped during diff") }
+        try fm.moveItem(at: stage, to: preview)
+        return TaskPreview(preview)
+    }
+}

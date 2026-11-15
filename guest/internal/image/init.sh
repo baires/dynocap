@@ -1,5 +1,5 @@
 #!/bin/busybox sh
-# PID 1 for the microvm initramfs. The kernel is started with rdinit=/init.
+# PID 1 for the dynocap initramfs. The kernel is started with rdinit=/init.
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 export HOME=/root
@@ -20,37 +20,37 @@ load_modules() {
     while IFS= read -r ko; do
         [ -z "$ko" ] && continue
         [ -f "$ko" ] || continue
-        insmod "$ko" || echo "microvm-init: insmod failed: $ko"
+        insmod "$ko" || echo "dynocap-init: insmod failed: $ko"
     done < "$file"
 }
 
 # vsock must be up before the agent listens. NAT is not on that path:
 # a slow DHCP client used to delay the first exec.
-load_modules /etc/microvm-vsock-modules
+load_modules /etc/dynocap-vsock-modules
 
 # Task runtime is attached read-only by the host; the workspace is a separate disk.
-if grep -q 'microvm.task=1' /proc/cmdline; then
-    load_modules /etc/microvm-storage-modules
+if grep -q 'dynocap.task=1' /proc/cmdline; then
+    load_modules /etc/dynocap-storage-modules
     mkdir -p /runtime
     mount -t ext4 -o ro /dev/vda /runtime || exec sh
     mount --move /proc /runtime/proc
     mount --move /sys /runtime/sys
     mount --move /dev /runtime/dev
-    exec switch_root /runtime /sbin/microvm-task-init
+    exec switch_root /runtime /sbin/dynocap-task-init
 fi
 
-hostname microvm >/dev/null 2>&1 || true
+hostname dynocap >/dev/null 2>&1 || true
 ip link set lo up 2>/dev/null || true
 
-if [ ! -x /usr/local/bin/microvm-agent ]; then
-    echo "microvm-init: missing /usr/local/bin/microvm-agent"
+if [ ! -x /usr/local/bin/dynocap-agent ]; then
+    echo "dynocap-init: missing /usr/local/bin/dynocap-agent"
 else
-    echo "microvm-init: starting microvm-agent"
-    setsid /usr/local/bin/microvm-agent &
+    echo "dynocap-init: starting dynocap-agent"
+    setsid /usr/local/bin/dynocap-agent &
 fi
 
 (
-    load_modules /etc/microvm-net-modules
+    load_modules /etc/dynocap-net-modules
     # Outbound NAT only. VZNATNetworkDeviceAttachment serves DHCP to the guest.
     for i in /sys/class/net/*; do
         [ -e "$i" ] || continue

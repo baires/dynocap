@@ -1,4 +1,4 @@
-# MicroVM site
+# DynoCap site
 
 ## Concept card
 
@@ -11,7 +11,7 @@ Motion verb: snap. A label shifts 4px and its rule locks. Nothing travels, pins,
 Screenshot:  The outcome at display size, beside the complete task lifecycle.
 ```
 
-Anchor: MicroVM copies a project into a disposable workspace, executes commands through one local daemon, and exports verified results before destroying the guest. The guest has its own kernel, no host directory mount, and no network device by default.
+Anchor: DynoCap copies a project into a disposable workspace, executes commands through one local daemon, and exports verified results before destroying the guest. The guest has its own kernel, no host directory mount, and no network device by default.
 
 Audience: experienced developers and frequent coding-agent users. The page is a product introduction with a short tutorial path, not a replacement for CLI reference.
 
@@ -102,13 +102,13 @@ Preserve the existing black/amber, Switzer/Plex identity. Keep the lifecycle in 
 
 ## Copy limits and evidence
 
-The user explicitly chose the intended release experience: Homebrew is primary, curl and source builds are alternatives. Homebrew and https://microvm.dev/install.sh are planned launch contracts, marked placeholder in the content data. The source build remains available today. Do not invent a published skill installer. Start source snippets from an existing MicroVM source checkout and link the full prerequisite guide. Doctor's first preparation downloads verified inputs and may take minutes; do not imply first installation takes milliseconds. The hero example runs uname rather than assuming project dependencies exist.
+The user explicitly chose the intended release experience: Homebrew is primary, curl and source builds are alternatives. Homebrew and https://dynocap.dev/install.sh are planned launch contracts, marked placeholder in the content data. The source build remains available today. Do not invent a published skill installer. Start source snippets from an existing DynoCap source checkout and link the full prerequisite guide. Doctor's first preparation downloads verified inputs and may take minutes; do not imply first installation takes milliseconds. The hero example runs uname rather than assuming project dependencies exist.
 
-SDK and MCP packages ship in this repository; their public npm packages are not available. Link local setup guides. The production URL https://microvm.dev remains a placeholder.
+SDK and MCP packages ship in this repository; their public npm packages are not available. Link local setup guides. The production URL https://dynocap.dev remains a placeholder.
 
 299 ms: raw run median, 6 runs after warmup; 491 ms: one-file shell:1 clone, 3 runs; 989 ms: repository clone, 387 files, 2 runs. One Apple Silicon Mac, 13 Nov 2026, daemon already running and artifacts prepared. Raw run used 1 vCPU, 1024 MB, warm page cache. Source: docs/research/boot-time.md. Never conflate raw boot, project import, dependency installs, or first preparation.
 
-MCP and the MicroVM skill must be discoverable from the hero and primary navigation. Distinguish tool access from procedural instructions. Serve the repository skill as raw Markdown at /skill.md so the linked content stays in sync. Never present the unpublished skill installer as available.
+MCP and the DynoCap skill must be discoverable from the hero and primary navigation. Distinguish tool access from procedural instructions. Serve the repository skill as raw Markdown at /skill.md so the linked content stays in sync. Never present the unpublished skill installer as available.
 
 ## Verification, 14 November 2026
 
@@ -122,4 +122,4 @@ Astro check still reports the pre-existing GSAP callback return-type error in sr
 
 ## Demo recording
 
-`site/demo/workflow.tape` drives the real CLI through clone, exec, diff, and finish on a one-file project, with `cat README.md` before and after to show the host file unchanged. `site/demo/record.sh` records it in a throwaway `MICROVM_HOME` (APFS clones of the prepared image and runtime), so no personal paths reach the published video. Output: `public/demo/microvm-workflow.{webm,mp4,png}`, about 0.5 MB each. Typing is scripted; every wait after Enter is the real command, and the timings are never edited. Theme: black ground, ink text, amber cursor, Plex Mono when installed (Menlo otherwise). Keep `demo.commands` in `src/data/site.ts` in step with the tape. Below 768px the video and its poster are not loaded; the commands list and a link to the MP4 take their place.
+`site/demo/workflow.tape` drives the real CLI through clone, exec, diff, and finish on a one-file project, with `cat README.md` before and after to show the host file unchanged. `site/demo/record.sh` records it in a throwaway `DYNOCAP_HOME` (APFS clones of the prepared image and runtime), so no personal paths reach the published video. Output: `public/demo/dynocap-workflow.{webm,mp4,png}`, about 0.5 MB each. Typing is scripted; every wait after Enter is the real command, and the timings are never edited. Theme: black ground, ink text, amber cursor, Plex Mono when installed (Menlo otherwise). Keep `demo.commands` in `src/data/site.ts` in step with the tape. Below 768px the video and its poster are not loaded; the commands list and a link to the MP4 take their place.

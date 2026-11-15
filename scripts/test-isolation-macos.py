@@ -15,8 +15,8 @@ import time
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     repo = pathlib.Path(__file__).resolve().parent.parent
-    parser.add_argument("--binary", type=pathlib.Path, default=repo / ".build/release/microvm")
-    parser.add_argument("--images", type=pathlib.Path, default=pathlib.Path.home() / ".microvm/images")
+    parser.add_argument("--binary", type=pathlib.Path, default=repo / ".build/release/dynocap")
+    parser.add_argument("--images", type=pathlib.Path, default=pathlib.Path.home() / ".dynocap/images")
     args = parser.parse_args()
     if platform.system() != "Darwin":
         parser.error("requires a virtualization-capable Mac and an entitled binary")
@@ -26,7 +26,7 @@ def main():
         if not (image / name).is_file():
             parser.error(f"missing {image / name}; build an image first")
     binary = str(args.binary.resolve())
-    with tempfile.TemporaryDirectory(prefix="microvm-isolation-", dir="/tmp") as scratch:
+    with tempfile.TemporaryDirectory(prefix="dynocap-isolation-", dir="/tmp") as scratch:
         home = pathlib.Path(scratch)
         (home / "images").mkdir()
         (home / "images" / arch).symlink_to(image, target_is_directory=True)
@@ -79,7 +79,7 @@ def main():
                 client_test = """
                   import assert from 'node:assert/strict';
                   const { Sandbox } = await import(process.argv[1]);
-                  const { microvmRun, microvmExec, microvmDestroy } = await import(process.argv[2]);
+                  const { dynocapRun, dynocapExec, dynocapDestroy } = await import(process.argv[2]);
                   const home = { home: process.argv[3] };
                   const sdk = await Sandbox.create({ ...home, name: 'sdk' });
                   assert.equal((await sdk.exec('echo sdk')).stdout.trim(), 'sdk');
@@ -89,14 +89,14 @@ def main():
                   assert.equal(tty.stderr, '');
                   assert.equal((await Sandbox.list(home)).find(s => s.name === 'sdk').network, 'none');
                   await sdk.destroy();
-                  assert.equal((await microvmRun({name: 'mcp'}, home)).isError, undefined);
-                  assert.equal((await microvmExec({name: 'mcp', command: 'true'}, home)).isError, undefined);
-                  const term = await microvmExec({name: 'mcp', command: 'stty size', terminal: true}, home);
+                  assert.equal((await dynocapRun({name: 'mcp'}, home)).isError, undefined);
+                  assert.equal((await dynocapExec({name: 'mcp', command: 'true'}, home)).isError, undefined);
+                  const term = await dynocapExec({name: 'mcp', command: 'stty size', terminal: true}, home);
                   assert.equal(term.content[0].text, 'exit 0\\nterminal:\\n24 80\\r\\n');
-                  assert.equal((await microvmRun({name: 'denied', network: 'nat'}, home)).isError, true);
-                  assert.equal((await microvmExec({name: 'online', command: 'true'}, home)).isError, true);
-                  assert.equal((await microvmExec({name: 'online', command: 'true'}, {...home, allowNat: true})).isError, undefined);
-                  await microvmDestroy('mcp', home);
+                  assert.equal((await dynocapRun({name: 'denied', network: 'nat'}, home)).isError, true);
+                  assert.equal((await dynocapExec({name: 'online', command: 'true'}, home)).isError, true);
+                  assert.equal((await dynocapExec({name: 'online', command: 'true'}, {...home, allowNat: true})).isError, undefined);
+                  await dynocapDestroy('mcp', home);
                 """
                 subprocess.run(["node", "--input-type=module", "-e", client_test, sdk, mcp, str(home)], check=True, timeout=30)
                 print("PASS: real SDK/MCP offline exec, terminal exec, and MCP NAT permission checks", flush=True)
@@ -186,14 +186,14 @@ def main():
                 assert (home / "vms" / "offline").exists() and (home / "vms" / "online").exists()
                 if settled:
                     reported = (settled[0].get("message") or "") + err + out
-                    assert "microvm rm cancelled --force" in reported, reported
+                    assert "dynocap rm cancelled --force" in reported, reported
                     assert settled[0]["name"] == "cancelled"
                     cli("rm", "cancelled", "--force")
                     assert not any(path.name != "task-kept" for path in (home / "tasks").iterdir())
                 vm_names = {path.name for path in (home / "vms").iterdir()} if (home / "vms").exists() else set()
                 assert vm_names <= {"offline", "online"}, vm_names
                 assert (kept / "changes.patch").read_text() == "kept"
-                print("PASS: interrupted creation cleans up or reports microvm rm cancelled --force", flush=True)
+                print("PASS: interrupted creation cleans up or reports dynocap rm cancelled --force", flush=True)
 
                 listed = json.loads(cli("ps", "--json").stdout)
                 assert [(entry["name"], entry["kind"]) for entry in listed] == [

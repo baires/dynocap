@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"microvm.dev/guest/internal/protocol"
+	"dynocap.dev/guest/internal/protocol"
 )
 
 const (
@@ -209,7 +209,7 @@ func failStartOn(stream uint8, id uint32, err error, write func(protocol.Message
 		code = exitNotFound
 	}
 	msg := err.Error()
-	_ = write(protocol.Message{Type: stream, ID: id, Data: []byte("microvm-agent: " + msg + "\n")})
+	_ = write(protocol.Message{Type: stream, ID: id, Data: []byte("dynocap-agent: " + msg + "\n")})
 	_ = write(protocol.Message{Type: protocol.TypeExit, ID: id, ExitCode: code})
 }
 
@@ -273,7 +273,7 @@ func mergeEnv(overrides []string, terminal bool) []string {
 	}
 	order := []string{"PATH", "HOME", "TERM", "LANG"}
 	var environment map[string]string
-	if data, err := os.ReadFile("/etc/microvm-environment.json"); err == nil && json.Unmarshal(data, &environment) == nil {
+	if data, err := os.ReadFile("/etc/dynocap-environment.json"); err == nil && json.Unmarshal(data, &environment) == nil {
 		for key, value := range environment {
 			if _, ok := base[key]; !ok {
 				order = append(order, key)

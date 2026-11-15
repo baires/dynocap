@@ -36,7 +36,7 @@ UNLISTED = ["example.com"]
 
 def validate(args, runtime, spec, arch):
     others = sorted({host for other in RUNTIMES.values() for host in other["registries"]} - set(spec["registries"]))
-    with tempfile.TemporaryDirectory(prefix="microvm-runtime-", dir="/tmp") as scratch:
+    with tempfile.TemporaryDirectory(prefix="dynocap-runtime-", dir="/tmp") as scratch:
         scratch = pathlib.Path(scratch)
         home = scratch / "home"
         (home / "images").mkdir(parents=True)
@@ -120,9 +120,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--runtime", choices=sorted(RUNTIMES), action="append", default=[])
     parser.add_argument("--all", action="store_true", help="validate every runtime in turn")
-    parser.add_argument("--binary", type=pathlib.Path, default=REPO / ".build/release/microvm")
-    parser.add_argument("--images", type=pathlib.Path, default=pathlib.Path.home() / ".microvm/images")
-    parser.add_argument("--cache", type=pathlib.Path, default=pathlib.Path.home() / ".microvm/cache",
+    parser.add_argument("--binary", type=pathlib.Path, default=REPO / ".build/release/dynocap")
+    parser.add_argument("--images", type=pathlib.Path, default=pathlib.Path.home() / ".dynocap/images")
+    parser.add_argument("--cache", type=pathlib.Path, default=pathlib.Path.home() / ".dynocap/cache",
                         help="verified inputs copied into the isolated home before runtime preparation")
     args = parser.parse_args()
     if platform.system() != "Darwin":

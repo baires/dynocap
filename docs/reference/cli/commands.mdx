@@ -1,6 +1,6 @@
 ---
 title: "CLI Command Reference"
-description: "Comprehensive syntax, parameters, flags, and behaviors for every microvm command."
+description: "Comprehensive syntax, parameters, flags, and behaviors for every dynocap command."
 sidebar_position: 2
 ---
 
@@ -10,37 +10,37 @@ Every exposed command, its output, and whether it accepts `--json`.
 
 | Command                   | Group    | Stdout on success                          | `--json` | Contract                                         |
 | ------------------------- | -------- | ------------------------------------------ | -------- | ------------------------------------------------ |
-| `microvm runtime prepare` | primary  | Preparation result                         | yes      | [JSON Schemas](json-schemas.mdx)                 |
-| `microvm clone`           | primary  | Creation result                            | yes      | [JSON Schemas](json-schemas.mdx)                 |
-| `microvm ls`              | primary  | Sandbox and result listing                 | yes      | [JSON Schemas](json-schemas.mdx)                 |
-| `microvm doctor`          | primary  | Diagnostic report                          | yes      | [Troubleshoot](/how-to/troubleshoot-with-doctor) |
-| `microvm logs`            | primary  | Replayed streams, or `--list` discovery    | no       | Content stream                                   |
-| `microvm inspect`         | primary  | Inspection                                 | yes      | [JSON Schemas](json-schemas.mdx)                 |
-| `microvm exec`            | primary  | Guest stdout                               | no       | Content stream                                   |
-| `microvm shell`           | primary  | Guest terminal                             | no       | Interactive terminal                             |
-| `microvm diff`            | primary  | Patch bytes                                | no       | Content stream                                   |
-| `microvm finish`          | primary  | Finish result                              | yes      | [JSON Schemas](json-schemas.mdx)                 |
-| `microvm rm`              | primary  | Removal result                             | yes      | [JSON Schemas](json-schemas.mdx)                 |
-| `microvm run`             | advanced | Raw sandbox creation result                | yes      | [JSON Schemas](json-schemas.mdx)                 |
-| `microvm ps`              | advanced | `ls` listing limited to raw sandboxes      | yes      | [JSON Schemas](json-schemas.mdx)                 |
-| `microvm destroy`         | advanced | `rm` removal result                        | yes      | [JSON Schemas](json-schemas.mdx)                 |
-| `microvm daemon`          | advanced | None; runs in the foreground until stopped | no       | Foreground process                               |
-| `microvm task start`      | advanced | `clone` creation result                    | yes      | [JSON Schemas](json-schemas.mdx)                 |
-| `microvm task exec`       | advanced | Guest stdout, as `exec`                    | no       | Content stream                                   |
-| `microvm task finish`     | advanced | `finish` result                            | yes      | [JSON Schemas](json-schemas.mdx)                 |
-| `microvm version`         | advanced | Version and virtualization support         | yes      | CLI version string / JSON                        |
-| `microvm help`            | advanced | Help text                                  | no       | Text only                                        |
+| `dynocap runtime prepare` | primary  | Preparation result                         | yes      | [JSON Schemas](json-schemas.mdx)                 |
+| `dynocap clone`           | primary  | Creation result                            | yes      | [JSON Schemas](json-schemas.mdx)                 |
+| `dynocap ls`              | primary  | Sandbox and result listing                 | yes      | [JSON Schemas](json-schemas.mdx)                 |
+| `dynocap doctor`          | primary  | Diagnostic report                          | yes      | [Troubleshoot](/how-to/troubleshoot-with-doctor) |
+| `dynocap logs`            | primary  | Replayed streams, or `--list` discovery    | no       | Content stream                                   |
+| `dynocap inspect`         | primary  | Inspection                                 | yes      | [JSON Schemas](json-schemas.mdx)                 |
+| `dynocap exec`            | primary  | Guest stdout                               | no       | Content stream                                   |
+| `dynocap shell`           | primary  | Guest terminal                             | no       | Interactive terminal                             |
+| `dynocap diff`            | primary  | Patch bytes                                | no       | Content stream                                   |
+| `dynocap finish`          | primary  | Finish result                              | yes      | [JSON Schemas](json-schemas.mdx)                 |
+| `dynocap rm`              | primary  | Removal result                             | yes      | [JSON Schemas](json-schemas.mdx)                 |
+| `dynocap run`             | advanced | Raw sandbox creation result                | yes      | [JSON Schemas](json-schemas.mdx)                 |
+| `dynocap ps`              | advanced | `ls` listing limited to raw sandboxes      | yes      | [JSON Schemas](json-schemas.mdx)                 |
+| `dynocap destroy`         | advanced | `rm` removal result                        | yes      | [JSON Schemas](json-schemas.mdx)                 |
+| `dynocap daemon`          | advanced | None; runs in the foreground until stopped | no       | Foreground process                               |
+| `dynocap task start`      | advanced | `clone` creation result                    | yes      | [JSON Schemas](json-schemas.mdx)                 |
+| `dynocap task exec`       | advanced | Guest stdout, as `exec`                    | no       | Content stream                                   |
+| `dynocap task finish`     | advanced | `finish` result                            | yes      | [JSON Schemas](json-schemas.mdx)                 |
+| `dynocap version`         | advanced | Version and virtualization support         | yes      | CLI version string / JSON                        |
+| `dynocap help`            | advanced | Help text                                  | no       | Text only                                        |
 
 ---
 
 ## Primary Workflow Commands
 
-### `microvm clone`
+### `dynocap clone`
 
 Import a local project directory or Git URL into an isolated sandbox.
 
 ```sh
-microvm clone SOURCE NAME [options]
+dynocap clone SOURCE NAME [options]
 ```
 
 - **Arguments:**
@@ -57,12 +57,12 @@ microvm clone SOURCE NAME [options]
 
 ---
 
-### `microvm exec`
+### `dynocap exec`
 
 Execute a command inside a running sandbox.
 
 ```sh
-microvm exec NAME [options] -- COMMAND [args...]
+dynocap exec NAME [options] -- COMMAND [args...]
 ```
 
 - **Arguments:**
@@ -78,12 +78,12 @@ microvm exec NAME [options] -- COMMAND [args...]
 
 ---
 
-### `microvm shell`
+### `dynocap shell`
 
 Open an interactive `/bin/sh` shell in a running sandbox.
 
 ```sh
-microvm shell NAME
+dynocap shell NAME
 ```
 
 - **Behavior:**
@@ -94,12 +94,12 @@ microvm shell NAME
 
 ---
 
-### `microvm diff`
+### `dynocap diff`
 
 Output a unified Git diff of all changes made in `/workspace` since creation.
 
 ```sh
-microvm diff NAME
+dynocap diff NAME
 ```
 
 - **Output:** Streams clean, standard unified diff bytes (`diff --git ...`) directly to `stdout`.
@@ -107,12 +107,12 @@ microvm diff NAME
 
 ---
 
-### `microvm finish`
+### `dynocap finish`
 
 Export verified patch and command logs to the host, and destroy the guest microVM.
 
 ```sh
-microvm finish NAME [options]
+dynocap finish NAME [options]
 ```
 
 - **Options:**
@@ -126,12 +126,12 @@ microvm finish NAME [options]
 
 ---
 
-### `microvm logs`
+### `dynocap logs`
 
 Inspect or replay recorded execution output from project tasks.
 
 ```sh
-microvm logs NAME [options]
+dynocap logs NAME [options]
 ```
 
 - **Options:**
@@ -141,12 +141,12 @@ microvm logs NAME [options]
 
 ---
 
-### `microvm ls`
+### `dynocap ls`
 
 List active sandboxes and retained task results.
 
 ```sh
-microvm ls [options]
+dynocap ls [options]
 ```
 
 - **Options:**
@@ -162,12 +162,12 @@ microvm ls [options]
 
 ---
 
-### `microvm inspect`
+### `dynocap inspect`
 
 Display full metadata for an active or retained task.
 
 ```sh
-microvm inspect NAME_OR_ID [options]
+dynocap inspect NAME_OR_ID [options]
 ```
 
 - **Options:**
@@ -175,12 +175,12 @@ microvm inspect NAME_OR_ID [options]
 
 ---
 
-### `microvm rm`
+### `dynocap rm`
 
 Release a sandbox name or purge retained results.
 
 ```sh
-microvm rm NAME_OR_ID [options]
+dynocap rm NAME_OR_ID [options]
 ```
 
 - **Options:**
@@ -190,33 +190,33 @@ microvm rm NAME_OR_ID [options]
 
 ---
 
-### `microvm doctor`
+### `dynocap doctor`
 
 Check that this Mac can run sandboxes. Each failed check says what is wrong and what to run next. Without `--fix`, doctor changes nothing.
 
 ```sh
-microvm doctor [PROJECT] [options]
+dynocap doctor [PROJECT] [options]
 ```
 
 The runtime checked is the one `PROJECT` (default: the current directory) uses, judged by its files as `clone` does. With no project, no runtime is required.
 
 - **Options:**
-  - `--fix`: Repair failed checks, then check again. Restarts a daemon from an older build (never one with running sandboxes), builds the guest image, and prepares the runtime. Builds need the microvm checkout and Go.
+  - `--fix`: Repair failed checks, then check again. Restarts a daemon from an older build (never one with running sandboxes), builds the guest image, and prepares the runtime. Builds need the dynocap checkout and Go.
   - `--runtime <name:version>`: Check this runtime instead of the project's (`node:24`, `node:22`, `python:3.14`, `go:1.27`, `shell:1`).
   - `--json`: Output diagnostic report as JSON.
 
 ---
 
-### `microvm runtime prepare`
+### `dynocap runtime prepare`
 
 Download, build, and verify a runtime rootfs disk.
 
 ```sh
-microvm runtime prepare [REPO_PATH] [options]
+dynocap runtime prepare [REPO_PATH] [options]
 ```
 
 - **Arguments:**
-  - `REPO_PATH`: Path to the `microvm` source tree (defaults to `.`).
+  - `REPO_PATH`: Path to the `dynocap` source tree (defaults to `.`).
 - **Options:**
   - `--runtime <name:version>`: Runtime to prepare. Default `shell:1`. Supported: `node:24` and `node:22` (npm), `python:3.14` (uv), `go:1.27` (Go modules), and `shell:1` (bash, git and ssh; no language). An unsupported selection fails and lists the supported ones; no version is substituted.
   - `--json`: Output preparation result object as JSON.
@@ -225,12 +225,12 @@ microvm runtime prepare [REPO_PATH] [options]
 
 ## Advanced & Raw Sandbox Commands
 
-### `microvm run`
+### `dynocap run`
 
 Boot an ephemeral raw Linux microVM without a project workspace.
 
 ```sh
-microvm run [options]
+dynocap run [options]
 ```
 
 - **Options:**
@@ -243,32 +243,32 @@ microvm run [options]
 
 ---
 
-### `microvm ps`
+### `dynocap ps`
 
 List only raw sandboxes (`kind == sandbox`). Supports `--json`.
 
 ```sh
-microvm ps [options]
+dynocap ps [options]
 ```
 
 ---
 
-### `microvm destroy`
+### `dynocap destroy`
 
-Alias for `microvm rm` without `--purge`. Requires `--force` for running sandboxes.
+Alias for `dynocap rm` without `--purge`. Requires `--force` for running sandboxes.
 
 ```sh
-microvm destroy NAME_OR_ID [--force]
+dynocap destroy NAME_OR_ID [--force]
 ```
 
 ---
 
-### `microvm daemon`
+### `dynocap daemon`
 
-Run the MicroVM background daemon in the foreground.
+Run the DynoCap background daemon in the foreground.
 
 ```sh
-microvm daemon [options]
+dynocap daemon [options]
 ```
 
 - Emits daemon logs directly to stdout/stderr. Used primarily for debugging daemon lifecycle.

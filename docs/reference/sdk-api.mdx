@@ -1,12 +1,12 @@
 ---
 title: "TypeScript SDK API Reference"
-description: "Complete class, method, and type definitions for @microvm/sdk."
+description: "Complete class, method, and type definitions for @dynocap/sdk."
 sidebar_position: 5
 ---
 
 # TypeScript SDK API Reference
 
-The `@microvm/sdk` package provides native TypeScript bindings to the local MicroVM daemon over `~/.microvm/daemon.sock`.
+The `@dynocap/sdk` package provides native TypeScript bindings to the local DynoCap daemon over `~/.dynocap/daemon.sock`.
 
 ---
 
@@ -24,7 +24,7 @@ Clones a local directory or remote Git URL into an isolated sandbox and boots th
 const task = await Task.start({
   name: "worker-1",
   projectPath: "./my-app",
-  history: "head", // "branches" (default), "head", or "none"; see microvm clone --history
+  history: "head", // "branches" (default), "head", or "none"; see dynocap clone --history
   runtimes: [{ name: "node", version: "24" }],
   network: "none",
   ttlSeconds: 1800,

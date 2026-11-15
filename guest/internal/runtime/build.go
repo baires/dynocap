@@ -3,13 +3,13 @@ package runtime
 
 import (
 	"crypto/sha256"
+	"dynocap.dev/guest/internal/image"
 	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
-	"microvm.dev/guest/internal/image"
 	"net/http"
 	"os"
 	"os/exec"
@@ -121,7 +121,7 @@ func Mkfs(file, root string, size int64) error {
 	if e != nil {
 		return e
 	}
-	tool := os.Getenv("MICROVM_MKE2FS")
+	tool := os.Getenv("DYNOCAP_MKE2FS")
 	if tool == "" {
 		for _, p := range []string{"/opt/homebrew/opt/e2fsprogs/sbin/mke2fs", "/usr/local/opt/e2fsprogs/sbin/mke2fs", "/sbin/mke2fs"} {
 			if _, e := os.Stat(p); e == nil {
@@ -131,7 +131,7 @@ func Mkfs(file, root string, size int64) error {
 		}
 	}
 	if tool == "" {
-		return fmt.Errorf("mke2fs required: brew install e2fsprogs, or set MICROVM_MKE2FS")
+		return fmt.Errorf("mke2fs required: brew install e2fsprogs, or set DYNOCAP_MKE2FS")
 	}
 	args := []string{"-q", "-t", "ext4", "-F", "-E", "lazy_itable_init=0,lazy_journal_init=0,root_owner=0:0"}
 	if root != "" {
@@ -311,10 +311,10 @@ func Build(repo, home, arch string, requests []Request) (Manifest, error) {
 		return Manifest{}, e
 	}
 	envJSON, _ := json.Marshal(recipe.Environment)
-	if e = os.WriteFile(filepath.Join(root, "etc/microvm-environment.json"), envJSON, 0644); e != nil {
+	if e = os.WriteFile(filepath.Join(root, "etc/dynocap-environment.json"), envJSON, 0644); e != nil {
 		return Manifest{}, e
 	}
-	if e = os.WriteFile(filepath.Join(root, "sbin/microvm-task-init"), taskInit, 0755); e != nil {
+	if e = os.WriteFile(filepath.Join(root, "sbin/dynocap-task-init"), taskInit, 0755); e != nil {
 		return Manifest{}, e
 	}
 	size := recipe.DiskBytes

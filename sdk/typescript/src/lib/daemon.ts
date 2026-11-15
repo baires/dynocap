@@ -207,7 +207,7 @@ async function requirePolicy(home: string): Promise<void> {
   ) {
     throw new SandboxError(
       "daemon",
-      "daemon lacks isolation policy v1; rebuild microvm and manually restart the daemon before creating sandboxes"
+      "daemon lacks isolation policy v1; rebuild dynocap and manually restart the daemon before creating sandboxes"
     );
   }
 }

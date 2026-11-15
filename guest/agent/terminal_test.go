@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"microvm.dev/guest/internal/protocol"
+	"dynocap.dev/guest/internal/protocol"
 )
 
 type terminalRun struct {

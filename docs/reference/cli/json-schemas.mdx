@@ -1,6 +1,6 @@
 ---
 title: "CLI JSON Schemas"
-description: "Exact JSON schemas and field definitions for scripting and automated integration with the microvm CLI."
+description: "Exact JSON schemas and field definitions for scripting and automated integration with the dynocap CLI."
 sidebar_position: 3
 ---
 
@@ -10,7 +10,7 @@ When passed `--json`, management commands print a single line-delimited JSON pay
 
 ---
 
-## 1. Listing Schema (`microvm ls --json`)
+## 1. Listing Schema (`dynocap ls --json`)
 
 Returns an array of sandbox and task records:
 
@@ -46,9 +46,9 @@ Returns an array of sandbox and task records:
 
 ---
 
-## 2. Creation Schema (`microvm clone --json`)
+## 2. Creation Schema (`dynocap clone --json`)
 
-Returned by `microvm clone` and `microvm task start`:
+Returned by `dynocap clone` and `dynocap task start`:
 
 ```json
 {
@@ -65,21 +65,21 @@ Returned by `microvm clone` and `microvm task start`:
 
 ---
 
-## 3. Finish Schema (`microvm finish --json`)
+## 3. Finish Schema (`dynocap finish --json`)
 
 Returned when a task is finalized and exported:
 
 ```json
 {
-  "applyCommand": "git apply --check '/Users/user/.microvm/tasks/task-8f92b7c1/result/changes.patch' && git apply '/Users/user/.microvm/tasks/task-8f92b7c1/result/changes.patch'",
+  "applyCommand": "git apply --check '/Users/user/.dynocap/tasks/task-8f92b7c1/result/changes.patch' && git apply '/Users/user/.dynocap/tasks/task-8f92b7c1/result/changes.patch'",
   "baseline": "imported_checkout_including_uncommitted_changes",
   "hostCheckout": "unchanged",
   "id": "task-8f92b7c1",
   "name": "demo",
-  "patch": "/Users/user/.microvm/tasks/task-8f92b7c1/result/changes.patch",
+  "patch": "/Users/user/.dynocap/tasks/task-8f92b7c1/result/changes.patch",
   "phase": "completed",
   "priorCommandFailure": false,
-  "resultDirectory": "/Users/user/.microvm/tasks/task-8f92b7c1/result",
+  "resultDirectory": "/Users/user/.dynocap/tasks/task-8f92b7c1/result",
   "resultExpiresAtUnix": 1795563000,
   "sandbox": "stopped",
   "sensitivePaths": [
@@ -96,9 +96,9 @@ Returned when a task is finalized and exported:
 
 ---
 
-## 4. Inspection Schema (`microvm inspect --json`)
+## 4. Inspection Schema (`dynocap inspect --json`)
 
-Returned by `microvm inspect NAME`:
+Returned by `dynocap inspect NAME`:
 
 ```json
 {
@@ -112,8 +112,8 @@ Returned by `microvm inspect NAME`:
   "createdAtUnix": 1794956400,
   "sandboxExpiresAtUnix": 1794958200,
   "resultExpiresAtUnix": 1795563000,
-  "resultDirectory": "/Users/user/.microvm/tasks/task-8f92b7c1/result",
-  "patchPath": "/Users/user/.microvm/tasks/task-8f92b7c1/result/changes.patch",
+  "resultDirectory": "/Users/user/.dynocap/tasks/task-8f92b7c1/result",
+  "patchPath": "/Users/user/.dynocap/tasks/task-8f92b7c1/result/changes.patch",
   "sourcePath": "/tmp/demo-project",
   "sourceRevision": "4b92c41"
 }
@@ -121,9 +121,9 @@ Returned by `microvm inspect NAME`:
 
 ---
 
-## 5. Removal Schema (`microvm rm --json`)
+## 5. Removal Schema (`dynocap rm --json`)
 
-Returned by `microvm rm` and `microvm destroy`:
+Returned by `dynocap rm` and `dynocap destroy`:
 
 ```json
 {
@@ -135,14 +135,14 @@ Returned by `microvm rm` and `microvm destroy`:
 
 ---
 
-## 6. Doctor Schema (`microvm doctor --json`)
+## 6. Doctor Schema (`dynocap doctor --json`)
 
 Diagnostic report of host readiness. Findings go to stdout in both modes; the command exits 1 when a required check fails.
 
 ```json
 {
   "ok": false,
-  "home": "/Users/user/.microvm",
+  "home": "/Users/user/.dynocap",
   "arch": "aarch64",
   "runtimes": [{ "name": "node", "version": "24" }],
   "checks": [
@@ -157,7 +157,7 @@ Diagnostic report of host readiness. Findings go to stdout in both modes; the co
       "id": "runtime",
       "status": "error",
       "message": "Runtime node:24 is not prepared for aarch64 yet.",
-      "recovery": "Run microvm doctor --fix to prepare node:24 (downloads verified inputs; takes a few minutes).",
+      "recovery": "Run dynocap doctor --fix to prepare node:24 (downloads verified inputs; takes a few minutes).",
       "fix": "prepare-runtime"
     }
   ]
@@ -177,7 +177,7 @@ With `--fix`, the report describes the state after repairs and adds `repairs`, i
     "status": "fixed",
     "summary": "Building the guest image for aarch64",
     "recovery": null,
-    "logPath": "/Users/user/.microvm/image-build-....log",
+    "logPath": "/Users/user/.dynocap/image-build-....log",
     "note": null,
     "seconds": 20.4
   }

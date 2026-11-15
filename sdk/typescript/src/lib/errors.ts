@@ -24,7 +24,7 @@ export function classifyDaemonMessage(
   message: string,
   exec: boolean
 ): SandboxError {
-  const prefix = "microvm-error-v1:";
+  const prefix = "dynocap-error-v1:";
   if (message.startsWith(prefix)) {
     try {
       const failure: unknown = JSON.parse(message.slice(prefix.length));

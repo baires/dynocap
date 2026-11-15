@@ -1,9 +1,9 @@
 #!/bin/sh
 # Pack a darwin-arm64 prefix: signed binaries, the guest tree, Package.swift,
-# the virtualization entitlement, and images/aarch64. Walking up from bin/microvm
+# the virtualization entitlement, and images/aarch64. Walking up from bin/dynocap
 # finds guest/mkimage/main.go and Package.swift.
 #
-# Set MICROVM_RELEASE_IMAGE to a directory that already holds kernel, initrd,
+# Set DYNOCAP_RELEASE_IMAGE to a directory that already holds kernel, initrd,
 # and manifest.json to reuse a built image. Otherwise this runs mkimage, which
 # downloads pinned Alpine files.
 set -eu
@@ -15,8 +15,8 @@ if [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then
   exit 1
 fi
 
-version="${1:-${MICROVM_VERSION:-dev}}"
-name="microvm-${version}-darwin-arm64.tar.gz"
+version="${1:-${DYNOCAP_VERSION:-dev}}"
+name="dynocap-${version}-darwin-arm64.tar.gz"
 
 ./scripts/build-macos.sh
 
@@ -24,22 +24,22 @@ stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
 mkdir -p "$stage/bin" "$stage/images/aarch64" "$stage/entitlements" "$stage/guest"
 
-cp .build/release/microvm .build/release/microvm-workspace .build/release/microvm-mkruntime "$stage/bin/"
-chmod 755 "$stage/bin/microvm" "$stage/bin/microvm-workspace" "$stage/bin/microvm-mkruntime"
+cp .build/release/dynocap .build/release/dynocap-workspace .build/release/dynocap-mkruntime "$stage/bin/"
+chmod 755 "$stage/bin/dynocap" "$stage/bin/dynocap-workspace" "$stage/bin/dynocap-mkruntime"
 cp Package.swift "$stage/Package.swift"
-cp entitlements/microvm.entitlements "$stage/entitlements/microvm.entitlements"
-tar -C "$root/guest" -cf - --exclude agent/microvm-agent . | tar -C "$stage/guest" -xf -
+cp entitlements/dynocap.entitlements "$stage/entitlements/dynocap.entitlements"
+tar -C "$root/guest" -cf - --exclude agent/dynocap-agent . | tar -C "$stage/guest" -xf -
 
-if [ -n "${MICROVM_RELEASE_IMAGE:-}" ]; then
+if [ -n "${DYNOCAP_RELEASE_IMAGE:-}" ]; then
   for file in kernel initrd manifest.json; do
-    if [ ! -f "${MICROVM_RELEASE_IMAGE}/$file" ]; then
-      echo "MICROVM_RELEASE_IMAGE is missing $file: ${MICROVM_RELEASE_IMAGE}" >&2
+    if [ ! -f "${DYNOCAP_RELEASE_IMAGE}/$file" ]; then
+      echo "DYNOCAP_RELEASE_IMAGE is missing $file: ${DYNOCAP_RELEASE_IMAGE}" >&2
       exit 1
     fi
-    cp "${MICROVM_RELEASE_IMAGE}/$file" "$stage/images/aarch64/$file"
+    cp "${DYNOCAP_RELEASE_IMAGE}/$file" "$stage/images/aarch64/$file"
   done
 else
-  cache="${MICROVM_IMAGE_CACHE:-$stage/cache}"
+  cache="${DYNOCAP_IMAGE_CACHE:-$stage/cache}"
   mkdir -p "$cache"
   (cd "$root/guest" && go run ./mkimage --arch aarch64 --out "$stage/images/aarch64" --cache "$cache" --repo "$root")
 fi

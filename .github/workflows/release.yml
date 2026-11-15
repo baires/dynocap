@@ -25,13 +25,13 @@ jobs:
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v2
         with:
-          subject-path: dist/microvm-${{ github.ref_name }}-darwin-arm64.tar.gz
+          subject-path: dist/dynocap-${{ github.ref_name }}-darwin-arm64.tar.gz
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${GITHUB_REF_NAME}" \
-            "dist/microvm-${GITHUB_REF_NAME}-darwin-arm64.tar.gz" \
-            "dist/microvm-${GITHUB_REF_NAME}-darwin-arm64.tar.gz.sha256" \
+            "dist/dynocap-${GITHUB_REF_NAME}-darwin-arm64.tar.gz" \
+            "dist/dynocap-${GITHUB_REF_NAME}-darwin-arm64.tar.gz.sha256" \
             --title "${GITHUB_REF_NAME}" \
             --notes "Apple Silicon (darwin-arm64) CLI, guest tree, and guest image. Installers re-sign the CLI on the Mac that boots VMs. This workflow does not boot a VM."

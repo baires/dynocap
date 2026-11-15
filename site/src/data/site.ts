@@ -1,16 +1,16 @@
 // Assumptions:
-// - Production URL is a stand-in (https://microvm.dev) until a host is chosen. placeholder: true.
+// - Production URL is a stand-in (https://dynocap.dev) until a host is chosen. placeholder: true.
 // - Release-facing install paths are intentional placeholders until launch: Homebrew tap and curl installer.
 // - The curl URL assumes the production domain will serve /install.sh. placeholder: true.
 // - Source build remains the path that works today: ./scripts/build-macos.sh.
-// - @microvm/sdk and @microvm/mcp ship in this repository. They are not on the public npm registry.
+// - @dynocap/sdk and @dynocap/mcp ship in this repository. They are not on the public npm registry.
 // - Timings are medians from docs/research/boot-time.md, one Apple Silicon Mac, 13 Nov 2026.
 //   They apply after the daemon is up and the guest image or runtime is already prepared.
 
 export const site = {
-  name: "MicroVM",
+  name: "DynoCap",
   role: "Local Linux VMs",
-  url: "https://microvm.dev",
+  url: "https://dynocap.dev",
   placeholder: true,
   description:
     "Local Linux sandboxes for coding agents and developers on macOS. Copy a project, run code, review the diff, and export a patch with the CLI, SDK, or MCP.",
@@ -26,44 +26,44 @@ export const hero = {
 export const workflow = [
   {
     title: "Copy your project",
-    command: "microvm clone . demo",
+    command: "dynocap clone . demo",
     text: "Imports the current directory into a disposable workspace.",
   },
   {
     title: "Run code inside",
-    command: "microvm exec demo -- uname -a",
+    command: "dynocap exec demo -- uname -a",
     text: "Runs in the Linux guest. Output returns to your terminal.",
   },
   {
     title: "Review the changes",
-    command: "microvm diff demo",
+    command: "dynocap diff demo",
     text: "Shows the patch for anything you or your agent changed.",
   },
   {
     title: "Export and clean up",
-    command: "microvm finish demo",
+    command: "dynocap finish demo",
     text: "Saves the patch and logs, then destroys the sandbox.",
   },
 ];
 
 // The commands in site/demo/workflow.tape, in order. Keep the two in sync.
 export const demo = {
-  video: "/demo/microvm-workflow",
+  video: "/demo/dynocap-workflow",
   duration: "20-second",
   commands: [
     "cat README.md",
-    "microvm clone . demo",
-    "microvm exec demo -- uname -sr",
-    "microvm exec demo -- sed -i 's/from the host/from a microVM/' README.md",
-    "microvm diff demo",
-    "microvm finish demo",
+    "dynocap clone . demo",
+    "dynocap exec demo -- uname -sr",
+    "dynocap exec demo -- sed -i 's/from the host/from a microVM/' README.md",
+    "dynocap diff demo",
+    "dynocap finish demo",
     "cat README.md",
   ],
 };
 
 export const installation = {
-  brew: "brew install microvm/tap/microvm",
-  curl: "curl -fsSL https://microvm.dev/install.sh | sh",
+  brew: "brew install dynocap/tap/dynocap",
+  curl: "curl -fsSL https://dynocap.dev/install.sh | sh",
   source:
     'npm ci\n./scripts/build-macos.sh\nexport PATH="$PWD/.build/release:$PATH"',
   placeholder: true,
@@ -71,14 +71,14 @@ export const installation = {
 
 export const setup = [
   {
-    title: "Install MicroVM",
+    title: "Install DynoCap",
     text: "Homebrew installs the CLI and its companions. Prefer another route? Use curl or build from source.",
     command: installation.brew,
   },
   {
     title: "Prepare your project",
     text: "Replace the path with your project. Doctor builds the guest image, prepares the detected runtime, and checks the daemon.",
-    command: "cd ~/code/my-app\nmicrovm doctor --fix",
+    command: "cd ~/code/my-app\ndynocap doctor --fix",
   },
 ];
 
@@ -89,7 +89,7 @@ export const measurements = [
     unit: "ms",
     at: 1.1,
     label: "Next command in a running microVM",
-    command: "microvm exec",
+    command: "dynocap exec",
     sample: "Median, after run returned",
   },
   {
@@ -97,7 +97,7 @@ export const measurements = [
     unit: "ms",
     at: 29.9,
     label: "Fresh microVM, ready for commands",
-    command: "microvm run",
+    command: "dynocap run",
     sample: "Median of 6 runs",
   },
   {
@@ -105,7 +105,7 @@ export const measurements = [
     unit: "ms",
     at: 49.1,
     label: "Small project copied in and ready",
-    command: "microvm clone",
+    command: "dynocap clone",
     sample: "One-file directory, shell:1, 3 runs",
   },
   {
@@ -113,7 +113,7 @@ export const measurements = [
     unit: "ms",
     at: 98.9,
     label: "This repository copied in and ready",
-    command: "microvm clone",
+    command: "dynocap clone",
     sample: "387 files, shell:1, 2 runs",
   },
 ];
@@ -208,7 +208,7 @@ export const guides = [
   },
   {
     title: "Call it from TypeScript",
-    text: "Start a task from @microvm/sdk, exec in the workspace, and collect the result.",
+    text: "Start a task from @dynocap/sdk, exec in the workspace, and collect the result.",
     href: "/docs/how-to/integrate-typescript-sdk",
   },
   {

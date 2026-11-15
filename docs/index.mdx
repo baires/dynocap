@@ -1,26 +1,26 @@
 ---
-title: "MicroVM Documentation"
+title: "DynoCap Documentation"
 description: "A fast, local Linux microVM runtime for AI agents and developers on macOS."
 sidebar_position: 1
 ---
 
-# MicroVM Documentation
+# DynoCap Documentation
 
-**MicroVM** provides fast, local Linux sandboxes for AI coding agents and developers on macOS. Powered by Apple's `Virtualization.framework`, it boots an isolated Linux guest with no host directory share and an offline-by-default network.
+**DynoCap** provides fast, local Linux sandboxes for AI coding agents and developers on macOS. Powered by Apple's `Virtualization.framework`, it boots an isolated Linux guest with no host directory share and an offline-by-default network.
 
 On one Apple Silicon Mac, 13 November 2026, with the daemon already running and artifacts already prepared:
 
 | What returned                                       |          Median |
 | --------------------------------------------------- | --------------: |
-| `microvm run`, guest agent ready                    | 299 ms (6 runs) |
-| `microvm clone` of a one-file directory (`shell:1`) | 491 ms (3 runs) |
-| `microvm clone` of this repository, 387 files       | 989 ms (2 runs) |
-| `microvm diff` of that repository                   |          882 ms |
-| the next `microvm exec -- true`                     |           12 ms |
+| `dynocap run`, guest agent ready                    | 299 ms (6 runs) |
+| `dynocap clone` of a one-file directory (`shell:1`) | 491 ms (3 runs) |
+| `dynocap clone` of this repository, 387 files       | 989 ms (2 runs) |
+| `dynocap diff` of that repository                   |          882 ms |
+| the next `dynocap exec -- true`                     |           12 ms |
 
 The runtime disk is hashed again only when its size, inode, or mtime changes. First installation, runtime preparation, and dependency installs are not in these numbers. Method and the before/after table: [Boot time](research/boot-time.md).
 
-Whether you run agents through the command-line interface, embed sandboxes in TypeScript applications, or connect coding agents via the Model Context Protocol (MCP), MicroVM ensures untrusted code runs safely, deterministically, and with verified diff extraction.
+Whether you run agents through the command-line interface, embed sandboxes in TypeScript applications, or connect coding agents via the Model Context Protocol (MCP), DynoCap ensures untrusted code runs safely, deterministically, and with verified diff extraction.
 
 ---
 
@@ -33,7 +33,7 @@ Tutorials teach a workflow. How-to guides solve one problem. Reference is the co
 <div className="p-4 rounded-lg border border-neutral-200 dark:border-neutral-800">
   ### 🚀 [Tutorials](/tutorials/getting-started) **Learning-oriented lessons**
   that guide you step-by-step through core workflows. - [Getting Started with
-  MicroVM](/tutorials/getting-started): Install requirements, build the signed
+  DynoCap](/tutorials/getting-started): Install requirements, build the signed
   CLI, and boot your first microVM. - [End-to-End Agent Task
   Workflow](/tutorials/agent-task-workflow): Clone a Node 22 project, run
   commands, verify diffs, and extract host patches.
@@ -50,7 +50,7 @@ Tutorials teach a workflow. How-to guides solve one problem. Reference is the co
   TTY sessions, forward signals, and debug live sandboxes. - [Integrate the
   TypeScript SDK](/how-to/integrate-typescript-sdk): Programmatically spawn and
   manage tasks from your agent applications. - [Configure the MCP
-  Server](/how-to/configure-mcp-server): Connect MicroVM tools to Claude
+  Server](/how-to/configure-mcp-server): Connect DynoCap tools to Claude
   Desktop, Cursor, and Cline. - [Troubleshoot with
   Doctor](/how-to/troubleshoot-with-doctor): Validate entitlements, companions,
   socket paths, and system health.
@@ -65,9 +65,9 @@ Tutorials teach a workflow. How-to guides solve one problem. Reference is the co
   JSON Schemas](/reference/cli/json-schemas): Exact JSON contracts for scripting
   and automated parsing. - [CLI Error Contracts](/reference/cli/errors):
   Structured stderr error reporting and recovery codes. - [TypeScript SDK
-  API](/reference/sdk-api): Types, classes, and methods for `@microvm/sdk`. -
+  API](/reference/sdk-api): Types, classes, and methods for `@dynocap/sdk`. -
   [MCP Tools Reference](/reference/mcp-tools): Tool declarations, parameter
-  schemas, and security flags for `@microvm/mcp`. - [Guest Wire
+  schemas, and security flags for `@dynocap/mcp`. - [Guest Wire
   Protocol](/reference/guest-wire-protocol): Vsock big-endian packet framing,
   message codes, and stream multiplexing.
 </div>

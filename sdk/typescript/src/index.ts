@@ -28,7 +28,7 @@ export const SANDBOX_PHASES = [
 export type KnownPhase = (typeof SANDBOX_PHASES)[number];
 
 export type ClientOptions = {
-  /** Daemon home. Defaults to `MICROVM_HOME`, then `~/.microvm`. */
+  /** Daemon home. Defaults to `DYNOCAP_HOME`, then `~/.dynocap`. */
   home?: string;
 };
 

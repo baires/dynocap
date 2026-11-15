@@ -1,4 +1,4 @@
-module microvm.dev/guest
+module dynocap.dev/guest
 
 go 1.22
 

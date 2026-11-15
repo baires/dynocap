@@ -6,7 +6,7 @@ import { fakeDaemon } from "./daemon.ts";
 
 function typedError(code: string, message: string, exitCode = 1): string {
   return (
-    "microvm-error-v1:" +
+    "dynocap-error-v1:" +
     JSON.stringify({ code, message, exitCode, recovery: "Retry." })
   );
 }
@@ -35,13 +35,13 @@ async function expectError(
 test("typed daemon errors keep the recovery command", async () => {
   const { classifyDaemonMessage } = await import("../src/lib/errors.ts");
   const error = classifyDaemonMessage(
-    "microvm-error-v1:" +
+    "dynocap-error-v1:" +
       JSON.stringify({
         code: "operation_failed",
         message: "runtime node:22 is not prepared yet",
         exitCode: 1,
         recovery:
-          "Run microvm doctor --fix --runtime node:22 with the same --home, then retry.",
+          "Run dynocap doctor --fix --runtime node:22 with the same --home, then retry.",
       }),
     false
   );
@@ -71,7 +71,7 @@ test("typed daemon errors classify independently of message wording", async () =
 });
 
 test("invalid typed errors cannot claim a timeout status", async () => {
-  for (const text of ["microvm-error-v1:{}", "microvm-error-v1:not JSON"]) {
+  for (const text of ["dynocap-error-v1:{}", "dynocap-error-v1:not JSON"]) {
     await expectError(text, "daemon", 1);
   }
 });

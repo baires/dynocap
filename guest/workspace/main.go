@@ -2,10 +2,10 @@
 package main
 
 import (
+	"dynocap.dev/guest/internal/workspace"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"microvm.dev/guest/internal/workspace"
 	"os"
 )
 
@@ -38,7 +38,7 @@ func main() {
 			err = fmt.Errorf("fetch DEST URL REF")
 		} else {
 			var revision string
-			revision, err = workspace.Fetch(os.Args[2], os.Args[3], os.Args[4], os.Getenv("MICROVM_GIT_TOKEN"), os.Getenv("MICROVM_SSH_KEY"))
+			revision, err = workspace.Fetch(os.Args[2], os.Args[3], os.Args[4], os.Getenv("DYNOCAP_GIT_TOKEN"), os.Getenv("DYNOCAP_SSH_KEY"))
 			if err == nil {
 				fmt.Fprint(os.Stdout, revision)
 			}

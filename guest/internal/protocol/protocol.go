@@ -67,7 +67,7 @@ const (
 	// AgentHello is the guest greeting. signal=1 means the agent can deliver a
 	// signal to the selected process group; tty=1 means it accepts EXEC_TTY and
 	// RESIZE. The protocol version stays 1 so older hosts still accept the hello.
-	AgentHello        = "microvm-agent signal=1 tty=1"
+	AgentHello        = "dynocap-agent signal=1 tty=1"
 	TypeStarted uint8 = 0x10
 	TypeStdout  uint8 = 0x11
 	TypeStderr  uint8 = 0x12

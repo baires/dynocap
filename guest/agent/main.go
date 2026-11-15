@@ -1,22 +1,22 @@
 package main
 
 import (
+	"dynocap.dev/guest/internal/workspace"
 	"fmt"
 	"io"
 	"log"
-	"microvm.dev/guest/internal/workspace"
 	"net"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
 
-	"microvm.dev/guest/internal/protocol"
+	"dynocap.dev/guest/internal/protocol"
 )
 
 func main() {
 	if len(os.Args) == 5 && os.Args[1] == "fetch" {
-		revision, err := workspace.Fetch(os.Args[2], os.Args[3], os.Args[4], os.Getenv("MICROVM_GIT_TOKEN"), os.Getenv("MICROVM_SSH_KEY"))
+		revision, err := workspace.Fetch(os.Args[2], os.Args[3], os.Args[4], os.Getenv("DYNOCAP_GIT_TOKEN"), os.Getenv("DYNOCAP_SSH_KEY"))
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)

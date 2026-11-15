@@ -71,8 +71,8 @@ func pruneRoot(root string) error {
 func keepGuestFile(root, rel string, d fs.DirEntry) bool {
 	switch rel {
 	case "init", "bin/busybox", "etc/passwd", "etc/group",
-		"etc/microvm-vsock-modules", "etc/microvm-storage-modules", "etc/microvm-net-modules",
-		"usr/local/bin/microvm-agent", "usr/share/udhcpc/default.script":
+		"etc/dynocap-vsock-modules", "etc/dynocap-storage-modules", "etc/dynocap-net-modules",
+		"usr/local/bin/dynocap-agent", "usr/share/udhcpc/default.script":
 		return true
 	}
 	if strings.HasPrefix(rel, "lib/modules/") || strings.HasPrefix(rel, "lib/ld-musl-") {

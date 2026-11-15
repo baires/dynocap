@@ -19,13 +19,13 @@ const checkout = path.resolve(
   ".."
 );
 const [reportArgument] = process.argv.slice(2);
-if (!reportArgument || !process.env.MICROVM_HOME) {
+if (!reportArgument || !process.env.DYNOCAP_HOME) {
   throw new Error(
-    "MICROVM_HOME=PRIVATE_HOME node scripts/validate-public-node-task.mjs REPORT.json\nREPORT.json and MICROVM_HOME must be outside this checkout or under validation/"
+    "DYNOCAP_HOME=PRIVATE_HOME node scripts/validate-public-node-task.mjs REPORT.json\nREPORT.json and DYNOCAP_HOME must be outside this checkout or under validation/"
   );
 }
 const reportPath = path.resolve(reportArgument);
-const homePath = path.resolve(process.env.MICROVM_HOME);
+const homePath = path.resolve(process.env.DYNOCAP_HOME);
 for (const target of [reportPath, homePath]) {
   if (!allowedSidePath(target)) {
     throw new Error(

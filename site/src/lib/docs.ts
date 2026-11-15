@@ -16,7 +16,7 @@ export function docTitle(entry: DocEntry) {
 }
 
 export function docDescription(entry: DocEntry) {
-  return entry.data.description ?? `${docTitle(entry)} in the MicroVM docs.`;
+  return entry.data.description ?? `${docTitle(entry)} in the DynoCap docs.`;
 }
 
 function byPosition(a: DocEntry, b: DocEntry) {

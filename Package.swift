@@ -2,29 +2,29 @@
 import PackageDescription
 
 let package = Package(
-    name: "microvm",
+    name: "dynocap",
     platforms: [
         .macOS(.v13),
     ],
     products: [
-        .executable(name: "microvm", targets: ["microvm"]),
+        .executable(name: "dynocap", targets: ["dynocap"]),
     ],
     targets: [
-        .target(name: "MicroVMCore", path: "Sources/MicroVMCore"),
+        .target(name: "DynoCapCore", path: "Sources/DynoCapCore"),
         .target(
-            name: "MicroVMVZ",
-            dependencies: ["MicroVMCore"],
-            path: "Sources/MicroVMVZ"
+            name: "DynoCapVZ",
+            dependencies: ["DynoCapCore"],
+            path: "Sources/DynoCapVZ"
         ),
         .executableTarget(
-            name: "microvm",
-            dependencies: ["MicroVMCore", "MicroVMVZ"],
-            path: "Sources/microvm"
+            name: "dynocap",
+            dependencies: ["DynoCapCore", "DynoCapVZ"],
+            path: "Sources/dynocap"
         ),
         .testTarget(
-            name: "MicroVMCoreTests",
-            dependencies: ["MicroVMCore", "MicroVMVZ", "microvm"],
-            path: "Tests/MicroVMCoreTests"
+            name: "DynoCapCoreTests",
+            dependencies: ["DynoCapCore", "DynoCapVZ", "dynocap"],
+            path: "Tests/DynoCapCoreTests"
         ),
     ]
 )

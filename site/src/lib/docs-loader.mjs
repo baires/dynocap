@@ -86,7 +86,7 @@ async function loadFile(file, context) {
 
 export function docsLoader() {
   return {
-    name: "microvm-docs",
+    name: "dynocap-docs",
     async load(context) {
       const current = new Set();
       for (const file of files()) {

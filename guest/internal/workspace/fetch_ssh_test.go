@@ -35,7 +35,7 @@ func TestPrivateSSHFetchAuthenticatesAndCleansCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	block, err := ssh.MarshalPrivateKey(private, "microvm-fixture")
+	block, err := ssh.MarshalPrivateKey(private, "dynocap-fixture")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestPrivateSSHFetchAuthenticatesAndCleansCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bytes.Contains(configBytes, []byte("MICROVM_SSH_KEY")) || bytes.Contains(configBytes, material) {
+	if bytes.Contains(configBytes, []byte("DYNOCAP_SSH_KEY")) || bytes.Contains(configBytes, material) {
 		t.Fatal("identity persisted in Git configuration")
 	}
 	if got, err := os.ReadFile(filepath.Join(dest, "README")); err != nil || string(got) != "hello\n" {

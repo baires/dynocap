@@ -12,9 +12,9 @@ const revision = "d6de9f4b36f175b11586f89339689c1fe3c88805";
 const lockfileHash =
   "de16b9dbcde39f75b41e7f5acc9a3a44af7a62ebc0ad077ecc51c5936843c129";
 const [projectArgument, reportArgument] = process.argv.slice(2);
-if (!projectArgument || !reportArgument || !process.env.MICROVM_HOME) {
+if (!projectArgument || !reportArgument || !process.env.DYNOCAP_HOME) {
   throw new Error(
-    "MICROVM_HOME=PRIVATE_HOME node scripts/validate-node-task.mjs CHECKOUT REPORT.json"
+    "DYNOCAP_HOME=PRIVATE_HOME node scripts/validate-node-task.mjs CHECKOUT REPORT.json"
   );
 }
 const projectPath = path.resolve(projectArgument);

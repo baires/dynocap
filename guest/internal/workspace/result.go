@@ -253,7 +253,7 @@ type ignoreSession struct {
 }
 
 func openIgnoreSession(root string) (*ignoreSession, error) {
-	scratch, err := os.MkdirTemp("", "microvm-ignore-")
+	scratch, err := os.MkdirTemp("", "dynocap-ignore-")
 	if err != nil {
 		return nil, err
 	}
@@ -516,11 +516,11 @@ func gitEnv(home string) []string {
 		"GIT_CONFIG_NOSYSTEM=1",
 		"GIT_CONFIG_GLOBAL=/dev/null",
 		"GIT_TERMINAL_PROMPT=0",
-		"GIT_AUTHOR_NAME=MicroVM",
-		"GIT_AUTHOR_EMAIL=microvm@localhost",
+		"GIT_AUTHOR_NAME=DynoCap",
+		"GIT_AUTHOR_EMAIL=dynocap@localhost",
 		"GIT_AUTHOR_DATE=1970-01-01T00:00:00Z",
-		"GIT_COMMITTER_NAME=MicroVM",
-		"GIT_COMMITTER_EMAIL=microvm@localhost",
+		"GIT_COMMITTER_NAME=DynoCap",
+		"GIT_COMMITTER_EMAIL=dynocap@localhost",
 		"GIT_COMMITTER_DATE=1970-01-01T00:00:00Z",
 	}
 }
@@ -552,7 +552,7 @@ func reviewPatch(before, after string, ignored map[string]bool) ([]byte, map[str
 	if err != nil {
 		return nil, nil, err
 	}
-	root, err := os.MkdirTemp("", "microvm-review-")
+	root, err := os.MkdirTemp("", "dynocap-review-")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -790,7 +790,7 @@ func hashGitBlobs(bin, repo string, env []string, blobs []string) ([]string, err
 	if len(blobs) == 0 {
 		return nil, nil
 	}
-	dir, err := os.MkdirTemp("", "microvm-review-blobs-")
+	dir, err := os.MkdirTemp("", "dynocap-review-blobs-")
 	if err != nil {
 		return nil, err
 	}

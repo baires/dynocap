@@ -12,7 +12,7 @@ import (
 // exposeSSHKey keeps key bytes in a memfd. The returned path names the owning process, so OpenSSH can close inherited fds.
 // The key is not written to a named filesystem path.
 func exposeSSHKey(material string) (string, func(), error) {
-	fd, err := unix.MemfdCreate("microvm-ssh", unix.MFD_CLOEXEC)
+	fd, err := unix.MemfdCreate("dynocap-ssh", unix.MFD_CLOEXEC)
 	if err != nil {
 		return "", nil, fmt.Errorf("ssh key could not be held")
 	}

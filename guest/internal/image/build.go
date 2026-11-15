@@ -96,7 +96,7 @@ func Build(opts Options) (Manifest, error) {
 		return Manifest{}, err
 	}
 
-	work, err := os.MkdirTemp("", "microvm-rootfs-")
+	work, err := os.MkdirTemp("", "dynocap-rootfs-")
 	if err != nil {
 		return Manifest{}, err
 	}
@@ -277,13 +277,13 @@ func installGuest(root string, agent []byte, plan modulePlan, release string) er
 	if vsock == nil && net == nil {
 		vsock = plan.Paths
 	}
-	if err := writeList("microvm-vsock-modules", vsock); err != nil {
+	if err := writeList("dynocap-vsock-modules", vsock); err != nil {
 		return err
 	}
-	if err := writeList("microvm-storage-modules", plan.Storage); err != nil {
+	if err := writeList("dynocap-storage-modules", plan.Storage); err != nil {
 		return err
 	}
-	if err := writeList("microvm-net-modules", net); err != nil {
+	if err := writeList("dynocap-net-modules", net); err != nil {
 		return err
 	}
 	if err := os.WriteFile(filepath.Join(root, "init"), initScript, 0o755); err != nil {
@@ -293,7 +293,7 @@ func installGuest(root string, agent []byte, plan modulePlan, release string) er
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(binDir, "microvm-agent"), agent, 0o755)
+	return os.WriteFile(filepath.Join(binDir, "dynocap-agent"), agent, 0o755)
 }
 
 func extractTarFile(tarPath, dest string) error {
@@ -409,12 +409,12 @@ func writeInitrd(root, dest string) error {
 }
 
 func buildAgent(repo, goarch string, log io.Writer) ([]byte, error) {
-	dir, err := os.MkdirTemp("", "microvm-agent-")
+	dir, err := os.MkdirTemp("", "dynocap-agent-")
 	if err != nil {
 		return nil, err
 	}
 	defer os.RemoveAll(dir)
-	out := filepath.Join(dir, "microvm-agent")
+	out := filepath.Join(dir, "dynocap-agent")
 	cmd := exec.Command("go", "build", "-trimpath", "-ldflags=-s -w", "-o", out, "./agent")
 	cmd.Dir = filepath.Join(repo, "guest")
 	cmd.Env = append(os.Environ(),

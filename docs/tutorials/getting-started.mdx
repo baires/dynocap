@@ -1,10 +1,10 @@
 ---
-title: "Getting Started with MicroVM"
-description: "Step-by-step tutorial to build MicroVM on macOS, verify prerequisites, and execute commands in an isolated Linux microVM."
+title: "Getting Started with DynoCap"
+description: "Step-by-step tutorial to build DynoCap on macOS, verify prerequisites, and execute commands in an isolated Linux microVM."
 sidebar_position: 1
 ---
 
-# Getting Started with MicroVM
+# Getting Started with DynoCap
 
 Build the signed CLI on an Apple Silicon Mac, boot one sealed Linux guest, and run a command inside it.
 
@@ -12,7 +12,7 @@ You will:
 
 1. Verify system prerequisites on Apple Silicon.
 2. Build the signed CLI binary.
-3. Check and repair your setup with `microvm doctor --fix`.
+3. Check and repair your setup with `dynocap doctor --fix`.
 4. Launch a raw sandbox and execute commands over vsock.
 5. Safely destroy the sandbox.
 
@@ -20,7 +20,7 @@ You will:
 
 ## Prerequisites
 
-MicroVM requires:
+DynoCap requires:
 
 - **Hardware:** Apple Silicon Mac (M1/M2/M3/M4).
 - **Operating System:** macOS 13 (Ventura) or newer.
@@ -43,9 +43,9 @@ mke2fs -V
 
 ## Step 1: Install Dependencies and Build the Release CLI
 
-MicroVM uses Apple's `Virtualization.framework`, which requires the `com.apple.security.virtualization` entitlement. The build script compiles the Swift CLI in release mode, compiles the companion Go binaries, and applies the code signature.
+DynoCap uses Apple's `Virtualization.framework`, which requires the `com.apple.security.virtualization` entitlement. The build script compiles the Swift CLI in release mode, compiles the companion Go binaries, and applies the code signature.
 
-From the root of your `microvm` repository:
+From the root of your `dynocap` repository:
 
 ```sh
 # Install repository development tooling
@@ -59,20 +59,20 @@ Add the built binary to your `PATH` for the current terminal session:
 
 ```sh
 export PATH="$PWD/.build/release:$PATH"
-which microvm
+which dynocap
 ```
 
-> **Note:** If you rebuild `microvm` at any point, re-run `./scripts/build-macos.sh` to ensure the binary is properly code-signed.
+> **Note:** If you rebuild `dynocap` at any point, re-run `./scripts/build-macos.sh` to ensure the binary is properly code-signed.
 
 ---
 
 ## Step 2: Check Your Setup
 
-Go to your project and run `microvm doctor`. It checks the platform, code signing, companion binaries, guest image, runtime, and daemon, and changes nothing:
+Go to your project and run `dynocap doctor`. It checks the platform, code signing, companion binaries, guest image, runtime, and daemon, and changes nothing:
 
 ```sh
 cd ~/code/my-app
-microvm doctor
+dynocap doctor
 ```
 
 Doctor reads your project's files to pick its runtime, the same way `clone` does:
@@ -87,28 +87,28 @@ On a fresh install, the guest image and runtime are not built yet. Each failure 
 
 ```text
 ERROR   images             The guest image for aarch64 has not been built yet.
-                           Next: Run microvm doctor --fix to build the guest image (downloads pinned Alpine files; needs Go).
+                           Next: Run dynocap doctor --fix to build the guest image (downloads pinned Alpine files; needs Go).
 ERROR   runtime            Runtime python:3.14 is not prepared for aarch64 yet. This project's pyproject.toml needs it.
-                           Next: Run microvm doctor --fix to prepare python:3.14 (downloads verified inputs; takes a few minutes).
+                           Next: Run dynocap doctor --fix to prepare python:3.14 (downloads verified inputs; takes a few minutes).
 
-2 required checks failed. Run microvm doctor --fix to repair them.
+2 required checks failed. Run dynocap doctor --fix to repair them.
 ```
 
-To prepare a different runtime, pass `--runtime`, for example `microvm doctor --fix --runtime node:22`. Run outside a project, doctor requires no runtime. It lists the prepared ones instead, because raw sandboxes need none.
+To prepare a different runtime, pass `--runtime`, for example `dynocap doctor --fix --runtime node:22`. Run outside a project, doctor requires no runtime. It lists the prepared ones instead, because raw sandboxes need none.
 
 ---
 
 ## Step 3: Repair It with `doctor --fix`
 
 ```sh
-microvm doctor --fix
+dynocap doctor --fix
 ```
 
 `--fix` builds the guest image, prepares your project's runtime, and restarts a daemon left over from an older build. Every download is pinned and verified. It then runs the checks again and ends with `Required checks passed.`
 
-Doctor finds the microvm checkout from the `microvm` binary, so you can run it in any directory. You can also name the project instead of changing directory: `microvm doctor --fix ~/code/my-app`.
+Doctor finds the dynocap checkout from the `dynocap` binary, so you can run it in any directory. You can also name the project instead of changing directory: `dynocap doctor --fix ~/code/my-app`.
 
-> **Tip:** After you rebuild `microvm`, run `microvm doctor --fix` again. It restarts the daemon so it runs the new build.
+> **Tip:** After you rebuild `dynocap`, run `dynocap doctor --fix` again. It restarts the daemon so it runs the new build.
 
 ---
 
@@ -119,7 +119,7 @@ A raw sandbox boots the minimal Alpine Linux image without importing a project w
 Start a sandbox named `my-first-box`:
 
 ```sh
-microvm run --name my-first-box
+dynocap run --name my-first-box
 ```
 
 Output:
@@ -130,15 +130,15 @@ running my-first-box
 
 Behind the scenes:
 
-1. The `microvm` CLI launched the per-user background daemon (`~/.microvm/daemon.sock`).
+1. The `dynocap` CLI launched the per-user background daemon (`~/.dynocap/daemon.sock`).
 2. The daemon booted a Linux virtual machine with 1 vCPU and 1024 MB RAM via Virtualization.framework.
-3. The guest booted its initramfs in under 200ms and launched the internal Go `microvm-agent`.
+3. The guest booted its initramfs in under 200ms and launched the internal Go `dynocap-agent`.
 4. The agent connected back over `virtio-vsock` (guest port 5252).
 
 Verify the sandbox status:
 
 ```sh
-microvm ps
+dynocap ps
 ```
 
 You will see:
@@ -154,32 +154,32 @@ Notice that `NETWORK` is `none`. The sandbox is completely offline. No network i
 
 ## Step 5: Execute Commands Inside the Sandbox
 
-Run commands inside your guest with `microvm exec`:
+Run commands inside your guest with `dynocap exec`:
 
 ```sh
-microvm exec my-first-box -- uname -a
+dynocap exec my-first-box -- uname -a
 ```
 
 Output:
 
 ```text
-Linux microvm 6.18.62-0-virt #1-Alpine SMP PREEMPT_DYNAMIC aarch64 Linux
+Linux dynocap 6.18.62-0-virt #1-Alpine SMP PREEMPT_DYNAMIC aarch64 Linux
 ```
 
 Test running an isolated shell command:
 
 ```sh
-microvm exec my-first-box -- sh -c "echo 'Hello from MicroVM' && id"
+dynocap exec my-first-box -- sh -c "echo 'Hello from DynoCap' && id"
 ```
 
 Output:
 
 ```text
-Hello from MicroVM
+Hello from DynoCap
 uid=0(root) gid=0(root) groups=0(root)
 ```
 
-MicroVM streams stdout and stderr separately, and exits with the exact status code returned by the guest command.
+DynoCap streams stdout and stderr separately, and exits with the exact status code returned by the guest command.
 
 ---
 
@@ -188,7 +188,7 @@ MicroVM streams stdout and stderr separately, and exits with the exact status co
 When your work is done, remove the sandbox:
 
 ```sh
-microvm rm my-first-box --force
+dynocap rm my-first-box --force
 ```
 
 Output:
@@ -203,7 +203,7 @@ Because `my-first-box` was actively running, `--force` explicitly confirms disca
 
 ## Next Steps
 
-Now that you know how to build MicroVM and run raw Linux commands, proceed to:
+Now that you know how to build DynoCap and run raw Linux commands, proceed to:
 
 - **[End-to-End Agent Task Workflow](/tutorials/agent-task-workflow)**: Copy a project into a task, install from a dependency seed, and export a verified diff. The host checkout is never mounted.
 - **[Interactive Shells & Terminal Sessions](/how-to/interactive-shells-and-terminal)**: Learn how to attach interactive TTY sessions for live debugging.

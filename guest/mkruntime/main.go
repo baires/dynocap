@@ -1,9 +1,9 @@
 package main
 
 import (
+	rt "dynocap.dev/guest/internal/runtime"
 	"encoding/json"
 	"fmt"
-	rt "microvm.dev/guest/internal/runtime"
 	"os"
 )
 

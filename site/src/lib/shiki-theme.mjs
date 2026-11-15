@@ -5,8 +5,8 @@ const soft = "#C8C8C0";
 const muted = "#8F8F88";
 const literal = "#E6CB8E";
 
-export const microvmTheme = {
-  name: "microvm",
+export const dynocapTheme = {
+  name: "dynocap",
   type: "dark",
   colors: {
     "editor.background": "#0B0B0A",

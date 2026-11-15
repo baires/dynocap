@@ -8,7 +8,7 @@ sidebar_position: 1
 
 Running a package install inside an untrusted sandbox creates a dilemma. The packages have to be downloaded, but giving an agent full Internet access risks data exfiltration or credential theft.
 
-MicroVM solves this by pairing **filtered network egress** with **lockfile-keyed dependency seeds**. Each runtime has exactly one package manager. The runtime declares which registry hosts filtered egress may reach and how its package cache is keyed.
+DynoCap solves this by pairing **filtered network egress** with **lockfile-keyed dependency seeds**. Each runtime has exactly one package manager. The runtime declares which registry hosts filtered egress may reach and how its package cache is keyed.
 
 This guide shows you how to:
 
@@ -28,7 +28,7 @@ This guide shows you how to:
 | `go:1.27`     | Go modules      | `go.sum`            | `proxy.golang.org`, `sum.golang.org` | `go mod download`  | `go mod download`            |
 | `shell:1`     | none            | no seed             | only a task repository URL's host    | n/a                | n/a                          |
 
-When `--runtime` is omitted, the project's files choose the runtime (`package.json` → `node:24`, `pyproject.toml` → `python:3.14`, `go.mod` → `go:1.27`); anything else gets `shell:1`. Prepare a runtime once per home before you use it, for example `microvm runtime prepare . --runtime python:3.14`.
+When `--runtime` is omitted, the project's files choose the runtime (`package.json` → `node:24`, `pyproject.toml` → `python:3.14`, `go.mod` → `go:1.27`); anything else gets `shell:1`. Prepare a runtime once per home before you use it, for example `dynocap runtime prepare . --runtime python:3.14`.
 
 Some files change the seed key besides the lockfile: `.npmrc` for npm and `uv.toml` for uv. The prepared runtime's digest is also part of the key, so a seed is never restored into a different runtime or version. uv uses the runtime's Python and never downloads an interpreter. Go runs with `GOTOOLCHAIN=local` and never switches to another toolchain.
 
@@ -37,22 +37,22 @@ Some files change the seed key besides the lockfile: `.npmrc` for npm and `uv.to
 ## The workflow pattern: "deps" sandbox vs. "worker" sandbox
 
 1. **Warm step:** Clone into a sandbox named `deps` with `--network filtered`, run the online install, and `finish`. Finishing publishes the package cache as a seed.
-2. **Offline step:** Clone again with the default `--network none`. MicroVM restores the matching seed before your first command, and the offline install needs no network.
+2. **Offline step:** Clone again with the default `--network none`. DynoCap restores the matching seed before your first command, and the offline install needs no network.
 
 ```
 +-------------------------------------------------------------+
 | 1. WARM SEED (deps)                                         |
-| microvm clone ./project deps --runtime python:3.14 \        |
+| dynocap clone ./project deps --runtime python:3.14 \        |
 |   --network filtered                                        |
-| microvm exec deps -- uv sync --frozen                       |
-| microvm finish deps   ---> Saves a seed keyed by uv.lock    |
+| dynocap exec deps -- uv sync --frozen                       |
+| dynocap finish deps   ---> Saves a seed keyed by uv.lock    |
 +-------------------------------------------------------------+
                               |
                               v
 +-------------------------------------------------------------+
 | 2. OFFLINE TASKS (worker)                                   |
-| microvm clone ./project worker --runtime python:3.14        |
-| microvm exec worker -- uv sync --offline --frozen           |
+| dynocap clone ./project worker --runtime python:3.14        |
+| dynocap exec worker -- uv sync --offline --frozen           |
 | (Installs from the restored seed, zero network)             |
 +-------------------------------------------------------------+
 ```
@@ -64,30 +64,30 @@ Some files change the seed key besides the lockfile: `.npmrc` for npm and `uv.to
 Make sure your project contains its runtime's lockfile, such as `package-lock.json`, `uv.lock` or `go.sum`. Then clone it with filtered networking:
 
 ```sh
-microvm clone ./my-project deps --runtime node:24 --network filtered
+dynocap clone ./my-project deps --runtime node:24 --network filtered
 ```
 
 > **Why `--network filtered`?**
-> Under filtered mode, MicroVM connects a virtio-net interface whose host forwarder answers DNS only for the runtime's registry hosts and, for a repository URL, that URL's host. It forwards only HTTPS to those names. Every other address and port is dropped.
+> Under filtered mode, DynoCap connects a virtio-net interface whose host forwarder answers DNS only for the runtime's registry hosts and, for a repository URL, that URL's host. It forwards only HTTPS to those names. Every other address and port is dropped.
 
 Run the online install:
 
 ```sh
-microvm exec deps --timeout 300 -- npm ci
+dynocap exec deps --timeout 300 -- npm ci
 ```
 
 Finish the sandbox:
 
 ```sh
-microvm finish deps
+dynocap finish deps
 ```
 
-Finishing archives the runtime's package cache (for example `/work/npm-cache/_cacache`, `/work/uv-cache` or `/work/go/pkg/mod/cache/download`) into `~/.microvm/dependency-cache/<key>.tar` on the host. A seed is only published if the lockfile is unchanged at finish. It is also skipped if any command pointed the package manager at another registry or cache, for example through `npm_config_*`, `UV_INDEX*`, `GOPROXY` or `GOFLAGS`, or a `--registry` or `--index` argument.
+Finishing archives the runtime's package cache (for example `/work/npm-cache/_cacache`, `/work/uv-cache` or `/work/go/pkg/mod/cache/download`) into `~/.dynocap/dependency-cache/<key>.tar` on the host. A seed is only published if the lockfile is unchanged at finish. It is also skipped if any command pointed the package manager at another registry or cache, for example through `npm_config_*`, `UV_INDEX*`, `GOPROXY` or `GOFLAGS`, or a `--registry` or `--index` argument.
 
 Clean up the finished record:
 
 ```sh
-microvm rm deps
+dynocap rm deps
 ```
 
 ---
@@ -97,26 +97,26 @@ microvm rm deps
 Clone your project again for your agent or test runner, leaving the network at its default (`none`):
 
 ```sh
-microvm clone ./my-project worker --runtime node:24
+dynocap clone ./my-project worker --runtime node:24
 ```
 
-If the lockfile matches a seed, MicroVM unpacks it into the guest before `clone` returns. Run the offline install:
+If the lockfile matches a seed, DynoCap unpacks it into the guest before `clone` returns. Run the offline install:
 
 ```sh
-microvm exec worker -- npm ci --offline
+dynocap exec worker -- npm ci --offline
 ```
 
 Then run your tests or let your coding agent work:
 
 ```sh
-microvm exec worker -- npm test
+dynocap exec worker -- npm test
 ```
 
 ---
 
 ## Which tasks publish a seed
 
-A seed is the package cache a networked install produced, and later offline sandboxes trust it. MicroVM therefore publishes a seed only from a task where:
+A seed is the package cache a networked install produced, and later offline sandboxes trust it. DynoCap therefore publishes a seed only from a task where:
 
 - every command was one of the runtime's install commands: `npm ci` or `npm install` for node, `uv sync` for python, `go mod download` for go (a plain `sh -c "npm ci"` from the SDK counts; anything with shell syntax does not);
 - no command pointed the package manager at another registry or cache.
@@ -133,9 +133,9 @@ A seed is only as trustworthy as the install that produced it: packages' install
 
 - **If you change dependencies:** a lockfile change produces a different key, so later clones find no matching seed.
 - **To update the seed:** re-run Step 1 with `--network filtered`.
-- **Location and size:** seeds live in `~/.microvm/dependency-cache/`. They are capped at 2 GiB in total, and the least recently restored seeds are evicted first. You can inspect or delete them safely:
+- **Location and size:** seeds live in `~/.dynocap/dependency-cache/`. They are capped at 2 GiB in total, and the least recently restored seeds are evicted first. You can inspect or delete them safely:
   ```sh
-  ls -lh ~/.microvm/dependency-cache
+  ls -lh ~/.dynocap/dependency-cache
   ```
 
 ---

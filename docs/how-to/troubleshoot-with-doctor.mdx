@@ -1,45 +1,45 @@
 ---
-title: "Troubleshoot with microvm doctor"
-description: "How to use microvm doctor to find what is blocking sandboxes, and microvm doctor --fix to repair it."
+title: "Troubleshoot with dynocap doctor"
+description: "How to use dynocap doctor to find what is blocking sandboxes, and dynocap doctor --fix to repair it."
 sidebar_position: 6
 ---
 
-# Troubleshoot with microvm doctor
+# Troubleshoot with dynocap doctor
 
-`microvm doctor` checks everything a sandbox needs and tells you, for each problem, what is wrong and what to run. `microvm doctor --fix` repairs the problems it can.
+`dynocap doctor` checks everything a sandbox needs and tells you, for each problem, what is wrong and what to run. `dynocap doctor --fix` repairs the problems it can.
 
 ```sh
-microvm doctor                  # report only; changes nothing
-microvm doctor --fix            # repair, then report again
-microvm doctor --fix ./project  # check and prepare the runtime ./project uses
+dynocap doctor                  # report only; changes nothing
+dynocap doctor --fix            # repair, then report again
+dynocap doctor --fix ./project  # check and prepare the runtime ./project uses
 ```
 
-The runtime doctor checks is the one your project uses: `package.json` means `node:24`; `pyproject.toml`, `uv.lock`, `requirements.txt`, `setup.py`, or `Pipfile` means `python:3.14`; `go.mod` means `go:1.27`. `clone` picks the same way. Pass `--runtime NAME:VERSION` to choose another. With no project (for example, in the microvm checkout), doctor requires no runtime and lists the prepared ones.
+The runtime doctor checks is the one your project uses: `package.json` means `node:24`; `pyproject.toml`, `uv.lock`, `requirements.txt`, `setup.py`, or `Pipfile` means `python:3.14`; `go.mod` means `go:1.27`. `clone` picks the same way. Pass `--runtime NAME:VERSION` to choose another. With no project (for example, in the dynocap checkout), doctor requires no runtime and lists the prepared ones.
 
-`--fix` builds from the microvm checkout, which it finds from the `microvm` binary, so you can run it in any directory.
+`--fix` builds from the dynocap checkout, which it finds from the `dynocap` binary, so you can run it in any directory.
 
 ---
 
 ## Reading the Report
 
 ```text
-Home: /Users/you/.microvm
+Home: /Users/you/.dynocap
 
 OK      platform           macOS 13+; guest architecture aarch64
 OK      signing            CLI signature validates and includes the virtualization entitlement.
 ERROR   images             The guest image for aarch64 does not match its manifest.
-                           Next: Run microvm doctor --fix to build the guest image (downloads pinned Alpine files; needs Go).
-ERROR   daemon             The running daemon started before this microvm binary was rebuilt, so it runs the old build.
-                           Next: Run microvm doctor --fix to restart the daemon with this microvm build.
+                           Next: Run dynocap doctor --fix to build the guest image (downloads pinned Alpine files; needs Go).
+ERROR   daemon             The running daemon started before this dynocap binary was rebuilt, so it runs the old build.
+                           Next: Run dynocap doctor --fix to restart the daemon with this dynocap build.
 
-2 required checks failed. Run microvm doctor --fix to repair them.
+2 required checks failed. Run dynocap doctor --fix to repair them.
 ```
 
 - `OK` passed; a stopped daemon or a home that does not exist yet is normal. `WARNING` is worth knowing but does not block sandboxes, such as having no runtime prepared outside a project. `ERROR` blocks sandboxes, and the command exits 1.
-- `Next:` is the one thing to do. When it names `microvm doctor --fix`, the command already includes any `--home` or `--runtime` you passed, so you can paste it as printed.
+- `Next:` is the one thing to do. When it names `dynocap doctor --fix`, the command already includes any `--home` or `--runtime` you passed, so you can paste it as printed.
 - The last line says whether `--fix` can repair everything, some of it, or nothing.
 
-For scripts, `microvm doctor --json` prints the same report. Each check has a `fix` field naming its automatic repair. See [JSON Schemas](../reference/cli/json-schemas.mdx).
+For scripts, `dynocap doctor --json` prints the same report. Each check has a `fix` field naming its automatic repair. See [JSON Schemas](../reference/cli/json-schemas.mdx).
 
 ---
 
@@ -49,7 +49,7 @@ For scripts, `microvm doctor --json` prints the same report. Each check has a `f
 | :-------- | :------------------------------------------------------------------------------------------------- | :---------------------------------- |
 | `daemon`  | Stops a broken daemon, or one from an older build, and starts one from this binary.                | No running sandboxes                |
 | `images`  | Builds the guest kernel and initrd. Mismatched files are moved to `replaced-<time>/`, not deleted. | Checkout, Go, network               |
-| `runtime` | Prepares and verifies the runtime in an offline guest, like `microvm runtime prepare`.             | Checkout, Go, network, a signed CLI |
+| `runtime` | Prepares and verifies the runtime in an offline guest, like `dynocap runtime prepare`.             | Checkout, Go, network, a signed CLI |
 
 Repairs run in that order, and progress goes to stderr. Each repair prints a build log path, so a failure shows what to read. `--fix` then runs every check again and reports the result.
 
@@ -67,28 +67,28 @@ Repairs run in that order, and progress goes to stderr. Each repair prints a bui
 | :--------------------------------------- | :---------------------------------------------------------- | :----------------------------------------------------------- |
 | `platform`, `backend`                    | Not a Mac with Virtualization.framework, or macOS < 13.     | Use a supported Mac.                                         |
 | `signing`                                | Built with `swift build` instead of the script.             | Run `./scripts/build-macos.sh`.                              |
-| `microvm-workspace`, `microvm-mkruntime` | Companions missing beside the `microvm` binary.             | Run `./scripts/build-macos.sh` and keep them beside the CLI. |
-| `home`                                   | Home not writable, or `daemon.sock` would exceed 104 bytes. | Use a shorter writable `--home` or `MICROVM_HOME`.           |
+| `dynocap-workspace`, `dynocap-mkruntime` | Companions missing beside the `dynocap` binary.             | Run `./scripts/build-macos.sh` and keep them beside the CLI. |
+| `home`                                   | Home not writable, or `daemon.sock` would exceed 104 bytes. | Use a shorter writable `--home` or `DYNOCAP_HOME`.           |
 
 ---
 
 ## Common Situations
 
-### I rebuilt microvm and now commands fail
+### I rebuilt dynocap and now commands fail
 
 The daemon keeps running the old build until it is restarted. `doctor` reports this as an `ERROR daemon`. Run:
 
 ```sh
-microvm doctor --fix
+dynocap doctor --fix
 ```
 
 ### `--fix` says Go is missing
 
-The guest agent is compiled during image and runtime builds. Install Go 1.22 or newer (`brew install go`), then run `microvm doctor --fix` again.
+The guest agent is compiled during image and runtime builds. Install Go 1.22 or newer (`brew install go`), then run `dynocap doctor --fix` again.
 
 ### `--fix` cannot find the source checkout
 
-`--fix` looks beside the `microvm` binary and above the current directory. If you copied the binary elsewhere, run it from inside your microvm clone with the project path: `microvm doctor --fix ~/code/my-app`.
+`--fix` looks beside the `dynocap` binary and above the current directory. If you copied the binary elsewhere, run it from inside your dynocap clone with the project path: `dynocap doctor --fix ~/code/my-app`.
 
 ### `clone` picked the wrong runtime
 

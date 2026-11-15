@@ -1,12 +1,12 @@
 ---
 title: "Network Isolation and Egress Policy"
-description: "How to configure network modes in MicroVM, enforce strict egress boundaries, and prevent data exfiltration."
+description: "How to configure network modes in DynoCap, enforce strict egress boundaries, and prevent data exfiltration."
 sidebar_position: 2
 ---
 
 # Network Isolation and Egress Policy
 
-A core security premise of MicroVM is that code generated or executed by an AI agent must not have unrestricted access to the Internet by default.
+A core security premise of DynoCap is that code generated or executed by an AI agent must not have unrestricted access to the Internet by default.
 
 This guide explains how to configure network egress policies for both raw sandboxes and project tasks.
 
@@ -14,7 +14,7 @@ This guide explains how to configure network egress policies for both raw sandbo
 
 ## Network Modes Overview
 
-MicroVM supports three explicit network modes:
+DynoCap supports three explicit network modes:
 
 | Mode               | Virtual Network Device    | Outbound Permitted                                | Use Case                                                  |
 | :----------------- | :------------------------ | :------------------------------------------------ | :-------------------------------------------------------- |
@@ -26,11 +26,11 @@ MicroVM supports three explicit network modes:
 
 ## 1. Offline Mode (`--network none`)
 
-By default, any `microvm run` or `microvm clone` command boots without a network device:
+By default, any `dynocap run` or `dynocap clone` command boots without a network device:
 
 ```sh
 # Explicitly or by default
-microvm clone ./my-project sandbox --network none
+dynocap clone ./my-project sandbox --network none
 ```
 
 Inside the Linux guest:
@@ -45,10 +45,10 @@ Even if an attacker inside the VM executes `curl`, `nc`, or attempts DNS lookups
 
 ## 2. Filtered Egress Mode (`--network filtered`)
 
-In filtered mode, MicroVM attaches a virtual network interface backed by a dedicated host-level user-space forwarder (`FilteredForwarder.swift`):
+In filtered mode, DynoCap attaches a virtual network interface backed by a dedicated host-level user-space forwarder (`FilteredForwarder.swift`):
 
 ```sh
-microvm clone ./my-project sandbox --network filtered
+dynocap clone ./my-project sandbox --network filtered
 ```
 
 ### Allowlist Rules
@@ -63,7 +63,7 @@ The forwarder inspects initial TLS ClientHello packets and socket connections:
      - `go:1.27`: `proxy.golang.org`, `sum.golang.org`
      - `shell:1`: none
    - The remote Git origin host if the project was cloned from an HTTPS URL.
-   - A plain `microvm run` sandbox has no runtime and keeps `registry.npmjs.org`.
+   - A plain `dynocap run` sandbox has no runtime and keeps `registry.npmjs.org`.
 
 A direct connection to another IP or domain (e.g., pastebins, command-and-control servers, webhooks) is terminated at the host boundary.
 
@@ -74,7 +74,7 @@ A direct connection to another IP or domain (e.g., pastebins, command-and-contro
 You can verify the network policy of any running sandbox:
 
 ```sh
-microvm inspect sandbox --json
+dynocap inspect sandbox --json
 ```
 
 The output will clearly state:
@@ -93,7 +93,7 @@ The output will clearly state:
 For tasks that legitimately require general Internet access, such as downloading datasets, interacting with external web APIs, or installing system-level packages via `apk`:
 
 ```sh
-microvm clone ./my-project sandbox --network nat
+dynocap clone ./my-project sandbox --network nat
 ```
 
 Under NAT mode:
@@ -116,7 +116,7 @@ When automating tasks programmatically or via LLM tool-calling (MCP):
 The SDK defaults to `none`:
 
 ```ts
-import { Sandbox, Task } from "@microvm/sdk";
+import { Sandbox, Task } from "@dynocap/sdk";
 
 // Offline task
 const task = await Task.start({
@@ -130,18 +130,18 @@ const task = await Task.open("my-task", { requireOffline: true });
 
 ### Model Context Protocol (MCP) Server
 
-To protect developers, the `@microvm/mcp` server rejects `nat` and `filtered` commands by default. You must explicitly start the MCP server with environment variables enabling them:
+To protect developers, the `@dynocap/mcp` server rejects `nat` and `filtered` commands by default. You must explicitly start the MCP server with environment variables enabling them:
 
 ```sh
 # Enable filtered network mode for agents
-MICROVM_MCP_ALLOW_FILTERED=1 npx @microvm/mcp
+DYNOCAP_MCP_ALLOW_FILTERED=1 npx @dynocap/mcp
 
 # Enable unrestricted NAT mode
-MICROVM_MCP_ALLOW_NAT=1 npx @microvm/mcp
+DYNOCAP_MCP_ALLOW_NAT=1 npx @dynocap/mcp
 ```
 
 If an LLM requests a sandbox with `network: "nat"` and the flag is not set, the tool returns:
 
 ```text
-NAT is disabled by this MCP host; start the server with MICROVM_MCP_ALLOW_NAT=1 to permit it
+NAT is disabled by this MCP host; start the server with DYNOCAP_MCP_ALLOW_NAT=1 to permit it
 ```

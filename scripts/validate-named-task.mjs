@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Owns a private daemon. Prepare its runtime first, then stop that daemon before
-// invoking this harness. Never point MICROVM_HOME at your everyday daemon.
+// invoking this harness. Never point DYNOCAP_HOME at your everyday daemon.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -13,16 +13,16 @@ import {
   listManaged,
   removeManaged,
 } from "../sdk/typescript/dist/index.js";
-import { microvmDiff, microvmLs } from "../sdk/mcp/dist/tools.js";
+import { dynocapDiff, dynocapLs } from "../sdk/mcp/dist/tools.js";
 
-const home = process.env.MICROVM_HOME;
+const home = process.env.DYNOCAP_HOME;
 const reportArgument = process.argv[2];
 if (!home || !reportArgument)
   throw Error(
-    "MICROVM_HOME=PRIVATE_HOME node scripts/validate-named-task.mjs REPORT.json"
+    "DYNOCAP_HOME=PRIVATE_HOME node scripts/validate-named-task.mjs REPORT.json"
   );
 const binary = path.resolve(
-  process.env.MICROVM_BIN ?? ".build/release/microvm"
+  process.env.DYNOCAP_BIN ?? ".build/release/dynocap"
 );
 const reportPath = path.resolve(reportArgument);
 assert(
@@ -126,7 +126,7 @@ try {
   assert(entries[0].expiresAtUnix <= Date.now() / 1000 + 601);
   assert.equal((await Task.list({ home }))[0].id, task.id);
   assert.equal((await listManaged({ home }))[0].id, task.id);
-  assert.match((await microvmLs({ home })).content[0].text, /interview/);
+  assert.match((await dynocapLs({ home })).content[0].text, /interview/);
   await run("npm ci", [
     "exec",
     "interview",
@@ -165,8 +165,8 @@ try {
   assert.match(patch, /^-    this.customDate = new Date/m);
   const preview = await task.diff();
   assert.equal(fs.readFileSync(preview.patchPath, "utf8"), patch);
-  assert.equal((await microvmDiff("interview", { home })).isError, true);
-  const mcpPreview = await microvmDiff("interview", {
+  assert.equal((await dynocapDiff("interview", { home })).isError, true);
+  const mcpPreview = await dynocapDiff("interview", {
     home,
     allowFiltered: true,
   });

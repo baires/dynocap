@@ -106,7 +106,7 @@ func TestRejects(t *testing.T) {
 	if _, err := Decode([]byte{TypeExecTTY, 0, 0, 0, 7, 0, 0, 0, 0, 0, 1}); err == nil {
 		t.Fatal("expected short exec-tty")
 	}
-	if !AdvertisesTerminal(AgentHello) || AdvertisesTerminal("microvm-agent signal=1") || AdvertisesTerminal("microvm-agent tty=10") {
+	if !AdvertisesTerminal(AgentHello) || AdvertisesTerminal("dynocap-agent signal=1") || AdvertisesTerminal("dynocap-agent tty=10") {
 		t.Fatal("terminal capability token is not exact")
 	}
 	// Length prefix claims more than the cap.

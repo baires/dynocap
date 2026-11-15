@@ -114,7 +114,7 @@ func InstallVerifiedAPK(file, root string) error {
 	if hex.EncodeToString(sum[:]) != want {
 		return fmt.Errorf("APK data hash mismatch")
 	}
-	f, e := os.CreateTemp("", "microvm-apk-*.tar")
+	f, e := os.CreateTemp("", "dynocap-apk-*.tar")
 	if e != nil {
 		return e
 	}

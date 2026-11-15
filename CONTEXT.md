@@ -1,4 +1,4 @@
-# MicroVM
+# DynoCap
 
 Local Linux sandboxes for agents. One daemon on a host owns them. Callers boot a sandbox, run commands inside it, and destroy it.
 

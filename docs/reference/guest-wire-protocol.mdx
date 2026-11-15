@@ -6,7 +6,7 @@ sidebar_position: 7
 
 # Guest Wire Protocol Specification
 
-The host daemon communicates with the in-guest `microvm-agent` over a point-to-point **virtio-vsock** connection on guest port `5252`.
+The host daemon communicates with the in-guest `dynocap-agent` over a point-to-point **virtio-vsock** connection on guest port `5252`.
 
 The protocol is binary, big-endian, and synchronous with frame length prefixes.
 
@@ -94,4 +94,4 @@ The guest agent handles `RESIZE` by calling `ioctl(ptmx_fd, TIOCSWINSZ, ...)` on
 
 ## Golden Test Vectors
 
-Shared cross-language serialization vectors are defined in `testdata/protocol-vectors.json`. Both Swift (`Tests/MicroVMCoreTests/ProtocolTests.swift`) and Go (`guest/internal/protocol/protocol_test.go`) execute automated assertions against these shared vectors to ensure binary compatibility.
+Shared cross-language serialization vectors are defined in `testdata/protocol-vectors.json`. Both Swift (`Tests/DynoCapCoreTests/ProtocolTests.swift`) and Go (`guest/internal/protocol/protocol_test.go`) execute automated assertions against these shared vectors to ensure binary compatibility.

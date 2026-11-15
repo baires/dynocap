@@ -1,25 +1,25 @@
 ---
 title: "Integrate the TypeScript SDK"
-description: "How to programmatically start sandboxes, execute commands, preview diffs, and collect results using @microvm/sdk."
+description: "How to programmatically start sandboxes, execute commands, preview diffs, and collect results using @dynocap/sdk."
 sidebar_position: 4
 ---
 
 # Integrate the TypeScript SDK
 
-MicroVM provides a native TypeScript/JavaScript SDK (`@microvm/sdk`) for developers building AI agent harnesses, automated evaluators, or developer tool integrations.
+DynoCap provides a native TypeScript/JavaScript SDK (`@dynocap/sdk`) for developers building AI agent harnesses, automated evaluators, or developer tool integrations.
 
-The SDK communicates directly with the local user daemon over UNIX domain socket `~/.microvm/daemon.sock` (mode `0600`).
+The SDK communicates directly with the local user daemon over UNIX domain socket `~/.dynocap/daemon.sock` (mode `0600`).
 
 ---
 
 ## Installation
 
-Within the `microvm` repository or a local workspace linking the package:
+Within the `dynocap` repository or a local workspace linking the package:
 
 ```json
 {
   "dependencies": {
-    "@microvm/sdk": "file:./sdk/typescript"
+    "@dynocap/sdk": "file:./sdk/typescript"
   }
 }
 ```
@@ -35,7 +35,7 @@ npm install
 The `Task` class provides the full project lifecycle: cloning a workspace, executing commands, streaming output, previewing diffs, and exporting results.
 
 ```ts
-import { Task, SandboxError } from "@microvm/sdk";
+import { Task, SandboxError } from "@dynocap/sdk";
 
 async function runAgent() {
   try {
@@ -68,7 +68,7 @@ async function runAgent() {
     console.log(`Result directory: ${finished.resultDirectory}`);
   } catch (error) {
     if (error instanceof SandboxError) {
-      console.error(`MicroVM error [${error.kind}]: ${error.message}`);
+      console.error(`DynoCap error [${error.kind}]: ${error.message}`);
     } else {
       throw error;
     }
@@ -85,7 +85,7 @@ runAgent();
 If you only need an isolated minimal Linux execution environment without importing a project workspace or generating diffs, use `Sandbox`:
 
 ```ts
-import { Sandbox } from "@microvm/sdk";
+import { Sandbox } from "@dynocap/sdk";
 
 async function executeInSandbox() {
   // Boot raw sandbox
@@ -116,7 +116,7 @@ async function executeInSandbox() {
 Tasks can be re-opened by their friendly name or immutable ID across different processes:
 
 ```ts
-import { Task } from "@microvm/sdk";
+import { Task } from "@dynocap/sdk";
 
 // Open existing task by name
 const task = await Task.open("pr-fixer", {
@@ -155,7 +155,7 @@ console.log(ttyRes.stdout);
 Query managed sandboxes and purge expired tasks:
 
 ```ts
-import { listManaged, removeManaged } from "@microvm/sdk";
+import { listManaged, removeManaged } from "@dynocap/sdk";
 
 // List all active and retained tasks
 const entries = await listManaged();

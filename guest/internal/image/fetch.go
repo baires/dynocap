@@ -25,7 +25,7 @@ func download(url, dest, wantSHA string) error {
 	if err != nil {
 		return err
 	}
-	req.Header.Set("User-Agent", "microvm-fetch/0.1")
+	req.Header.Set("User-Agent", "dynocap-fetch/0.1")
 	resp, err := client.Do(req)
 	if err != nil {
 		return err

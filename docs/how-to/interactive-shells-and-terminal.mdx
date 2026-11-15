@@ -1,6 +1,6 @@
 ---
 title: "Interactive Shells and Terminal Sessions"
-description: "How to open interactive terminals, handle terminal resizing and signals, and run full-screen console programs in MicroVM."
+description: "How to open interactive terminals, handle terminal resizing and signals, and run full-screen console programs in DynoCap."
 sidebar_position: 3
 ---
 
@@ -10,19 +10,19 @@ While AI agents frequently run automated non-interactive commands, human develop
 
 This guide covers:
 
-1. Opening an interactive shell using `microvm shell`.
-2. Running single terminal-aware commands using `microvm exec -t`.
+1. Opening an interactive shell using `dynocap shell`.
+2. Running single terminal-aware commands using `dynocap exec -t`.
 3. Signal handling (Ctrl-C, window resize, signals).
 4. Terminal session lifecycle vs. Sandbox TTL.
 
 ---
 
-## Interactive Shell: `microvm shell`
+## Interactive Shell: `dynocap shell`
 
 To open an interactive session in any running sandbox:
 
 ```sh
-microvm shell my-sandbox
+dynocap shell my-sandbox
 ```
 
 Output:
@@ -33,30 +33,30 @@ root
 /workspace # node -v
 v24.x.x
 /workspace # exit
-microvm: left the shell; my-sandbox is still running until its TTL. Export with `microvm finish my-sandbox` or discard with `microvm rm my-sandbox --force`.
+dynocap: left the shell; my-sandbox is still running until its TTL. Export with `dynocap finish my-sandbox` or discard with `dynocap rm my-sandbox --force`.
 ```
 
-### Characteristics of `microvm shell`:
+### Characteristics of `dynocap shell`:
 
 - **Shell executable:** The guest automatically selects `/bin/sh` (BusyBox `ash` with tab completion and arrow key history) or the user's defined shell in `/etc/passwd`.
 - **Working directory:** Starts in `/workspace` for project tasks or `/` for raw sandboxes.
 - **Environment:** Sets `TERM=xterm-256color`, `PATH`, `HOME=/root`, and the runtime's environment variables.
-- **No Command Deadline:** Unlike `microvm exec` (which defaults to a 60-second command deadline), `shell` has no command timeout. The session remains open until you exit or the sandbox reaches its overall TTL.
+- **No Command Deadline:** Unlike `dynocap exec` (which defaults to a 60-second command deadline), `shell` has no command timeout. The session remains open until you exit or the sandbox reaches its overall TTL.
 - **Sandbox survives exit:** When you type `exit` or press `Ctrl-D`, only your interactive shell session ends. The guest virtual machine continues running in the background.
 
 ---
 
-## Single Terminal Commands: `microvm exec -t`
+## Single Terminal Commands: `dynocap exec -t`
 
-When you want to run a single command that requires a pseudo-terminal (PTY), such as an interactive test runner, a progress bar, or a cursor-positioned tool, use `microvm exec -t`:
+When you want to run a single command that requires a pseudo-terminal (PTY), such as an interactive test runner, a progress bar, or a cursor-positioned tool, use `dynocap exec -t`:
 
 ```sh
-microvm exec my-sandbox -t -- npm test -- --watch
+dynocap exec my-sandbox -t -- npm test -- --watch
 ```
 
 ### Differences: `exec -t` vs `shell`
 
-| Property              | `microvm exec -t NAME -- COMMAND`       | `microvm shell NAME`                          |
+| Property              | `dynocap exec -t NAME -- COMMAND`       | `dynocap shell NAME`                          |
 | :-------------------- | :-------------------------------------- | :-------------------------------------------- |
 | **Command**           | Explicit argument (e.g. `htop`, `vi`)   | Guest `/bin/sh`                               |
 | **Command Timeout**   | Defaults to 60s (`--timeout` overrides) | None (bounded only by sandbox TTL)            |
@@ -69,26 +69,26 @@ microvm exec my-sandbox -t -- npm test -- --watch
 
 Guest output is untrusted. A terminal acts on escape sequences: they can write your clipboard (OSC 52), retitle the window, add hyperlinks, or make the terminal answer a query by typing into your shell.
 
-- `exec` without `-t` and `logs`: when stdout or stderr is a terminal, MicroVM passes text, colors, `\r`, `\b`, and the line-erase and column moves progress bars use, and drops every other escape sequence and control character.
+- `exec` without `-t` and `logs`: when stdout or stderr is a terminal, DynoCap passes text, colors, `\r`, `\b`, and the line-erase and column moves progress bars use, and drops every other escape sequence and control character.
 - `diff`: on a terminal nothing is interpreted. Control characters appear as `^[`, `^M` and so on, and characters that hide or reorder text (bidi overrides, zero-width characters) appear as `<U+202E>`, so hidden content in a patch is visible.
 - `shell` and `exec -t` are a real terminal session, like `ssh`, and are not filtered. Use them only with sandboxes whose output you are willing to let your terminal interpret.
 
-Output to a pipe or file is never filtered. To see the exact bytes, pipe through a viewer: `microvm diff demo | less -R` or `microvm logs demo | cat -v`.
+Output to a pipe or file is never filtered. To see the exact bytes, pipe through a viewer: `dynocap diff demo | less -R` or `dynocap logs demo | cat -v`.
 
 ---
 
 ## Signal Handling and Keystrokes
 
-When attached to a terminal session in MicroVM:
+When attached to a terminal session in DynoCap:
 
 ### 1. Interrupting a Process (Ctrl-C)
 
-- When running `microvm exec` without `-t`, pressing `Ctrl-C` forwards `SIGINT` over vsock to the guest process group. If the guest exits from the signal, the CLI exits with status `130`.
+- When running `dynocap exec` without `-t`, pressing `Ctrl-C` forwards `SIGINT` over vsock to the guest process group. If the guest exits from the signal, the CLI exits with status `130`.
 - In a terminal session (`shell` or `exec -t`), `Ctrl-C` is passed as a standard ASCII byte (`0x03`) to the guest PTY driver, triggering standard terminal interrupt behavior.
 
 ### 2. Window Resizing (SIGWINCH)
 
-When you resize your macOS terminal window (e.g. Terminal.app, iTerm2, Alacritty, Ghostty), the MicroVM CLI intercepts `SIGWINCH` on the host, reads the new row and column dimensions, and transmits a control packet over vsock. The guest agent issues an `ioctl(TIOCSWINSZ)` on the guest PTY, so full-screen tools (such as `nano`, `less`, or `htop`) match the new size.
+When you resize your macOS terminal window (e.g. Terminal.app, iTerm2, Alacritty, Ghostty), the DynoCap CLI intercepts `SIGWINCH` on the host, reads the new row and column dimensions, and transmits a control packet over vsock. The guest agent issues an `ioctl(TIOCSWINSZ)` on the guest PTY, so full-screen tools (such as `nano`, `less`, or `htop`) match the new size.
 
 ### 3. Terminating from the Host
 
@@ -96,19 +96,19 @@ If the host CLI receives `SIGTERM`, `SIGHUP`, or `SIGQUIT`, it cleanly restores 
 
 ---
 
-## Standard Input Modes for `microvm exec`
+## Standard Input Modes for `dynocap exec`
 
-For automated scripting, `microvm exec` supports several stdin modes:
+For automated scripting, `dynocap exec` supports several stdin modes:
 
 ```sh
 # 1. Pipe a local file or script into the guest
-cat script.sh | microvm exec my-sandbox -- sh
+cat script.sh | dynocap exec my-sandbox -- sh
 
 # 2. Interactive non-PTY streaming (read host stdin until EOF)
-microvm exec my-sandbox -i -- python3
+dynocap exec my-sandbox -i -- python3
 
 # 3. Explicitly disable stdin (immediate EOF to guest)
-microvm exec my-sandbox --no-input -- my-command
+dynocap exec my-sandbox --no-input -- my-command
 ```
 
 | Flag                  | Host Stdin Behavior      | Guest Stdin Behavior                   |

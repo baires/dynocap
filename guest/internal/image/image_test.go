@@ -260,9 +260,9 @@ func TestPruneRootDropsUnusedLibraries(t *testing.T) {
 	must(os.Symlink("busybox", filepath.Join(root, "bin/sh")))
 	must(os.WriteFile(filepath.Join(root, "usr/lib/libcrypto.so.3"), []byte("crypto"), 0o644))
 	must(os.WriteFile(filepath.Join(root, "usr/lib/ossl-modules/legacy.so"), []byte("x"), 0o644))
-	must(os.WriteFile(filepath.Join(root, "usr/local/bin/microvm-agent"), []byte("agent"), 0o755))
+	must(os.WriteFile(filepath.Join(root, "usr/local/bin/dynocap-agent"), []byte("agent"), 0o755))
 	must(os.WriteFile(filepath.Join(root, "lib/modules/rel/vsock.ko"), []byte("ko"), 0o644))
-	must(os.WriteFile(filepath.Join(root, "etc/microvm-vsock-modules"), []byte("vsock\n"), 0o644))
+	must(os.WriteFile(filepath.Join(root, "etc/dynocap-vsock-modules"), []byte("vsock\n"), 0o644))
 	must(os.WriteFile(filepath.Join(root, "init"), []byte("#!/bin/sh\n"), 0o755))
 	must(pruneRoot(root))
 	if _, err := os.Stat(filepath.Join(root, "usr/lib/libcrypto.so.3")); !os.IsNotExist(err) {
@@ -271,7 +271,7 @@ func TestPruneRootDropsUnusedLibraries(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "usr/lib")); !os.IsNotExist(err) {
 		t.Fatalf("empty usr/lib still present: %v", err)
 	}
-	for _, rel := range []string{"bin/busybox", "bin/sh", "usr/local/bin/microvm-agent", "lib/modules/rel/vsock.ko", "init"} {
+	for _, rel := range []string{"bin/busybox", "bin/sh", "usr/local/bin/dynocap-agent", "lib/modules/rel/vsock.ko", "init"} {
 		if _, err := os.Stat(filepath.Join(root, rel)); err != nil {
 			t.Fatalf("missing %s: %v", rel, err)
 		}

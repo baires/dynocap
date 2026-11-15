@@ -1,12 +1,12 @@
 ---
 title: "CLI Overview and Standards"
-description: "Global options, environment variables, exit codes, and signal conventions for the microvm command-line interface."
+description: "Global options, environment variables, exit codes, and signal conventions for the dynocap command-line interface."
 sidebar_position: 1
 ---
 
 # CLI Overview and Standards
 
-The `microvm` command-line tool manages local Linux sandboxes and project tasks on macOS.
+The `dynocap` command-line tool manages local Linux sandboxes and project tasks on macOS.
 
 ---
 
@@ -15,13 +15,13 @@ The `microvm` command-line tool manages local Linux sandboxes and project tasks 
 Global options can be placed either before or after the subcommand:
 
 ```sh
-microvm --home /tmp/mvm ls
-microvm ls --home /tmp/mvm
+dynocap --home /tmp/mvm ls
+dynocap ls --home /tmp/mvm
 ```
 
 | Option         | Description                                                                                          |
 | :------------- | :--------------------------------------------------------------------------------------------------- |
-| `--home PATH`  | Directory holding daemon socket, images, and sandboxes. Defaults to `$MICROVM_HOME` or `~/.microvm`. |
+| `--home PATH`  | Directory holding daemon socket, images, and sandboxes. Defaults to `$DYNOCAP_HOME` or `~/.dynocap`. |
 | `--verbose`    | Emits detailed operational diagnostics to `stderr`.                                                  |
 | `--help`, `-h` | Displays help message and exits 0 (does not start daemon).                                           |
 | `--version`    | Displays CLI and runtime version and exits 0. Accepts `--json`.                                      |
@@ -33,8 +33,8 @@ microvm ls --home /tmp/mvm
 
 | Variable         | Description                                                         | Default              |
 | :--------------- | :------------------------------------------------------------------ | :------------------- |
-| `MICROVM_HOME`   | Base directory for daemon socket, disks, and state records.         | `~/.microvm`         |
-| `MICROVM_MKE2FS` | Explicit path to `mke2fs` binary for formatting ext4 virtual disks. | Resolved via `$PATH` |
+| `DYNOCAP_HOME`   | Base directory for daemon socket, disks, and state records.         | `~/.dynocap`         |
+| `DYNOCAP_MKE2FS` | Explicit path to `mke2fs` binary for formatting ext4 virtual disks. | Resolved via `$PATH` |
 | `NO_COLOR`       | Disables colored human terminal output when set.                    | Unset                |
 | `TERM`           | If set to `dumb`, interactive escape sequences are disabled.        | Inherited from host  |
 
@@ -42,7 +42,7 @@ microvm ls --home /tmp/mvm
 
 ## Exit Statuses
 
-MicroVM follows standard POSIX exit status conventions:
+DynoCap follows standard POSIX exit status conventions:
 
 | Exit Status    | Meaning                                                                    |
 | :------------- | :------------------------------------------------------------------------- |
@@ -50,7 +50,7 @@ MicroVM follows standard POSIX exit status conventions:
 | `1`            | Operational failure (daemon unreachable, boot error, task not found).      |
 | `2`            | Invalid CLI arguments (unknown flag, missing required parameter).          |
 | `124`          | Command deadline exceeded (`--timeout` elapsed).                           |
-| _Guest Code_   | `microvm exec` returns the exact numeric exit status of the guest command. |
+| _Guest Code_   | `dynocap exec` returns the exact numeric exit status of the guest command. |
 | `128 + Signal` | Execution terminated by signal (e.g. `130` for SIGINT, `143` for SIGTERM). |
 
 ---

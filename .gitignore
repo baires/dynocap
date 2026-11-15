@@ -9,7 +9,7 @@ xcuserdata/
 .idea/
 
 # Guest agent binary produced by the image build
-/guest/agent/microvm-agent
+/guest/agent/dynocap-agent
 
 # Node
 node_modules/

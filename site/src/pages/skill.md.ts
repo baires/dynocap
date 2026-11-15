@@ -1,5 +1,5 @@
 import type { APIRoute } from "astro";
-import skill from "../../../skills/microvm/SKILL.md?raw";
+import skill from "../../../skills/dynocap/SKILL.md?raw";
 
 export const GET: APIRoute = () =>
   new Response(skill, {

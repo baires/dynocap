@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-/** Repository hosts an MCP caller may name when MICROVM_MCP_GIT_HOSTS is unset. */
+/** Repository hosts an MCP caller may name when DYNOCAP_MCP_GIT_HOSTS is unset. */
 export const DEFAULT_GIT_HOSTS = ["github.com", "gitlab.com", "bitbucket.org"];
 
 export type AccessPolicy = {
@@ -28,11 +28,11 @@ export async function admitProjectPath(
   const roots = await allowedRoots(policy, home);
   if (roots.length === 0)
     throw new Error(
-      "no project roots are configured for this MCP server; set MICROVM_MCP_ROOTS to the directories tasks may import"
+      "no project roots are configured for this MCP server; set DYNOCAP_MCP_ROOTS to the directories tasks may import"
     );
   if (!roots.some((root) => within(resolved, root)))
     throw new Error(
-      `projectPath ${resolved} is outside the MCP project roots (${roots.join(", ")}); set MICROVM_MCP_ROOTS to allow it`
+      `projectPath ${resolved} is outside the MCP project roots (${roots.join(", ")}); set DYNOCAP_MCP_ROOTS to allow it`
     );
   return resolved;
 }
@@ -53,7 +53,7 @@ export function admitRepositoryUrl(url: string, policy: AccessPolicy): void {
   host = host.toLowerCase();
   if (!allowed.includes(host))
     throw new Error(
-      `repository host ${host} is not allowed by this MCP server; set MICROVM_MCP_GIT_HOSTS to permit it`
+      `repository host ${host} is not allowed by this MCP server; set DYNOCAP_MCP_GIT_HOSTS to permit it`
     );
 }
 

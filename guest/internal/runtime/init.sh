@@ -11,9 +11,9 @@ load_modules() {
  while IFS= read -r ko; do [ -z "$ko" ] || insmod "$ko"; done < "$1"
 }
 # The initramfs loaded vsock before switch_root; loading it again cost 4 ms of failed insmod.
-setsid /usr/local/bin/microvm-agent &
+setsid /usr/local/bin/dynocap-agent &
 (
- load_modules /etc/microvm-net-modules
+ load_modules /etc/dynocap-net-modules
  for i in /sys/class/net/*; do
   name=${i##*/}; [ "$name" = lo ] && continue
   ip link set "$name" up

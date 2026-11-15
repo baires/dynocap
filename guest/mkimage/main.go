@@ -6,14 +6,14 @@ import (
 	"os"
 	"runtime"
 
-	"microvm.dev/guest/internal/image"
+	"dynocap.dev/guest/internal/image"
 )
 
 func main() {
 	arch := flag.String("arch", defaultArch(), "guest arch: aarch64 or x86_64")
 	out := flag.String("out", "", "output directory for kernel, initrd, and manifest.json")
 	cache := flag.String("cache", "", "directory for downloaded Alpine artifacts")
-	repo := flag.String("repo", ".", "path to the microvm repository root")
+	repo := flag.String("repo", ".", "path to the dynocap repository root")
 	flag.Parse()
 	if *out == "" || *cache == "" {
 		fmt.Fprintln(os.Stderr, "usage: mkimage --arch aarch64|x86_64 --out DIR --cache DIR [--repo ROOT]")

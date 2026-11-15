@@ -1,0 +1,571 @@
+#if os(macOS)
+import Darwin
+import Foundation
+import DynoCapCore
+import Virtualization
+
+/// Boots a Linux guest with VZLinuxBootLoader and talks to the in-guest agent
+/// over VZVirtioSocketDevice. Compiled only on macOS; this file is not
+/// type-checked on Linux.
+public final class VirtualizationBackend: VMBackend {
+    public var onGuestExit: ((String, UUID, String?) -> Void)?
+    private let lock = NSLock()
+    private var machines: [String: LinuxVM] = [:]
+    private var guestWrites: [String: GuestWriteOrder] = [:]
+
+    public init() {}
+
+    public func boot(_ request: BootRequest, completion: @escaping (Result<Void, Error>) -> Void) {
+        let vm = LinuxVM(request: request)
+        lock.lock()
+        machines[request.name] = vm
+        lock.unlock()
+        vm.onExit = { [weak self, weak vm] message in
+            guard let self = self else { return }
+            self.lock.lock()
+            if self.machines[request.name] === vm {
+                self.machines[request.name] = nil
+                self.guestWrites[request.name] = nil
+            }
+            self.lock.unlock()
+            self.onGuestExit?(request.name, request.generation, message)
+        }
+        vm.boot(completion: completion)
+    }
+
+    public func exec(_ request: ExecRequest, emit: @escaping (ExecEvent) -> Void) {
+        lock.lock()
+        let vm = machines[request.name]
+        let writes = guestWriteOrderLocked(request.name)
+        lock.unlock()
+        guard let vm = vm else {
+            emit(.failed("VM \(request.name) is not running"))
+            return
+        }
+        // Queued, not run here: the daemon still holds its lifecycle lock. Stdin and
+        // signals sync on the same queue, so they cannot pass this exec frame.
+        writes.async { vm.exec(request, emit: emit) }
+    }
+
+    public func cancelExec(name: String, id: UInt32) {
+        lock.lock()
+        let vm = machines[name]
+        let writes = guestWriteOrderLocked(name)
+        lock.unlock()
+        writes.async { vm?.cancelExec(id) }
+    }
+
+    public func writeStdin(name: String, id: UInt32, data: Data) throws {
+        lock.lock()
+        let vm = machines[name]
+        let writes = guestWriteOrderLocked(name)
+        lock.unlock()
+        guard let vm else { throw DynoCapError("VM \(name) is not running") }
+        try writes.sync { try vm.writeStdin(id, data) }
+    }
+
+    public func closeStdin(name: String, id: UInt32) throws {
+        lock.lock()
+        let vm = machines[name]
+        let writes = guestWriteOrderLocked(name)
+        lock.unlock()
+        guard let vm else { throw DynoCapError("VM \(name) is not running") }
+        try writes.sync { try vm.closeStdin(id) }
+    }
+
+    public func signalExec(name: String, id: UInt32, signal: Int32) throws {
+        lock.lock()
+        let vm = machines[name]
+        let writes = guestWriteOrderLocked(name)
+        lock.unlock()
+        guard let vm else { throw DynoCapError("VM \(name) is not running") }
+        try writes.sync { try vm.signalExec(id, signal) }
+    }
+
+    public func resizeExec(name: String, id: UInt32, size: TerminalSize) throws {
+        lock.lock()
+        let vm = machines[name]
+        let writes = guestWriteOrderLocked(name)
+        lock.unlock()
+        guard let vm else { throw DynoCapError("VM \(name) is not running") }
+        try writes.sync { try vm.resizeExec(id, size) }
+    }
+
+    /// Caller holds `lock`.
+    private func guestWriteOrderLocked(_ name: String) -> GuestWriteOrder {
+        if let writes = guestWrites[name] { return writes }
+        let writes = GuestWriteOrder(label: "dynocap.guest-io.\(name)")
+        guestWrites[name] = writes
+        return writes
+    }
+
+    public func destroy(name: String, completion: @escaping (Result<Void, Error>) -> Void) {
+        lock.lock()
+        let vm = machines[name]
+        lock.unlock()
+        guard let vm = vm else {
+            completion(.success(()))
+            return
+        }
+        vm.destroy(completion: completion)
+    }
+}
+
+final class LinuxVM: NSObject, VZVirtualMachineDelegate {
+    let request: BootRequest
+    let queue: DispatchQueue
+    var virtualMachine: VZVirtualMachine?
+    var socketConnection: VZVirtioSocketConnection?
+    private var link: GuestLink?
+    private var guestAgent = ""
+    private let linkLock = NSLock()
+
+    private var connectedLink: GuestLink? {
+        linkLock.lock()
+        defer { linkLock.unlock() }
+        return link
+    }
+    var keptPipes: [Pipe] = []
+    var consoleHandle: FileHandle?
+    var onExit: ((String?) -> Void)?
+    private var forwarder: FilteredForwarder?
+    private var bootCompletion: ((Result<Void, Error>) -> Void)?
+    private var bootFinished = false
+    private var exited = false
+    private var stopping = false
+    private var pendingStops: [(Result<Void, Error>) -> Void] = []
+    private let bootLock = NSLock()
+    private let handlerLock = NSLock()
+    private var handlers: [UInt32: (GuestMessage) -> Void] = [:]
+
+    init(request: BootRequest) {
+        self.request = request
+        self.queue = DispatchQueue(label: "dynocap.vm.\(request.name)")
+        super.init()
+    }
+
+    func boot(completion: @escaping (Result<Void, Error>) -> Void) {
+        bootCompletion = completion
+        queue.async { [weak self] in
+            guard let self = self else { return }
+            do {
+                try self.makeAndStart()
+            } catch {
+                self.forwarder?.stop()
+                self.forwarder = nil
+                self.finishBoot(.failure(error))
+            }
+        }
+    }
+
+    func exec(_ request: ExecRequest, emit: @escaping (ExecEvent) -> Void) {
+        guard let link = connectedLink else {
+            emit(.failed("guest agent is not connected"))
+            return
+        }
+        // An older agent drops the whole connection on EXEC_TTY, which would end every exec in this sandbox.
+        if request.terminal != nil && !guestAgentAllocatesTerminals(guestAgent) {
+            emit(.failed("guest agent cannot allocate terminals; rebuild the guest image"))
+            return
+        }
+        // Zero starts no guest timer; the sandbox TTL still ends the command.
+        let bounded = max(0, min(request.timeoutSeconds, 24 * 60 * 60))
+        let timeoutMS = UInt32(bounded * 1000)
+        let start = ExecStart(
+            id: request.id,
+            timeoutMS: timeoutMS,
+            argv: request.argv,
+            env: request.env,
+            cwd: request.cwd,
+            terminal: request.terminal
+        )
+        let started = DispatchSemaphore(value: 0)
+        handlerLock.lock()
+        handlers[request.id] = { [weak self] message in
+            switch message {
+            case .stdout(_, let data):
+                emit(.stdout(data))
+            case .stderr(_, let data):
+                emit(.stderr(data))
+            case .exit(_, let code, let signal):
+                self?.clearHandler(request.id)
+                emit(.finished(code: code, signal: signal))
+            case .error(_, let text):
+                self?.clearHandler(request.id)
+                emit(.failed(text))
+            case .started:
+                started.signal()
+            default:
+                break
+            }
+        }
+        handlerLock.unlock()
+        do {
+            try link.write(.exec(start))
+            if request.streamStdin { return }
+            if let file = request.stdinFile {
+                guard started.wait(timeout: .now() + .seconds(max(1, bounded))) == .success else {
+                    throw DynoCapError("guest did not acknowledge stdin command")
+                }
+                let input = try FileHandle(forReadingFrom: file)
+                defer { try? input.close() }
+                while let data = try input.read(upToCount: 256 << 10), !data.isEmpty {
+                    try link.write(.stdin(id: request.id, data: data))
+                }
+            }
+            try link.write(.stdinEOF(id: request.id))
+        } catch {
+            clearHandler(request.id)
+            emit(.failed(String(describing: error)))
+        }
+    }
+
+    func writeStdin(_ id: UInt32, _ data: Data) throws {
+        guard let link = connectedLink else { throw DynoCapError("guest agent is not connected") }
+        try link.write(.stdin(id: id, data: data))
+    }
+
+    func closeStdin(_ id: UInt32) throws {
+        guard let link = connectedLink else { throw DynoCapError("guest agent is not connected") }
+        try link.write(.stdinEOF(id: id))
+    }
+
+    func signalExec(_ id: UInt32, _ signal: Int32) throws {
+        guard guestAgentDeliversSignals(guestAgent) else {
+            throw DynoCapError("guest agent cannot deliver signals; rebuild the guest image")
+        }
+        guard signal > 0, signal < 64 else { throw DynoCapError("unsupported signal \(signal)") }
+        guard let link = connectedLink else { throw DynoCapError("guest agent is not connected") }
+        try link.write(.signal(id: id, signal: signal))
+    }
+
+    func resizeExec(_ id: UInt32, _ size: TerminalSize) throws {
+        guard guestAgentAllocatesTerminals(guestAgent) else {
+            throw DynoCapError("guest agent cannot allocate terminals; rebuild the guest image")
+        }
+        guard let link = connectedLink else { throw DynoCapError("guest agent is not connected") }
+        try link.write(.resize(id: id, size: size))
+    }
+
+    func cancelExec(_ id: UInt32) {
+        try? connectedLink?.write(.kill(id: id))
+    }
+
+    func destroy(completion: @escaping (Result<Void, Error>) -> Void) {
+        queue.async { [weak self] in
+            guard let self = self else {
+                completion(.success(()))
+                return
+            }
+            self.stopping = true
+            self.disconnectGuest()
+            guard let vm = self.virtualMachine else {
+                self.teardown(message: nil)
+                completion(.success(()))
+                return
+            }
+            if vm.state == .starting {
+                // VZ rejects stop during start. Its completion will drain these requests.
+                self.pendingStops.append(completion)
+                return
+            }
+            if vm.state == .stopped {
+                self.teardown(message: nil)
+                completion(.success(()))
+            } else {
+                vm.stop { error in
+                    if let error, vm.state != .stopped {
+                        completion(.failure(error))
+                    } else {
+                        self.teardown(message: nil)
+                        completion(.success(()))
+                    }
+                }
+            }
+        }
+    }
+
+    func guestDidStop(_ virtualMachine: VZVirtualMachine) {
+        teardown(message: nil)
+    }
+
+    func virtualMachine(_ virtualMachine: VZVirtualMachine, didStopWithError error: Error) {
+        teardown(message: error.localizedDescription)
+    }
+
+    private func makeAndStart() throws {
+        let config = VZVirtualMachineConfiguration()
+        let minCPU = VZVirtualMachineConfiguration.minimumAllowedCPUCount
+        let maxCPU = VZVirtualMachineConfiguration.maximumAllowedCPUCount
+        guard request.cpus >= minCPU, request.cpus <= maxCPU else {
+            throw DynoCapError("cpus \(request.cpus) is outside \(minCPU)-\(maxCPU) on this Mac")
+        }
+        let bytes = UInt64(request.memoryMB) * 1024 * 1024
+        let minMem = VZVirtualMachineConfiguration.minimumAllowedMemorySize
+        let maxMem = VZVirtualMachineConfiguration.maximumAllowedMemorySize
+        guard bytes >= minMem, bytes <= maxMem else {
+            throw DynoCapError(
+                "memory \(request.memoryMB) MB is outside \(minMem / 1024 / 1024)-\(maxMem / 1024 / 1024) MB on this Mac"
+            )
+        }
+        config.cpuCount = request.cpus
+        config.memorySize = bytes
+
+        let boot = VZLinuxBootLoader(kernelURL: request.kernelURL)
+        boot.initialRamdiskURL = request.initrdURL
+        // hvc0 is the virtio console. rdinit skips Alpine's /sbin/init.
+        boot.commandLine = "console=hvc0 rdinit=/init panic=1"
+        if let runtime = request.runtimeDirectory, let workspace = request.workspaceDisk {
+            boot.commandLine += " dynocap.task=1"
+            config.storageDevices = try [
+                VZVirtioBlockDeviceConfiguration(
+                    attachment: VZDiskImageStorageDeviceAttachment(url: runtime.appendingPathComponent("runtime.ext4"), readOnly: true)),
+                // The workspace file is discarded on daemon restart and results leave through the agent, so
+                // host flushes protect nothing. Full sync cost 8 ms on the workspace mount alone.
+                VZVirtioBlockDeviceConfiguration(
+                    attachment: VZDiskImageStorageDeviceAttachment(
+                        url: workspace, readOnly: false, cachingMode: .automatic, synchronizationMode: .none)),
+            ]
+        }
+        config.bootLoader = boot
+        config.entropyDevices = [VZVirtioEntropyDeviceConfiguration()]
+
+        switch request.network {
+        case .nat:
+            config.networkDevices = networkDevices(for: .nat)
+        case .filtered:
+            let forwarder = try FilteredForwarder.start(allowedHosts: request.filteredHosts)
+            self.forwarder = forwarder
+            config.networkDevices = [forwarder.device]
+        case .none:
+            config.networkDevices = []
+        }
+
+        let guestToHost = Pipe()
+        let hostToGuest = Pipe()
+        let serial = VZVirtioConsoleDeviceSerialPortConfiguration()
+        serial.attachment = VZFileHandleSerialPortAttachment(
+            fileHandleForReading: hostToGuest.fileHandleForReading,
+            fileHandleForWriting: guestToHost.fileHandleForWriting
+        )
+        config.serialPorts = [serial]
+        keptPipes = [guestToHost, hostToGuest]
+        startConsoleDrain(guestToHost)
+
+        config.socketDevices = [VZVirtioSocketDeviceConfiguration()]
+        try config.validate()
+
+        let vm = VZVirtualMachine(configuration: config, queue: queue)
+        vm.delegate = self
+        virtualMachine = vm
+        vm.start { [weak self] result in
+            guard let self = self else { return }
+            self.queue.async {
+                if self.stopping {
+                    let completions = self.pendingStops
+                    self.pendingStops = []
+                    guard !completions.isEmpty else { return }
+                    if case .failure(let error) = result {
+                        self.teardown(message: error.localizedDescription)
+                        for completion in completions { completion(.success(())) }
+                    } else {
+                        self.destroy { outcome in
+                            for completion in completions { completion(outcome) }
+                        }
+                    }
+                    return
+                }
+                if case .failure(let error) = result {
+                    self.finishBoot(.failure(error))
+                    return
+                }
+                let deadline = Date().addingTimeInterval(TimeInterval(self.request.bootTimeoutSeconds))
+                self.connectAgent(deadline: deadline)
+            }
+        }
+    }
+
+    private func startConsoleDrain(_ pipe: Pipe) {
+        let fd = dup(pipe.fileHandleForReading.fileDescriptor)
+        guard fd >= 0 else { return }
+        let path = request.consoleLogURL.path
+        Thread.detachNewThread {
+            let logFD = open(path, O_WRONLY | O_CREAT | O_APPEND, mode_t(0o644))
+            defer {
+                if logFD >= 0 { close(logFD) }
+                close(fd)
+            }
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            // The guest controls this stream. Past the cap it is still read, so hvc0 never blocks, but not stored.
+            var room = consoleLogLimit
+            while true {
+                let n = buffer.withUnsafeMutableBytes { raw -> Int in
+                    guard let base = raw.baseAddress else { return 0 }
+                    return read(fd, base, raw.count)
+                }
+                if n <= 0 { break }
+                guard logFD >= 0, room > 0 else { continue }
+                let kept = min(n, room)
+                _ = buffer.withUnsafeBytes { raw in
+                    write(logFD, raw.baseAddress, kept)
+                }
+                room -= kept
+                if room == 0 {
+                    let note = "\n[dynocap: console output truncated at \(consoleLogLimit >> 20) MiB]\n"
+                    _ = note.withCString { write(logFD, $0, strlen($0)) }
+                }
+            }
+        }
+    }
+
+    private func connectAgent(deadline: Date) {
+        guard !exited, !stopping, let vm = virtualMachine else {
+            finishBoot(.failure(DynoCapError("virtual machine disappeared")))
+            return
+        }
+        guard let device = vm.socketDevices.first as? VZVirtioSocketDevice else {
+            finishBoot(.failure(DynoCapError("VM has no virtio-vsock device")))
+            return
+        }
+        device.connect(toPort: GuestProtocol.port) { [weak self] result in
+            guard let self = self else { return }
+            self.queue.async {
+                guard !self.exited, !self.stopping else { return }
+                if case .success(let connection) = result {
+                    self.accept(connection)
+                    return
+                }
+                if Date() < deadline {
+                    self.queue.asyncAfter(deadline: .now() + .milliseconds(10)) {
+                        self.connectAgent(deadline: deadline)
+                    }
+                } else {
+                    let tail = tailFile(self.request.consoleLogURL, lines: 40)
+                    var message = "guest agent did not accept vsock port \(GuestProtocol.port) before the boot timeout"
+                    if !tail.isEmpty {
+                        message += "\n--- console.log ---\n\(tail)"
+                    }
+                    self.finishBoot(.failure(DynoCapError(message)))
+                }
+            }
+        }
+    }
+
+    private func accept(_ connection: VZVirtioSocketConnection) {
+        guard !exited, !stopping else {
+            connection.close()
+            return
+        }
+        let raw = connection.fileDescriptor
+        guard raw >= 0 else {
+            finishBoot(.failure(DynoCapError("vsock connection has no file descriptor")))
+            return
+        }
+        let fd = dup(raw)
+        guard fd >= 0 else {
+            finishBoot(.failure(DynoCapError("dup vsock fd: \(String(cString: strerror(errno)))")))
+            return
+        }
+        // Keep the Virtualization object alive; it owns the underlying socket.
+        socketConnection = connection
+        let link = GuestLink(fd: fd)
+        linkLock.lock()
+        self.link = link
+        linkLock.unlock()
+        link.readLoop { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+            case .success(let message):
+                self.onGuest(message)
+            case .failure(let error):
+                let text = String(describing: error)
+                self.finishBoot(.failure(error))
+                self.failExecs(text)
+                self.queue.async {
+                    if !self.stopping { self.destroy { _ in } }
+                }
+            }
+        }
+    }
+
+    private func onGuest(_ message: GuestMessage) {
+        switch message {
+        case .hello(let version, let agent):
+            guestAgent = agent
+            if version != GuestProtocol.version {
+                finishBoot(.failure(DynoCapError("guest protocol version \(version), host wants \(GuestProtocol.version)")))
+                return
+            }
+            finishBoot(.success(()))
+        default:
+            guard let id = message.id else { return }
+            handlerLock.lock()
+            let handler = handlers[id]
+            handlerLock.unlock()
+            handler?(message)
+        }
+    }
+
+    private func clearHandler(_ id: UInt32) {
+        handlerLock.lock()
+        handlers[id] = nil
+        handlerLock.unlock()
+    }
+
+    private func failExecs(_ text: String) {
+        handlerLock.lock()
+        let pending = handlers
+        handlers.removeAll()
+        handlerLock.unlock()
+        for (_, handler) in pending {
+            DispatchQueue.global().async { handler(.error(id: 0, message: text)) }
+        }
+    }
+
+    private func finishBoot(_ result: Result<Void, Error>) {
+        bootLock.lock()
+        let already = bootFinished
+        bootFinished = true
+        let completion = bootCompletion
+        bootCompletion = nil
+        bootLock.unlock()
+        if already { return }
+        completion?(result)
+    }
+
+    private func disconnectGuest() {
+        linkLock.lock()
+        let connection = link
+        link = nil
+        linkLock.unlock()
+        connection?.close()
+        socketConnection?.close()
+        socketConnection = nil
+    }
+
+    private func teardown(message: String?) {
+        bootLock.lock()
+        let already = exited
+        exited = true
+        bootLock.unlock()
+        if already { return }
+        forwarder?.stop()
+        forwarder = nil
+        finishBoot(.failure(DynoCapError(message ?? "guest exited")))
+        disconnectGuest()
+        failExecs(message ?? "guest exited")
+        virtualMachine = nil
+        onExit?(message)
+    }
+}
+// Kept separate so the actual Virtualization configuration can be checked without booting a guest.
+/// Console bytes kept per boot. Guest root can write hvc0 at disk speed for the whole TTL.
+let consoleLogLimit = 8 << 20
+
+func networkDevices(for mode: NetworkMode) -> [VZNetworkDeviceConfiguration] {
+    guard mode == .nat else { return [] }
+    let network = VZVirtioNetworkDeviceConfiguration()
+    network.attachment = VZNATNetworkDeviceAttachment()
+    return [network]
+}
+#endif

@@ -7,9 +7,9 @@ import { Task } from "../sdk/typescript/dist/index.js";
 
 const repositoryUrl = "https://github.com/octocat/Hello-World.git";
 const [reportArgument] = process.argv.slice(2);
-if (!reportArgument || !process.env.MICROVM_HOME) {
+if (!reportArgument || !process.env.DYNOCAP_HOME) {
   throw new Error(
-    "MICROVM_HOME=PRIVATE_HOME node scripts/validate-public-repo-task.mjs REPORT.json"
+    "DYNOCAP_HOME=PRIVATE_HOME node scripts/validate-public-repo-task.mjs REPORT.json"
   );
 }
 const reportPath = path.resolve(reportArgument);

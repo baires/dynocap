@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"microvm.dev/guest/internal/protocol"
+	"dynocap.dev/guest/internal/protocol"
 )
 
 func collectExec(t *testing.T, msg protocol.Message) []protocol.Message {
@@ -101,7 +101,7 @@ func TestExecNotFound(t *testing.T) {
 	msgs := collectExec(t, protocol.Message{
 		Type: protocol.TypeExec,
 		ID:   3,
-		Argv: []string{"/no/such/microvm-bin"},
+		Argv: []string{"/no/such/dynocap-bin"},
 	})
 	code := int32(-1)
 	for _, m := range msgs {
@@ -281,7 +281,7 @@ func TestSignalReachesProcessGroupWhileStdinIsBlocked(t *testing.T) {
 	if !protocol.AdvertisesSignal(hello.Agent) {
 		t.Fatalf("agent %q does not advertise signals", hello.Agent)
 	}
-	if protocol.AdvertisesSignal("microvm-agent") || protocol.AdvertisesSignal("microvm-agent signal=10") {
+	if protocol.AdvertisesSignal("dynocap-agent") || protocol.AdvertisesSignal("dynocap-agent signal=10") {
 		t.Fatal("old agent advertised signals")
 	}
 	err = protocol.WriteFrame(client, protocol.Message{
@@ -378,7 +378,7 @@ func TestStdinBeforeStartIsKeptAcrossEarlyEOF(t *testing.T) {
 // check runs in a child test binary started the same way, with the signals ignored.
 func TestCommandsDoNotInheritAnIgnoredInterrupt(t *testing.T) {
 	cmd := exec.Command("sh", "-c", `trap "" INT HUP; exec "$0" -test.run='^TestHelperStartedWithInterruptIgnored$'`, os.Args[0])
-	cmd.Env = append(os.Environ(), "MICROVM_AGENT_IGNORED_HELPER=1")
+	cmd.Env = append(os.Environ(), "DYNOCAP_AGENT_IGNORED_HELPER=1")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("helper failed: %v\n%s", err, out)
@@ -445,7 +445,7 @@ func TestStdinChunksStayInOrderWhenThePipeIsFull(t *testing.T) {
 }
 
 func TestHelperStartedWithInterruptIgnored(t *testing.T) {
-	if os.Getenv("MICROVM_AGENT_IGNORED_HELPER") != "1" {
+	if os.Getenv("DYNOCAP_AGENT_IGNORED_HELPER") != "1" {
 		t.Skip("helper for TestCommandsDoNotInheritAnIgnoredInterrupt")
 	}
 	resetInheritedSignals()
