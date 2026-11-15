@@ -102,7 +102,7 @@ Preserve the existing black/amber, Switzer/Plex identity. Keep the lifecycle in 
 
 ## Copy limits and evidence
 
-The user explicitly chose the intended release experience: Homebrew is primary, curl and source builds are alternatives. Homebrew and https://dynocap.dev/install.sh are planned launch contracts, marked placeholder in the content data. The source build remains available today. Do not invent a published skill installer. Start source snippets from an existing DynoCap source checkout and link the full prerequisite guide. Doctor's first preparation downloads verified inputs and may take minutes; do not imply first installation takes milliseconds. The hero example runs uname rather than assuming project dependencies exist.
+The user explicitly chose the intended release experience: Homebrew is primary, curl and source builds are alternatives. The Homebrew command is `brew install baires/tap/dynocap` (github.com/baires/homebrew-tap). https://dynocap.dev/install.sh is the curl command, and the site serves `scripts/install.sh` at `/install.sh`. The source build remains `./scripts/build-macos.sh` from a checkout. Do not invent a published skill installer. Start source snippets from an existing DynoCap source checkout and link the full prerequisite guide. Doctor's first preparation downloads verified inputs and may take minutes; do not imply first installation takes milliseconds. The hero example runs uname rather than assuming project dependencies exist.
 
 SDK and MCP packages ship in this repository; their public npm packages are not available. Link local setup guides. The production URL https://dynocap.dev remains a placeholder.
 

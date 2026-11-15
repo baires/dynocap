@@ -1,18 +1,14 @@
 #!/bin/sh
 # Install the latest darwin-arm64 release into ~/.local/dynocap and re-sign it
-# on this Mac. Replace OWNER with the GitHub account that publishes releases.
+# on this Mac. https://dynocap.dev/install.sh serves this file.
 set -eu
 set -o pipefail
 
-OWNER="${DYNOCAP_GITHUB_OWNER:-OWNER}"
+OWNER="${DYNOCAP_GITHUB_OWNER:-baires}"
 REPO="${DYNOCAP_GITHUB_REPO:-dynocap}"
 
 if [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then
   echo "dynocap installs on Apple Silicon (darwin-arm64) only." >&2
-  exit 1
-fi
-if [ "$OWNER" = "OWNER" ]; then
-  echo "Replace OWNER in this script with the GitHub account that publishes dynocap releases." >&2
   exit 1
 fi
 
@@ -28,20 +24,18 @@ mke2fs_present() {
   return 1
 }
 
-tag=$(curl -fsSL "https://api.github.com/repos/${OWNER}/${REPO}/releases/latest" \
-  | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' \
-  | head -n 1)
-if [ -z "$tag" ]; then
-  echo "Could not read the latest ${OWNER}/${REPO} release." >&2
-  exit 1
-fi
-
-name="dynocap-${tag}-darwin-arm64.tar.gz"
-base="https://github.com/${OWNER}/${REPO}/releases/download/${tag}"
+name="dynocap-darwin-arm64.tar.gz"
+base="https://github.com/${OWNER}/${REPO}/releases/latest/download"
 workdir=$(mktemp -d)
 trap 'rm -rf "$workdir"' EXIT
-curl -fsSL -o "$workdir/$name" "${base}/${name}"
-curl -fsSL -o "$workdir/${name}.sha256" "${base}/${name}.sha256"
+if ! curl -fsSL -o "$workdir/$name" "${base}/${name}"; then
+  echo "Could not download the latest ${OWNER}/${REPO} release (${name})." >&2
+  exit 1
+fi
+if ! curl -fsSL -o "$workdir/${name}.sha256" "${base}/${name}.sha256"; then
+  echo "Could not download the checksum for the latest ${OWNER}/${REPO} release." >&2
+  exit 1
+fi
 xattr -d com.apple.quarantine "$workdir/$name" 2>/dev/null || true
 (
   cd "$workdir"
@@ -49,6 +43,7 @@ xattr -d com.apple.quarantine "$workdir/$name" 2>/dev/null || true
 )
 # The checksum comes from the same release as the archive, so it only catches
 # corruption. The attestation proves this repository's release workflow built it.
+# The stable asset name is a byte copy of the versioned archive the workflow attested.
 if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
   if ! gh attestation verify "$workdir/$name" --repo "${OWNER}/${REPO}" >/dev/null; then
     echo "The archive has no valid build attestation from ${OWNER}/${REPO}. Not installing." >&2

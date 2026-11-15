@@ -33,5 +33,16 @@ jobs:
           gh release create "${GITHUB_REF_NAME}" \
             "dist/dynocap-${GITHUB_REF_NAME}-darwin-arm64.tar.gz" \
             "dist/dynocap-${GITHUB_REF_NAME}-darwin-arm64.tar.gz.sha256" \
+            "dist/dynocap-darwin-arm64.tar.gz" \
+            "dist/dynocap-darwin-arm64.tar.gz.sha256" \
             --title "${GITHUB_REF_NAME}" \
-            --notes "Apple Silicon (darwin-arm64) CLI, guest tree, and guest image. Installers re-sign the CLI on the Mac that boots VMs. This workflow does not boot a VM."
+            --notes "Apple Silicon (darwin-arm64) CLI, guest tree, and guest image. Installers re-sign the CLI on the Mac that boots VMs. The stable dynocap-darwin-arm64.tar.gz asset is a byte copy of the versioned archive. This workflow does not boot a VM."
+
+  # gh release create uses GITHUB_TOKEN, which does not start a release: published workflow.
+  notify-homebrew-tap:
+    needs: release
+    uses: ./.github/workflows/homebrew-tap.yml
+    secrets: inherit
+    with:
+      tag_name: ${{ github.ref_name }}
+      require_token: true

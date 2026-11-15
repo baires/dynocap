@@ -23,33 +23,46 @@ This release is Apple Silicon (`darwin-arm64`) only. Intel Macs are refused by
 the installers. There is no Apple Developer ID signature: both installers
 re-sign the CLI on your Mac with `codesign --sign -` and the bundled
 virtualization entitlement, and they clear the download quarantine flag.
-Runtime preparation still needs `mke2fs` from `e2fsprogs`.
+There is no Homebrew bottle, because pouring one would skip that re-sign.
+Runtime preparation still needs `mke2fs` from `e2fsprogs`. The first runtime
+preparation also needs Go 1.22 or newer. The guest image is in the release
+archive.
+
+### Homebrew
+
+```sh
+brew install baires/tap/dynocap
+```
+
+That formula lives in [baires/homebrew-tap](https://github.com/baires/homebrew-tap).
+On Homebrew 6, installing by this fully qualified name trusts the formula.
+Trust covers loading the tap's Ruby. Run this when you want the short name
+`dynocap` for a later install or upgrade:
+
+```sh
+brew trust --formula baires/tap/dynocap
+```
+
+The formula depends on macOS Ventura and `e2fsprogs`, and it refuses Intel.
+`e2fsprogs` is keg-only; DynoCap looks up `mke2fs` under the Homebrew prefix.
+A published release of this repository dispatches `dynocap-release` to the tap,
+which rewrites `Formula/dynocap.rb` from the versioned archive and its
+`.sha256` file. `packaging/homebrew/dynocap.rb` is the install method that
+generator must keep. After install, run `dynocap doctor --fix` in your project.
 
 ### Curl
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/OWNER/dynocap/main/scripts/install.sh | sh
+curl -fsSL https://dynocap.dev/install.sh | sh
 ```
 
-The script downloads the latest GitHub release, checks its sha256, unpacks it
-to `~/.local/dynocap`, and symlinks `~/.local/bin/dynocap`. If `mke2fs` is
-missing it tells you to run `brew install e2fsprogs`. Its last step is
-`dynocap doctor --fix`.
-
-### Homebrew
-
-`packaging/homebrew/dynocap.rb` is the formula for a tap named
-`OWNER/homebrew-tap`. Copy it into that tap, replace `OWNER`, and set `url`
-and `sha256` from the published `dynocap-<tag>-darwin-arm64.tar.gz` and its
-`.sha256` file. `brew trust` is required because this third-party formula runs
-`codesign`.
-
-```sh
-brew trust --formula OWNER/tap/dynocap
-brew install OWNER/tap/dynocap
-```
-
-The formula depends on macOS Ventura and `e2fsprogs`, and it refuses Intel.
+The site serves `scripts/install.sh`. The script downloads
+`dynocap-darwin-arm64.tar.gz` from the latest GitHub release, checks its
+sha256, unpacks it to `~/.local/dynocap`, and symlinks `~/.local/bin/dynocap`.
+The checksum catches a truncated download. When `gh` is installed and logged
+in, the script also requires a build attestation from `baires/dynocap`. If
+`mke2fs` is missing it tells you to run `brew install e2fsprogs`. Its last
+step is `dynocap doctor --fix`.
 
 ### From source
 
@@ -69,7 +82,7 @@ skill that teaches a coding agent the task workflow, the network rules, and when
 to prefer MCP. It works with the CLI alone; MCP is optional.
 
 ```sh
-npx skills add OWNER/dynocap
+npx skills add baires/dynocap
 ```
 
 Or copy the `skills/dynocap` folder into a skills directory your agent scans:
