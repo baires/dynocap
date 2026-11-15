@@ -1,0 +1,59 @@
+# Opens one pull request, release/next, whose title is chore: release vX.Y.Z.
+# The version comes from pull request titles merged since DynoCapInfo.version
+# last changed. fix is a patch, feat is a minor, and a bang is a major.
+# Merging it does not build an archive or create a GitHub release.
+
+name: Version pull request
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: version-pr
+  cancel-in-progress: false
+
+jobs:
+  open:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Plan the version
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release/plan-version.mjs --apply
+      - name: Open or update the release pull request
+        if: steps.plan.outputs.open == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          set -eu
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B release/next
+          git add Sources/DynoCapCore/Support.swift
+          git commit -m "chore: release v${VERSION}"
+          if git ls-remote --exit-code --heads origin release/next >/dev/null 2>&1; then
+            git push --force-with-lease origin release/next
+          else
+            git push -u origin release/next
+          fi
+          title="chore: release v${VERSION}"
+          body="Version bump from pull request titles merged since the current version. Merging this does not publish. After it is on main, create the GitHub release v${VERSION} yourself."
+          number="$(gh pr list --head release/next --base main --json number --jq '.[0].number // empty')"
+          if [ -n "$number" ]; then
+            gh pr edit "$number" --title "$title" --body "$body"
+          else
+            gh pr create --base main --head release/next --title "$title" --body "$body"
+          fi

@@ -90,6 +90,12 @@ Or copy the `skills/dynocap` folder into a skills directory your agent scans:
 Code reads `.claude/skills/` and `~/.claude/skills/`). `npm run lint` checks
 the skill against the specification with `scripts/validate-skills.mjs`.
 
+## Release
+
+Pull request titles are Conventional Commits. The bump is the title: `fix` is a patch, `feat` is a minor, and `type!:` is a breaking major. `docs`, `test`, `refactor`, `perf`, `build`, `ci`, `chore`, and `revert` do not change the version. When several pull requests land, the highest bump wins.
+
+A push to `main` opens or updates `chore: release vX.Y.Z`, which writes that version into `DynoCapInfo.version`. Merging it does not publish. Create the GitHub release `vX.Y.Z` yourself after that commit is on `main`. The release workflow then packs the Apple Silicon archive, attests it, uploads it to the release you created, and updates the Homebrew formula.
+
 ## Quick start
 
 After `dynocap` is on your PATH, the repository workflow below is the same one
