@@ -105,9 +105,48 @@ Boot is the largest remaining piece of a small clone, about 320 ms, and it did n
 
 These task numbers use a private `MICROVM_HOME` and a copy of the prepared `shell:1` disk with the rebuilt agent written into it. The copy is not `~/.microvm`. A runtime prepared before this change still has the previous agent until it is prepared again.
 
+## 15 November 2026, same Mac
+
+Same Alpine 6.18.62 image. Numbers are medians of `clone --runtime shell:1` with the daemon up, one warmup discarded, results purged after each run. Baseline and changed binaries were run alternately against one private home. Host marks are timestamps of console bytes as they reached the daemon; guest marks are `/dev/kmsg` lines added to a scratch copy of the init scripts.
+
+A raw `run` was 288 ms. `vm.start` completed at about 120 ms, `Run /init` arrived at about 256 ms, the agent's listening line at 265 ms and hello at 272 ms. Padding the kernel file from 36 MB to 72 MB moved `vm.start` by under 10 ms and `Run /init` not at all, so file size is not the pre-kernel gap. Hello came a median 4.9 ms (max 12.6 ms, n=45) after the listening line.
+
+A task boot spent 53 ms between `Run /init` and listening, against 9 ms for a raw boot:
+
+| Guest step                                                   | Before | After |
+| ------------------------------------------------------------ | -----: | ----: |
+| initramfs: virtio_blk, crc16, mbcache, jbd2, ext4 `insmod`   |  20–30 |  same |
+| task init: mount the workspace (vdb), host `.full` sync      |    8.9 |   0.9 |
+| task init: vsock `insmod` again, every call failing (EEXIST) |    4.3 |     — |
+
+On the host, three things were serial or stalled:
+
+- `mke2fs` of the 8 GiB workspace took 90–160 ms. Clone blocked on it for a median 39 ms (max 106 ms) after the snapshot. An APFS clone of a formatted copy took 0.2 ms.
+- `Process.waitUntilExit` returned in 0.1 ms on most companion calls and in 65–67 ms on about one in four, after the child had closed its pipes.
+- `pack` of a one-file directory without Git took 52 ms, 34 ms of it `git init` and `check-ignore` for a tree with no `.gitignore`. A Git repository took 19 ms.
+
+For this repository (342 files, 78 commits), `import-git` was 428 ms of a 540 ms snapshot: copying `.git` 90–160 ms, `fsck --full` 130 ms, ref deletion, reflog expiry, `repack -a -d` and `prune` together 230 ms. Boot started only after it.
+
+What changed:
+
+- The workspace disk is cloned from a template formatted once per daemon start, and attached with `synchronizationMode: .none`. The file is deleted when the daemon restarts and results leave through the agent, so host flushes protected nothing.
+- The task init no longer reloads vsock.
+- Companion calls wait on the termination handler.
+- Ignore rules are evaluated only below a directory holding a `.gitignore`. The scratch repository has no other rule source; packed tars were byte-identical before and after for a plain directory, a Git directory, and this repository.
+- The sandbox boots while the host packs the tree and sanitizes history, and history import runs beside tree packing. A failed or cancelled snapshot waits for that boot, then cleanup destroys it. The cancellation message now names `import and boot`.
+
+| Clone                                                |  Before |  After |
+| ---------------------------------------------------- | ------: | -----: |
+| one-file directory, wall clock                       |  530 ms | 349 ms |
+| this repository, wall clock                          | 1006 ms | 538 ms |
+| this repository, snapshot                            |  628 ms | 492 ms |
+| this repository, boot not hidden behind the snapshot |  333 ms |   0 ms |
+
+The imported tree of this repository matched the host's 342 file hashes, and its history kept 78 commits and the same HEAD. `test-journey-macos.py` and `test-isolation-macos.py` passed on the changed build. A runtime prepared before this change keeps the second vsock load until it is prepared again.
+
 ## What is still open
 
-Snapshot restore and a warm pool are not measured. The ~140 ms before the guest clock moves is inside `VZVirtualMachine.start` and did not fall in proportion to kernel size. Outbound DHCP was not timed as a lease; on the Alpine kernel `udhcpc` failed immediately with `socket(AF_PACKET): Address family not supported by protocol`, and that call is no longer on the way to the agent.
+Snapshot restore and a warm pool are not measured. The ~140 ms before the guest clock moves is inside `VZVirtualMachine.start` and did not fall in proportion to kernel size. A kernel with vsock, virtio-blk and ext4 built in would remove the 20–30 ms of `insmod` on the task path; the 6.12.46 build measured 185 ms raw but had neither ext4 nor virtio-blk. For a repository, `import-git` is now the critical path; `fsck --connectivity-only` and cloning `.git` with `clonefile` are untested. `admit` reads every retained task directory to check the result quota, about 0.17 ms per retained task. Outbound DHCP was not timed as a lease; on the Alpine kernel `udhcpc` failed immediately with `socket(AF_PACKET): Address family not supported by protocol`, and that call is no longer on the way to the agent.
 
 ## Sources
 

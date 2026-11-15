@@ -255,10 +255,13 @@ enum HostTree {
         } else {
             process.standardOutput = result
         }
+        // waitUntilExit polls this thread's run loop and slept about 65 ms after one exit in four.
+        let exited = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in exited.signal() }
         try process.run()
         let data = output == nil ? result.fileHandleForReading.readDataToEndOfFile() : Data()
         let error = errors.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
+        exited.wait()
         guard process.terminationStatus == 0 else {
             throw MicroVMError("\(name): \((String(data: error, encoding: .utf8) ?? "<non-UTF8 error>"))")
         }

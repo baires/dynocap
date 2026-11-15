@@ -22,9 +22,10 @@ final class CreationCancellationTests: XCTestCase {
         let fixture = try makeFixture()
         fixture.cancelOnTree = true
         XCTAssertThrowsError(try fixture.manager.start(startCommand(fixture.root), cancellation: fixture.cancellation)) { error in
-            XCTAssertTrue(String(describing: error).contains("during import"))
+            XCTAssertTrue(String(describing: error).contains("during import and boot"))
         }
-        XCTAssertEqual(fixture.boots, 0)
+        // Boot overlaps the host snapshot, so the sandbox it started is the one destroyed.
+        XCTAssertEqual(fixture.boots, 1)
         XCTAssertGreaterThan(fixture.treeCalls, 0)
         XCTAssertEqual(fixture.destroyed.count, 1)
         XCTAssertFalse(fixture.destroyed.contains("task-kept"))
@@ -33,11 +34,24 @@ final class CreationCancellationTests: XCTestCase {
         XCTAssertNoThrow(try fixture.manager.admit())
     }
 
+    func testFailedSnapshotDestroysTheSandboxBootedBesideIt() throws {
+        let fixture = try makeFixture()
+        fixture.failOnPack = true
+        XCTAssertThrowsError(try fixture.manager.start(startCommand(fixture.root), cancellation: fixture.cancellation)) { error in
+            XCTAssertTrue(String(describing: error).contains("pack refused"))
+        }
+        XCTAssertEqual(fixture.boots, 1)
+        XCTAssertEqual(fixture.destroyed.count, 1)
+        XCTAssertFalse(fixture.destroyed.contains("task-kept"))
+        XCTAssertEqual(try taskIDs(fixture.root), ["task-kept"])
+        XCTAssertNoThrow(try fixture.manager.admit())
+    }
+
     func testCancellationDuringBootAndAfterSuccessCleansUpTheNewSandbox() throws {
         let booting = try makeFixture()
         booting.cancelOnBoot = true
         XCTAssertThrowsError(try booting.manager.start(startCommand(booting.root), cancellation: booting.cancellation)) { error in
-            XCTAssertTrue(String(describing: error).contains("during boot"))
+            XCTAssertTrue(String(describing: error).contains("during import and boot"))
         }
         XCTAssertEqual(booting.boots, 1)
         XCTAssertEqual(booting.destroyed.count, 1)
@@ -122,6 +136,7 @@ final class CreationCancellationTests: XCTestCase {
         var treeCalls = 0
         var destroyed: [String] = []
         var cancelOnTree = false
+        var failOnPack = false
         var cancelOnBoot = false
         var cancelOnExecute = false
         init(root: URL, keptPatch: URL) {
@@ -185,7 +200,8 @@ final class CreationCancellationTests: XCTestCase {
             },
             hostTree: { name, args, _, output in
                 fixture.treeCalls += 1
-                if fixture.cancelOnTree { fixture.cancellation.cancel() }
+                if fixture.cancelOnTree, name == "microvm-workspace", args[0] == "pack" { fixture.cancellation.cancel() }
+                if fixture.failOnPack, name == "microvm-workspace", args[0] == "pack" { throw MicroVMError("pack refused") }
                 if let output { try Data().write(to: output) }
                 if name == "microvm-workspace", args[0] == "unpack" {
                     try FileManager.default.createDirectory(atPath: args[1], withIntermediateDirectories: true)

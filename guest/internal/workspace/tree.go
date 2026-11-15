@@ -301,7 +301,9 @@ func names(root string, project, useGit bool) ([]string, error) {
 // never run. Paths in keep are included even when ignored, and their parent
 // directories are still walked. Other ignored directories are not walked.
 // Git starts only when a listed path is outside keep. A diff of an unchanged
-// imported tree does not pay for git init.
+// imported tree does not pay for git init. Ignore rules come only from
+// .gitignore files in the tree, so a directory with none in itself or above
+// it is not checked; a plain directory with none never starts Git.
 func filesRespectingIgnore(root string, keep map[string]bool) ([]string, error) {
 	ancestors := map[string]bool{}
 	for n := range keep {
@@ -316,8 +318,8 @@ func filesRespectingIgnore(root string, keep map[string]bool) ([]string, error) 
 		}
 	}()
 	var names []string
-	var walk func(string) error
-	walk = func(rel string) error {
+	var walk func(string, bool) error
+	walk = func(rel string, rulesAbove bool) error {
 		dir := root
 		if rel != "" {
 			dir = filepath.Join(root, filepath.FromSlash(rel))
@@ -332,6 +334,12 @@ func filesRespectingIgnore(root string, keep map[string]bool) ([]string, error) 
 		}
 		items := make([]item, 0, len(entries))
 		var unchecked []string
+		rules := rulesAbove
+		for _, entry := range entries {
+			if entry.Name() == ".gitignore" {
+				rules = true
+			}
+		}
 		for _, entry := range entries {
 			if entry.Name() == ".git" {
 				continue
@@ -341,7 +349,7 @@ func filesRespectingIgnore(root string, keep map[string]bool) ([]string, error) 
 				child = rel + "/" + entry.Name()
 			}
 			items = append(items, item{child, entry})
-			if !keep[child] && !ancestors[child] {
+			if rules && !keep[child] && !ancestors[child] {
 				unchecked = append(unchecked, child)
 			}
 		}
@@ -370,13 +378,13 @@ func filesRespectingIgnore(root string, keep map[string]bool) ([]string, error) 
 				names = append(names, it.rel)
 				continue
 			}
-			if err := walk(it.rel); err != nil {
+			if err := walk(it.rel, rules); err != nil {
 				return err
 			}
 		}
 		return nil
 	}
-	if err := walk(""); err != nil {
+	if err := walk("", false); err != nil {
 		return nil, err
 	}
 	sort.Strings(names)

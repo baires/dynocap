@@ -1,3 +1,6 @@
+#if canImport(Darwin)
+import Darwin
+#endif
 import Foundation
 
 public struct TaskCommand: Codable, Equatable {
@@ -114,6 +117,8 @@ final class TaskManager {
     let hostTree: (String, [String], URL?, URL?) throws -> Data
     let fm = FileManager.default
     var root: URL { paths.home.appendingPathComponent("tasks") }
+    /// Formatted by the first task start after the daemon starts, so an upgraded mkruntime takes effect on restart.
+    var workspaceTemplate: URL { paths.cache.appendingPathComponent("workspace-template.ext4") }
     func dir(_ id: String) -> URL { root.appendingPathComponent(id) }
     func save(_ record: TaskRecord) throws {
         try JSONEncoder().encode(record).write(to: dir(record.id).appendingPathComponent("task.json"), options: .atomic)
@@ -157,6 +162,7 @@ final class TaskManager {
                 try? fm.removeItem(at: entry.appendingPathComponent(name))
             }
         }
+        try? fm.removeItem(at: workspaceTemplate)
         try? fm.removeItem(at: paths.home.appendingPathComponent("runtime-candidate"))
         // Seeds predating runtime-declared caches lived in npm-cache and are keyed by retired artifacts.
         try? fm.removeItem(at: paths.home.appendingPathComponent("npm-cache"))
@@ -244,44 +250,19 @@ final class TaskManager {
         progress(.importingSource)
         progress(.creatingWorkspace)
         let disk = directory.appendingPathComponent("workspace.ext4")
-        let workspaceJob = WorkspaceDiskJob()
+        let workspaceJob = BackgroundJob()
         let makeDisk = hostTree
-        let diskPath = disk.path
+        let template = workspaceTemplate
         workspaceJob.start {
-            _ = try makeDisk("microvm-mkruntime", ["workspace", diskPath], nil, nil)
+            try cloneWorkspaceDisk(template: template, to: disk) { _ = try makeDisk("microvm-mkruntime", ["workspace", $0.path], nil, nil) }
         }
         defer { workspaceJob.waitIgnoringError() }
-        switch resolved {
-        case .directory(let source):
-            _ = try hostTree("microvm-workspace", ["pack", source, "project"], nil, input)
-            let history = directory.appendingPathComponent("history")
-            let imported = String(
-                data: try hostTree(
-                    "microvm-workspace", ["import-git", source, history.path, command.history ?? "branches"], nil, nil),
-                encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if imported == "git" {
-                gitTar = directory.appendingPathComponent("git.tar")
-                _ = try hostTree("microvm-workspace", ["pack-git", history.path], nil, gitTar)
-                try fm.removeItem(at: history)
-            }
-            _ = try hostTree("microvm-workspace", ["unpack", baseline.path], input, nil)
-        case .guestClone(let repo):
-            sourceURL = repo.url
-            if repo.token != nil || repo.sshKeyPath != nil {
-                credentialEnv = try GuestGit.secretEnv(repo)
-            }
-        }
-        measured("snapshot")
-        try rejectCreationCancellation(cancellation, stage: "import", name: command.name, id: id)
-        timings["workspaceDisk"] = try workspaceJob.wait()
-        mark = ProcessInfo.processInfo.systemUptime
         var record = TaskRecord(
             id: id, name: command.name, runtimes: artifact.runtimes, phase: "starting", runtimeDigest: artifact.artifactDigest,
             createdAtUnix: unixNow(),
             expiresAtUnix: unixNow() + 7 * 86400, network: command.network ?? NetworkMode.none)
         if case .directory(let path) = resolved { record.sourcePath = path }
-        record.sourceUrl = sourceURL
+        if case .guestClone(let repo) = resolved { record.sourceUrl = repo.url }
         do {
             namespace.lock()
             defer { namespace.unlock() }
@@ -302,9 +283,52 @@ final class TaskManager {
         }
         progress(.booting)
         try rejectCreationCancellation(cancellation, stage: "boot", name: command.name, id: id)
-        _ = try boot(request)
-        try rejectCreationCancellation(cancellation, stage: "boot", name: command.name, id: id)
-        measured("boot")
+        // The guest needs the tree only at upload, so boot runs while the host packs and sanitizes it.
+        // A failed snapshot waits for this boot to settle, then cleanup destroys the sandbox.
+        let bootJob = BackgroundJob()
+        let bootSandbox = boot
+        bootJob.start {
+            _ = try workspaceJob.wait()
+            _ = try bootSandbox(request)
+        }
+        defer { bootJob.waitIgnoringError() }
+        switch resolved {
+        case .directory(let source):
+            // History and the working tree have separate inputs and outputs. Sanitizing history
+            // took 430 ms of a 540 ms snapshot, so the tree is packed beside it.
+            let history = directory.appendingPathComponent("history")
+            let historyTar = directory.appendingPathComponent("git.tar")
+            let historyMode = command.history ?? "branches"
+            let importTree = hostTree
+            let historyJob = BackgroundJob()
+            historyJob.start {
+                let imported = String(
+                    data: try importTree("microvm-workspace", ["import-git", source, history.path, historyMode], nil, nil),
+                    encoding: .utf8)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                guard imported == "git" else { return }
+                _ = try importTree("microvm-workspace", ["pack-git", history.path], nil, historyTar)
+                try FileManager.default.removeItem(at: history)
+            }
+            defer { historyJob.waitIgnoringError() }
+            _ = try hostTree("microvm-workspace", ["pack", source, "project"], nil, input)
+            _ = try hostTree("microvm-workspace", ["unpack", baseline.path], input, nil)
+            _ = try historyJob.wait()
+            if fm.fileExists(atPath: historyTar.path) { gitTar = historyTar }
+        case .guestClone(let repo):
+            sourceURL = repo.url
+            if repo.token != nil || repo.sshKeyPath != nil {
+                credentialEnv = try GuestGit.secretEnv(repo)
+            }
+        }
+        measured("snapshot")
+        // Cleanup waits for the boot either way, so one check covers both overlapping stages.
+        let booted = Result { try bootJob.wait() }
+        try rejectCreationCancellation(cancellation, stage: "import and boot", name: command.name, id: id)
+        timings["workspaceDisk"] = try workspaceJob.wait()
+        timings["boot"] = try booted.get()
+        // Boot time not hidden behind the snapshot.
+        measured("bootWait")
         if record.network == .nat || record.network == .filtered {
             progress(.waitingForNetwork)
             _ = try execute(
@@ -667,8 +691,8 @@ final class TaskManager {
     }
 }
 
-/// Formats the workspace disk while source import runs. `wait` is safe to call twice.
-private final class WorkspaceDiskJob {
+/// Runs creation work beside the host snapshot. `wait` is safe to call twice and from several threads.
+private final class BackgroundJob {
     private let group = DispatchGroup()
     private let lock = NSLock()
     private var started = false
@@ -708,6 +732,24 @@ private final class WorkspaceDiskJob {
         guard started else { return }
         group.wait()
     }
+}
+
+/// A fresh workspace filesystem is the same every time. mke2fs took 90-160 ms and a clone 0.2 ms,
+/// so one formatted template is cloned per task. Task starts are serialized, so the template has one writer.
+func cloneWorkspaceDisk(template: URL, to disk: URL, format: (URL) throws -> Void) throws {
+    let fm = FileManager.default
+    #if canImport(Darwin)
+    if !fm.fileExists(atPath: template.path) {
+        let partial = template.appendingPathExtension("partial")
+        try? fm.removeItem(at: partial)
+        try fm.createDirectory(at: template.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try format(partial)
+        try fm.moveItem(at: partial, to: template)
+    }
+    // Copy-on-write needs the template and the task on one APFS volume; otherwise format in place.
+    if clonefile(template.path, disk.path, 0) == 0 { return }
+    #endif
+    try format(disk)
 }
 
 func ensureCommandLogs(directory: URL, names: [String]) throws {

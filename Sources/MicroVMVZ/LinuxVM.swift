@@ -320,7 +320,11 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
             config.storageDevices = try [
                 VZVirtioBlockDeviceConfiguration(
                     attachment: VZDiskImageStorageDeviceAttachment(url: runtime.appendingPathComponent("runtime.ext4"), readOnly: true)),
-                VZVirtioBlockDeviceConfiguration(attachment: VZDiskImageStorageDeviceAttachment(url: workspace, readOnly: false)),
+                // The workspace file is discarded on daemon restart and results leave through the agent, so
+                // host flushes protect nothing. Full sync cost 8 ms on the workspace mount alone.
+                VZVirtioBlockDeviceConfiguration(
+                    attachment: VZDiskImageStorageDeviceAttachment(
+                        url: workspace, readOnly: false, cachingMode: .automatic, synchronizationMode: .none)),
             ]
         }
         config.bootLoader = boot

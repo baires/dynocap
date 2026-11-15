@@ -118,6 +118,23 @@ func TestFilteredExportFollowsGitignore(t *testing.T) {
 		t.Fatal(".git exported")
 	}
 }
+
+func TestNestedGitignoreAppliesBelowItsDirectoryOnly(t *testing.T) {
+	root := t.TempDir()
+	must(t, os.MkdirAll(filepath.Join(root, "app/build/deep"), 0755))
+	must(t, os.MkdirAll(filepath.Join(root, "app/src"), 0755))
+	must(t, os.MkdirAll(filepath.Join(root, "other"), 0755))
+	must(t, os.WriteFile(filepath.Join(root, "app/.gitignore"), []byte("*.log\nbuild/\n"), 0644))
+	for _, name := range []string{"app/main.go", "app/debug.log", "app/build/deep/out", "app/src/lib.go", "app/src/trace.log", "other/debug.log", "top.log"} {
+		must(t, os.WriteFile(filepath.Join(root, name), []byte(name), 0644))
+	}
+	names, err := filesRespectingIgnore(root, nil)
+	must(t, err)
+	want := []string{"app/.gitignore", "app/main.go", "app/src/lib.go", "other/debug.log", "top.log"}
+	if strings.Join(names, ",") != strings.Join(want, ",") {
+		t.Fatalf("names = %v, want %v", names, want)
+	}
+}
 func TestResultTracksDeletionBinaryAndMode(t *testing.T) {
 	before, after, out := t.TempDir(), t.TempDir(), t.TempDir()
 	os.WriteFile(filepath.Join(before, "deleted"), []byte("old"), 0644)
