@@ -57,18 +57,18 @@ Repairs run in that order, and progress goes to stderr. Each repair prints a bui
 
 - restarts a daemon that has running sandboxes. Instead it names them, so you can `finish` or `rm` them first;
 - deletes image files. It moves them aside;
-- re-signs the CLI or rebuilds companions. Run `./scripts/build-macos.sh` for those.
+- re-signs the CLI or rebuilds companions. Reinstall with `brew reinstall baires/tap/dynocap` or `scripts/install.sh`. From a source checkout, run `./scripts/build-macos.sh`.
 
 ---
 
 ## Checks That Need You
 
-| Check                                    | Cause                                                       | What to do                                                   |
-| :--------------------------------------- | :---------------------------------------------------------- | :----------------------------------------------------------- |
-| `platform`, `backend`                    | Not a Mac with Virtualization.framework, or macOS < 13.     | Use a supported Mac.                                         |
-| `signing`                                | Built with `swift build` instead of the script.             | Run `./scripts/build-macos.sh`.                              |
-| `dynocap-workspace`, `dynocap-mkruntime` | Companions missing beside the `dynocap` binary.             | Run `./scripts/build-macos.sh` and keep them beside the CLI. |
-| `home`                                   | Home not writable, or `daemon.sock` would exceed 104 bytes. | Use a shorter writable `--home` or `DYNOCAP_HOME`.           |
+| Check                                    | Cause                                                          | What to do                                                                                           |
+| :--------------------------------------- | :------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------- |
+| `platform`, `backend`                    | Not a Mac with Virtualization.framework, or macOS < 13.        | Use a supported Mac.                                                                                 |
+| `signing`                                | The CLI is unsigned or missing the virtualization entitlement. | Reinstall with Homebrew or curl. From a source checkout, run `./scripts/build-macos.sh`.             |
+| `dynocap-workspace`, `dynocap-mkruntime` | Companions missing beside the `dynocap` binary.                | Reinstall so both companions stay beside the CLI. A source checkout uses `./scripts/build-macos.sh`. |
+| `home`                                   | Home not writable, or `daemon.sock` would exceed 104 bytes.    | Use a shorter writable `--home` or `DYNOCAP_HOME`.                                                   |
 
 ---
 
@@ -88,7 +88,7 @@ The guest agent is compiled during image and runtime builds. Install Go 1.22 or 
 
 ### `--fix` cannot find the source checkout
 
-`--fix` looks beside the `dynocap` binary and above the current directory. If you copied the binary elsewhere, run it from inside your dynocap clone with the project path: `dynocap doctor --fix ~/code/my-app`.
+`--fix` looks beside the `dynocap` binary and above the current directory. A Homebrew or curl install keeps `Package.swift` and `guest/` next to `bin/`, and the CLI resolves its own symlink to that prefix. If you copied the binary by itself, run doctor from a source checkout with the project path: `dynocap doctor --fix ~/code/my-app`.
 
 ### `clone` picked the wrong runtime
 

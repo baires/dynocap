@@ -1,18 +1,18 @@
 ---
 title: "Getting Started with DynoCap"
-description: "Step-by-step tutorial to build DynoCap on macOS, verify prerequisites, and execute commands in an isolated Linux microVM."
+description: "Install DynoCap on Apple Silicon with Homebrew or curl, prepare a project, and run a command in an isolated Linux microVM."
 sidebar_position: 1
 ---
 
 # Getting Started with DynoCap
 
-Build the signed CLI on an Apple Silicon Mac, boot one sealed Linux guest, and run a command inside it.
+Install DynoCap on an Apple Silicon Mac, prepare one project, and run a command inside an isolated Linux guest.
 
 You will:
 
-1. Verify system prerequisites on Apple Silicon.
-2. Build the signed CLI binary.
-3. Check and repair your setup with `dynocap doctor --fix`.
+1. Install the CLI with Homebrew, or with curl.
+2. Check your setup with `dynocap doctor`.
+3. Repair it with `dynocap doctor --fix`.
 4. Launch a raw sandbox and execute commands over vsock.
 5. Safely destroy the sandbox.
 
@@ -20,49 +20,55 @@ You will:
 
 ## Prerequisites
 
-DynoCap requires:
-
-- **Hardware:** Apple Silicon Mac (M1/M2/M3/M4).
+- **Hardware:** Apple Silicon Mac (M1 or newer). Intel Macs are refused by the installers.
 - **Operating System:** macOS 13 (Ventura) or newer.
-- **Developer Tools:**
-  - Xcode Command Line Tools (`xcode-select --install`, Swift 5.9+)
-  - Go 1.22+ (`brew install go`)
-  - Node.js 22+ (`brew install node`)
-  - `mke2fs` from e2fsprogs (`brew install e2fsprogs`)
-
-Verify that the tools are present in your shell:
-
-```sh
-swift --version
-go version
-node --version
-mke2fs -V
-```
+- **Homebrew**, for the primary install. The formula also installs `e2fsprogs`, which provides `mke2fs`. That formula is keg-only; DynoCap finds it at `/opt/homebrew/opt/e2fsprogs/sbin/mke2fs`.
+- **Go 1.22+** (`brew install go`) the first time a runtime is prepared. The guest image ships in the release archive, so a Homebrew or curl install does not need Go to copy it. Swift and Node are for a source build and for this repository's TypeScript packages.
 
 ---
 
-## Step 1: Install Dependencies and Build the Release CLI
+## Step 1: Install
 
-DynoCap uses Apple's `Virtualization.framework`, which requires the `com.apple.security.virtualization` entitlement. The build script compiles the Swift CLI in release mode, compiles the companion Go binaries, and applies the code signature.
+DynoCap uses Apple's `Virtualization.framework`, which requires the `com.apple.security.virtualization` entitlement. There is no Apple Developer ID signature. Both installers re-sign the CLI on your Mac with `codesign --sign -` and the bundled entitlement. Neither installer uses a Homebrew bottle, because a poured bottle would skip that re-sign.
 
-From the root of your `dynocap` repository:
+### Homebrew
 
 ```sh
-# Install repository development tooling
-npm ci
+brew install baires/tap/dynocap
+```
 
-# Build the release CLI and sign it with the virtualization entitlement
+That installs the formula from [baires/homebrew-tap](https://github.com/baires/homebrew-tap). On Homebrew 6, this fully qualified name trusts that formula.
+
+Trust it explicitly when you want later commands to use the short name `dynocap`, such as `brew upgrade dynocap`:
+
+```sh
+brew trust --formula baires/tap/dynocap
+```
+
+The formula downloads the versioned release archive, checks its sha256, and re-signs `dynocap`. Then run doctor in your project, which the formula also prints as a caveat:
+
+```sh
+dynocap doctor --fix
+```
+
+### Curl
+
+```sh
+curl -fsSL https://dynocap.dev/install.sh | sh
+```
+
+The site serves [`scripts/install.sh`](https://github.com/baires/dynocap/blob/main/scripts/install.sh). The script downloads `dynocap-darwin-arm64.tar.gz` from the latest GitHub release, checks its sha256, installs it under `~/.local/dynocap`, and symlinks `~/.local/bin/dynocap`. The checksum catches a truncated download. When `gh` is installed and logged in, the script also requires a build attestation from `baires/dynocap`. Its last step is `dynocap doctor --fix`. If `mke2fs` is missing, it tells you to run `brew install e2fsprogs`. If `~/.local/bin` is not on `PATH`, it tells you to add it.
+
+### From source
+
+A checkout has no bundled guest image. Building needs Xcode Command Line Tools (Swift 5.9+), Go 1.22+, and `mke2fs` (`brew install e2fsprogs`).
+
+```sh
 ./scripts/build-macos.sh
-```
-
-Add the built binary to your `PATH` for the current terminal session:
-
-```sh
 export PATH="$PWD/.build/release:$PATH"
-which dynocap
 ```
 
-> **Note:** If you rebuild `dynocap` at any point, re-run `./scripts/build-macos.sh` to ensure the binary is properly code-signed.
+Re-run `./scripts/build-macos.sh` after every rebuild so the binary stays signed. `npm ci` is for the repository's TypeScript packages, not for the CLI.
 
 ---
 
@@ -83,7 +89,7 @@ Doctor reads your project's files to pick its runtime, the same way `clone` does
 | `pyproject.toml`, `uv.lock`, `requirements.txt`, `setup.py`, `Pipfile` | `python:3.14` |
 | `go.mod`                                                               | `go:1.27`     |
 
-On a fresh install, the guest image and runtime are not built yet. Each failure says what is wrong and what to run:
+On a fresh source build, the guest image and runtime are not built yet. A Homebrew or curl install already contains the guest image, and `--fix` copies it into your home. Each failure says what is wrong and what to run:
 
 ```text
 ERROR   images             The guest image for aarch64 has not been built yet.
@@ -104,9 +110,9 @@ To prepare a different runtime, pass `--runtime`, for example `dynocap doctor --
 dynocap doctor --fix
 ```
 
-`--fix` builds the guest image, prepares your project's runtime, and restarts a daemon left over from an older build. Every download is pinned and verified. It then runs the checks again and ends with `Required checks passed.`
+`--fix` copies a bundled guest image when the install has one, and builds it otherwise. It prepares your project's runtime and restarts a daemon left over from an older build. Every download is pinned and verified. It then runs the checks again and ends with `Required checks passed.`
 
-Doctor finds the dynocap checkout from the `dynocap` binary, so you can run it in any directory. You can also name the project instead of changing directory: `dynocap doctor --fix ~/code/my-app`.
+Doctor finds that prefix from the `dynocap` binary, whether it is a source checkout or a Homebrew or curl install, so you can run it in any directory. You can also name the project instead of changing directory: `dynocap doctor --fix ~/code/my-app`.
 
 > **Tip:** After you rebuild `dynocap`, run `dynocap doctor --fix` again. It restarts the daemon so it runs the new build.
 
@@ -203,7 +209,7 @@ Because `my-first-box` was actively running, `--force` explicitly confirms disca
 
 ## Next Steps
 
-Now that you know how to build DynoCap and run raw Linux commands, proceed to:
+Now that the CLI is installed and a raw sandbox runs, proceed to:
 
 - **[End-to-End Agent Task Workflow](/tutorials/agent-task-workflow)**: Copy a project into a task, install from a dependency seed, and export a verified diff. The host checkout is never mounted.
 - **[Interactive Shells & Terminal Sessions](/how-to/interactive-shells-and-terminal)**: Learn how to attach interactive TTY sessions for live debugging.

@@ -1,8 +1,8 @@
 // Assumptions:
 // - Production URL is a stand-in (https://dynocap.dev) until a host is chosen. placeholder: true.
-// - Release-facing install paths are intentional placeholders until launch: Homebrew tap and curl installer.
-// - The curl URL assumes the production domain will serve /install.sh. placeholder: true.
-// - Source build remains the path that works today: ./scripts/build-macos.sh.
+// - Homebrew installs baires/tap/dynocap from github.com/baires/homebrew-tap.
+// - /install.sh serves scripts/install.sh. The curl command uses the production domain.
+// - Source build remains ./scripts/build-macos.sh from a checkout.
 // - @dynocap/sdk and @dynocap/mcp ship in this repository. They are not on the public npm registry.
 // - Timings are medians from docs/research/boot-time.md, one Apple Silicon Mac, 13 Nov 2026.
 //   They apply after the daemon is up and the guest image or runtime is already prepared.
@@ -62,17 +62,16 @@ export const demo = {
 };
 
 export const installation = {
-  brew: "brew install dynocap/tap/dynocap",
+  brew: "brew install baires/tap/dynocap",
   curl: "curl -fsSL https://dynocap.dev/install.sh | sh",
-  source:
-    'npm ci\n./scripts/build-macos.sh\nexport PATH="$PWD/.build/release:$PATH"',
-  placeholder: true,
+  source: './scripts/build-macos.sh\nexport PATH="$PWD/.build/release:$PATH"',
+  placeholder: false,
 };
 
 export const setup = [
   {
     title: "Install DynoCap",
-    text: "Homebrew installs the CLI and its companions. Prefer another route? Use curl or build from source.",
+    text: "Homebrew installs the CLI and its companions, and this command trusts the formula. For a later short-name upgrade, run brew trust --formula baires/tap/dynocap. Prefer another route? Use curl or build from source.",
     command: installation.brew,
   },
   {

@@ -46,8 +46,11 @@ fi
 
 mkdir -p "$root/dist"
 tar -C "$stage" -czf "$root/dist/$name" bin guest Package.swift entitlements images
+# Stable names are byte copies for the curl installer. The versioned archive is what the tap pins.
+cp "$root/dist/$name" "$root/dist/dynocap-darwin-arm64.tar.gz"
 (
   cd "$root/dist"
   shasum -a 256 "$name" > "$name.sha256"
+  shasum -a 256 dynocap-darwin-arm64.tar.gz > dynocap-darwin-arm64.tar.gz.sha256
 )
 echo "packed dist/$name"

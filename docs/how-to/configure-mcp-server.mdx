@@ -14,7 +14,7 @@ DynoCap includes a first-party MCP server package (`@dynocap/mcp`) that exposes 
 
 ## Prerequisites
 
-1. DynoCap CLI built and signed (`./scripts/build-macos.sh`).
+1. DynoCap CLI installed (`brew install baires/tap/dynocap`, the curl installer, or `./scripts/build-macos.sh` from a checkout).
 2. The runtime your projects use, prepared with `dynocap doctor --fix ./project` (or `--runtime python:3.14`, for example). When a task omits `runtimes`, DynoCap picks one from the project's files, the same way `clone` does, and falls back to `shell:1` (bash, git, ssh). The task result reports the runtime used.
 3. Build the TypeScript packages:
    ```sh

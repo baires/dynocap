@@ -29,7 +29,7 @@ Do not use Docker, a host bind mount, or the user's checkout as the place untrus
 - The workspace is a copy. Never tell the user their checkout was edited. `finish` exports a patch. The user applies it.
 - TTL starts at creation, includes boot, and activity does not extend it. Default is 30 minutes. Unexported work is discarded at expiry.
 - `@dynocap/sdk` and `@dynocap/mcp` ship in this repository. They are not on the public npm registry. Do not invent an `npm install` for them.
-- The Homebrew tap `dynocap/tap/dynocap` and `npx skills add dynocap/dynocap` are the intended install lines. If `dynocap` is not on `PATH`, say so and point at a source build (`./scripts/build-macos.sh`) instead of pretending the tap already resolved.
+- The install lines are `brew install baires/tap/dynocap` and `npx skills add baires/dynocap`. That Homebrew command trusts the formula. Mention `brew trust --formula baires/tap/dynocap` only when the user wants the short name `dynocap` for a later upgrade, or when Homebrew asks for it. If `dynocap` is not on `PATH`, say so and point at that tap. A source build (`./scripts/build-macos.sh`) is the fallback from a checkout.
 
 ## CLI
 
