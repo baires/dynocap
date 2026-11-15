@@ -1,0 +1,17 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "dynocap",
+  "account_id": "1f7913aca6e0c514f5cc9e067f4002d2",
+  "compatibility_date": "2026-11-15",
+  "observability": {
+    "enabled": true,
+  },
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "404-page",
+  },
+  "routes": [
+    { "pattern": "dynocap.dev", "custom_domain": true },
+    { "pattern": "www.dynocap.dev", "custom_domain": true },
+  ],
+}
