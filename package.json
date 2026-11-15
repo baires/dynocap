@@ -7,7 +7,7 @@
   "scripts": {
     "lint": "swiftlint lint --quiet && ./scripts/gofmt-check.sh && node scripts/validate-skills.mjs",
     "typecheck": "npm run build --prefix sdk/typescript && npm run build --prefix sdk/mcp",
-    "test": "swift test && cd guest && go test ./... && cd .. && npm test --prefix sdk/typescript && npm test --prefix sdk/mcp",
+    "test": "node --test scripts/release/*.test.mjs && swift test && cd guest && go test ./... && cd .. && npm test --prefix sdk/typescript && npm test --prefix sdk/mcp",
     "prepare": "husky"
   },
   "devDependencies": {

@@ -7,13 +7,11 @@
 #
 # A published release fails this job when the secret is unset. Prereleases and
 # tags other than vX.Y.Z are not dispatched. The release workflow calls this
-# after gh release create, because that token does not start release: published.
+# after the archive is uploaded, so the tap never sees a release with no asset.
 
 name: Notify Homebrew tap
 
 on:
-  release:
-    types: [published]
   workflow_call:
     inputs:
       tag_name:

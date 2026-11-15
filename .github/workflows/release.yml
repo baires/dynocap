@@ -1,13 +1,15 @@
+# A person creates the GitHub release. This workflow packs the Apple Silicon
+# archive, attests it, and uploads it to that release. It does not create the
+# release. The tag must be v{DynoCapInfo.version}.
+
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*"
+  release:
+    types: [published]
 
 permissions:
   contents: write
-  # Build provenance: installers verify the archive came from this workflow, not just that it matches a checksum beside it.
   id-token: write
   attestations: write
 
@@ -20,29 +22,36 @@ jobs:
         with:
           go-version: "1.22.x"
           cache-dependency-path: guest/go.sum
+      - name: Require the release tag to match the version
+        run: |
+          set -eu
+          version="$(sed -n 's/.*public static let version = "\([^"]*\)".*/\1/p' Sources/DynoCapCore/Support.swift)"
+          if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "::error::Release tag ${GITHUB_REF_NAME} does not match DynoCapInfo.version ${version}. Merge the version pull request first."
+            exit 1
+          fi
       - name: Package darwin-arm64
         run: ./scripts/package-release.sh "${GITHUB_REF_NAME}"
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: dist/dynocap-${{ github.ref_name }}-darwin-arm64.tar.gz
-      - name: Publish
+      - name: Upload the archive
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" \
+          gh release upload "${GITHUB_REF_NAME}" \
             "dist/dynocap-${GITHUB_REF_NAME}-darwin-arm64.tar.gz" \
             "dist/dynocap-${GITHUB_REF_NAME}-darwin-arm64.tar.gz.sha256" \
             "dist/dynocap-darwin-arm64.tar.gz" \
             "dist/dynocap-darwin-arm64.tar.gz.sha256" \
-            --title "${GITHUB_REF_NAME}" \
-            --notes "Apple Silicon (darwin-arm64) CLI, guest tree, and guest image. Installers re-sign the CLI on the Mac that boots VMs. The stable dynocap-darwin-arm64.tar.gz asset is a byte copy of the versioned archive. This workflow does not boot a VM."
+            --clobber
 
-  # gh release create uses GITHUB_TOKEN, which does not start a release: published workflow.
   notify-homebrew-tap:
     needs: release
     uses: ./.github/workflows/homebrew-tap.yml
     secrets: inherit
     with:
-      tag_name: ${{ github.ref_name }}
+      tag_name: ${{ github.event.release.tag_name }}
+      prerelease: ${{ github.event.release.prerelease }}
       require_token: true
