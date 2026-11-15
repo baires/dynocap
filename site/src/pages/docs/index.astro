@@ -1,0 +1,56 @@
+---
+import Base from "../../layouts/Base.astro";
+import DocsSidebar from "../../components/DocsSidebar.astro";
+import { guides } from "../../data/site";
+import { docHref, loadDocs } from "../../lib/docs";
+
+const { groups } = await loadDocs();
+---
+
+<Base title="Docs" description="Where to start with MicroVM: boot a guest, run a project task, or connect the SDK and MCP.">
+  <div class="docs-shell">
+    <DocsSidebar groups={groups} />
+    <article class="prose docs-home">
+      <h1 id="content" tabindex="-1">Docs</h1>
+      <p>
+        Start with the job you have. The guide on the side is every page, in the order you would read a section.
+      </p>
+      <ol class="docs-guides">
+        {
+          guides.map((guide, index) => (
+            <li>
+              <p class="docs-guides__step">{index + 1}</p>
+              <div>
+                <h2>
+                  <a href={guide.href}>{guide.title}</a>
+                </h2>
+                <p>{guide.text}</p>
+              </div>
+            </li>
+          ))
+        }
+      </ol>
+      <h2>Or open a section</h2>
+      <ul class="docs-jump">
+        {
+          groups.map((group) => {
+            const first = group.pages[0];
+            return (
+              <li>
+                <a href={first ? docHref(first.id) : "/docs"}>{group.title}</a>
+                <span>{group.text}</span>
+              </li>
+            );
+          })
+        }
+      </ul>
+      <p class="docs-md">
+        Each page is also Markdown, for agents and for you.
+        <a href="/llms.txt">llms.txt</a>
+        lists them.
+        <a href="/llms-full.txt">llms-full.txt</a>
+        is the set in one file.
+      </p>
+    </article>
+  </div>
+</Base>

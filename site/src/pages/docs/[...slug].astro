@@ -1,0 +1,52 @@
+---
+import { render } from "astro:content";
+import Base from "../../layouts/Base.astro";
+import DocsSidebar from "../../components/DocsSidebar.astro";
+import { docDescription, docHref, docMarkdownHref, docTitle, loadDocs, neighbors } from "../../lib/docs";
+
+export async function getStaticPaths() {
+  const { flat } = await loadDocs();
+  return flat.map((entry) => ({
+    params: { slug: entry.id.replace(/\.mdx?$/, "") },
+    props: { entry },
+  }));
+}
+
+const { entry } = Astro.props;
+const { Content } = await render(entry);
+const { groups, flat } = await loadDocs();
+const title = docTitle(entry);
+const description = docDescription(entry);
+const { previous, next } = neighbors(flat, entry.id);
+const markdown = docMarkdownHref(entry.id);
+---
+
+<Base title={title} description={description}>
+  <div class="docs-shell">
+    <DocsSidebar groups={groups} current={docHref(entry.id)} />
+    <article class="prose" id="content" tabindex="-1">
+      <p class="docs-md">
+        <a href={markdown}>View as Markdown</a>
+      </p>
+      <Content />
+      <nav class="docs-turn" aria-label="Continue">
+        {
+          previous && (
+            <a href={docHref(previous.id)} data-turn="previous">
+              <span>Previous</span>
+              {docTitle(previous)}
+            </a>
+          )
+        }
+        {
+          next && (
+            <a href={docHref(next.id)} data-turn="next">
+              <span>Next</span>
+              {docTitle(next)}
+            </a>
+          )
+        }
+      </nav>
+    </article>
+  </div>
+</Base>

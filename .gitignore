@@ -26,3 +26,5 @@ sdk/mcp/dist/
 validation/
 
 __pycache__/
+site/.astro
+site/dist

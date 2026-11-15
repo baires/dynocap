@@ -1,0 +1,46 @@
+---
+import { docHref, docTitle, type DocEntry } from "../lib/docs";
+
+interface Group {
+  id: string;
+  title: string;
+  pages: DocEntry[];
+}
+interface Props {
+  groups: Group[];
+  current?: string;
+}
+const { groups, current } = Astro.props;
+const currentPage = groups.flatMap((group) => group.pages).find((page) => docHref(page.id) === current);
+const summary = currentPage ? docTitle(currentPage) : "Guide";
+---
+
+<nav class="docs-nav" aria-label="Documentation">
+  <details class="docs-disclosure">
+    <summary>{summary}</summary>
+  </details>
+  <div class="docs-tree">
+    <p class="docs-nav__home">
+      <a href="/docs" aria-current={current ? undefined : "page"}>Docs home</a>
+    </p>
+    {
+      groups.map((group) => (
+        <div>
+          <p id={`guide-${group.id}`}>{group.title}</p>
+          <ul aria-labelledby={`guide-${group.id}`}>
+            {group.pages.map((page) => {
+              const href = docHref(page.id);
+              return (
+                <li>
+                  <a href={href} aria-current={href === current ? "page" : undefined}>
+                    {docTitle(page)}
+                  </a>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ))
+    }
+  </div>
+</nav>

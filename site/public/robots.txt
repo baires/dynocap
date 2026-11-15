@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://microvm.dev/sitemap-index.xml

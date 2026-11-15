@@ -1,0 +1,12 @@
+---
+import { site } from "../data/site";
+const year = new Date().getFullYear();
+---
+
+<footer class="site-footer">
+  <p>{site.name}. Local Linux VMs. Apple Silicon. macOS 13 or newer. {year}.</p>
+  <nav aria-label="About">
+    <a href={site.licenseHref}>Apache-2.0</a>
+    <a href="/docs">Docs</a>
+  </nav>
+</footer>

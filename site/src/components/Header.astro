@@ -1,0 +1,35 @@
+---
+import { nav, site } from "../data/site";
+const path = Astro.url.pathname;
+const current = (href: string) => (href === "/docs" ? path.startsWith("/docs") : path === href);
+---
+
+<header class="site-header">
+  <a class="word seal-link" href="/">
+    <span>{site.name}</span>
+    <i aria-hidden="true"></i>
+  </a>
+  <nav class="nav-desktop" aria-label="Primary">
+    {
+      nav.map((item) => (
+        <a class="seal-link" href={item.href} aria-current={current(item.href) ? "page" : undefined}>
+          <span>{item.label}</span>
+          <i aria-hidden="true" />
+        </a>
+      ))
+    }
+  </nav>
+  <details class="nav-mobile">
+    <summary>Menu</summary>
+    <nav aria-label="Primary">
+      {
+        nav.map((item) => (
+          <a class="seal-link" href={item.href} aria-current={current(item.href) ? "page" : undefined}>
+            <span>{item.label}</span>
+            <i aria-hidden="true" />
+          </a>
+        ))
+      }
+    </nav>
+  </details>
+</header>
