@@ -12,11 +12,14 @@ public func formatExecutionList(_ logs: ExecutionLogs, arguments: [String] = [])
             integrity = values.contains("unknown") ? "unknown" : "complete"
         }
         let date = ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: TimeInterval(execution.startedAtUnix)))
-        lines.append([
-            String(execution.id), execution.state, date, execution.exitCode.map(String.init) ?? "-",
-            execution.stdout.bytes.map(String.init) ?? "-", terminal ? "-" : execution.stderr.bytes.map(String.init) ?? "-", integrity,
+        let exit = execution.exitCode.map(String.init) ?? "-"
+        let stdoutBytes = execution.stdout.bytes.map(String.init) ?? "-"
+        let stderrBytes = terminal ? "-" : (execution.stderr.bytes.map(String.init) ?? "-")
+        let columns = [
+            String(execution.id), execution.state, date, exit, stdoutBytes, stderrBytes, integrity,
             execution.format, execution.command,
-        ].map { safeDiagnostic($0, secrets: secrets) }.joined(separator: "  "))
+        ]
+        lines.append(columns.map { safeDiagnostic($0, secrets: secrets) }.joined(separator: "  "))
     }
     return lines.joined(separator: "\n") + "\n"
 }
