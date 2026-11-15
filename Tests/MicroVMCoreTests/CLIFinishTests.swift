@@ -45,6 +45,27 @@ final class CLIFinishTests: XCTestCase {
         XCTAssertTrue(human.contains("not an export or teardown failure"))
     }
 
+    func testFinishWarnsAboutChangesThatRunCode() throws {
+        let now: Int64 = 1_700_000_000
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("finish-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try Data("""
+        [{"path":".husky/pre-commit","kind":"added","mode":493,"sensitive":"Git hooks run on commit"},
+         {"path":"notes.txt","kind":"modified","mode":420}]
+        """.utf8).write(to: directory.appendingPathComponent("changes.json"))
+        var record = sampleRecord(name: "demo", phase: "completed", expiresAtUnix: now + 90)
+        record.resultDirectory = directory.path
+        let human = try formatFinishResult(TaskDescriptor(record), output: .human, now: now)
+        XCTAssertTrue(human.contains("Review carefully before applying."))
+        XCTAssertTrue(human.contains("  added .husky/pre-commit: Git hooks run on commit"))
+        XCTAssertFalse(human.contains("notes.txt"))
+        let object = try jsonObject(formatFinishResult(TaskDescriptor(record), output: .json, now: now))
+        let flagged = try XCTUnwrap(object["sensitivePaths"] as? [[String: Any]])
+        XCTAssertEqual(flagged.map { $0["path"] as? String }, [".husky/pre-commit"])
+        XCTAssertEqual(sensitiveChanges(resultDirectory: "/nonexistent"), [])
+    }
+
     func testFinishKeepsArtifactsAppliesPatchAndLeavesSourceUntouched() throws {
         let fixture = try runningTask()
         let source = fixture.root.appendingPathComponent("source")

@@ -39,7 +39,15 @@ enum TaskSourceResolver {
         if hasPath && hasURL { throw MicroVMError("task start accepts a directory or a repository URL") }
         if !hasURL {
             guard let source = command.projectPath, !source.isEmpty else { throw MicroVMError("projectPath is required") }
+            if let history = command.history, !taskHistoryModes.contains(history) {
+                throw MicroVMError("history must be branches, head, or none")
+            }
             return .directory(source)
+        }
+        if command.history != nil {
+            throw MicroVMError(
+                "--history applies to a local directory",
+                recovery: "A repository URL is fetched from its remote; use --ref to choose what it fetches.")
         }
         let parsed = try parseRepositoryURL(command.repositoryUrl ?? "")
         let ref = try command.ref.map(parseRef)

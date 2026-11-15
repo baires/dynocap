@@ -34,6 +34,7 @@ func goRecipe(goVersion, sha256 string) recipeFunc {
 				IncompatibleEnvPrefixes: []string{
 					"GOPROXY", "GOSUMDB", "GONOSUMDB", "GONOPROXY", "GOPRIVATE", "GOINSECURE", "GOFLAGS", "GOMODCACHE",
 				},
+				SeedCommands: [][]string{{"go", "mod", "download"}},
 			},
 			// The extracted toolchain is about 250 MiB.
 			DiskBytes: 1 << 30,

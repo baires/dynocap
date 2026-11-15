@@ -11,6 +11,8 @@ public struct TaskCommand: Codable, Equatable {
     public var ref: String?
     public var gitToken: String?
     public var sshKeyPath: String?
+    /// How much of a local repository to import: branches (default), head, or none.
+    public var history: String?
     public var runtimes: [RuntimeSelection]?
     public var network: NetworkMode?
     public var ttlSeconds: Int?
@@ -254,7 +256,9 @@ final class TaskManager {
             _ = try hostTree("microvm-workspace", ["pack", source, "project"], nil, input)
             let history = directory.appendingPathComponent("history")
             let imported = String(
-                data: try hostTree("microvm-workspace", ["import-git", source, history.path], nil, nil), encoding: .utf8)?
+                data: try hostTree(
+                    "microvm-workspace", ["import-git", source, history.path, command.history ?? "branches"], nil, nil),
+                encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             if imported == "git" {
                 gitTar = directory.appendingPathComponent("git.tar")
@@ -339,7 +343,8 @@ final class TaskManager {
         record.sourceRevision = sourceRevision
         record.phase = "running"
         progress(.restoringCache)
-        record.dependencyCacheKey = try DependencyCache.key(baseline: baseline, runtime: artifact)
+        record.dependencyCacheKey = try DependencyCache.key(
+            baseline: baseline, runtime: artifact, source: record.sourcePath ?? record.sourceUrl)
         if let key = record.dependencyCacheKey, let spec = artifact.dependencyCache {
             try DependencyCache.restore(key: key, spec: spec, home: paths.home, id: id, execute: execute)
         }
@@ -507,6 +512,7 @@ final class TaskManager {
             let archive = directory.appendingPathComponent("export.tar")
             _ = try execute(id, ["/usr/local/bin/microvm-agent", "task-pack", "/workspace"], [], nil, archive, 256 << 20)
             let final = directory.appendingPathComponent("final")
+            try? fm.removeItem(at: final)
             _ = try hostTree("microvm-workspace", ["unpack", final.path], archive, nil)
             try fm.removeItem(at: archive)
             record.timingsMS["export"] = (ProcessInfo.processInfo.systemUptime - mark) * 1000
@@ -525,8 +531,9 @@ final class TaskManager {
             mark = ProcessInfo.processInfo.systemUptime
             if let key = record.dependencyCacheKey {
                 try? DependencyCache.publish(
-                    seed: DependencyCache.Seed(key: key, runtimeDigest: record.runtimeDigest), finalTree: final, home: paths.home, id: id,
-                    execute: execute)
+                    seed: DependencyCache.Seed(
+                        key: key, runtimeDigest: record.runtimeDigest, source: record.sourcePath ?? record.sourceUrl),
+                    finalTree: final, home: paths.home, id: id, execute: execute)
             }
             record.timingsMS["cachePublish"] = (ProcessInfo.processInfo.systemUptime - mark) * 1000
             record.phase = record.commands.contains { $0.exitCode != 0 || $0.error != nil } ? "failed" : "completed"

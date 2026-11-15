@@ -857,7 +857,47 @@ var ErrNoGit = errors.New("directory has no git history")
 // ImportGit copies sanitized history from a local checkout into dest.
 // The source tree is only read. A directory without .git returns ErrNoGit.
 // A gitfile is materialized with host Git into a normal repository, then sanitized.
-func ImportGit(src, dest string) error {
+// History selects how much of a local repository a task imports.
+type History string
+
+const (
+	// HistoryBranches keeps local branches, tags and remote-tracking refs.
+	HistoryBranches History = "branches"
+	// HistoryHead keeps only the history of the checked-out commit.
+	HistoryHead History = "head"
+	// HistoryNone imports files only.
+	HistoryNone History = "none"
+)
+
+// ParseHistory reads a --history value; empty means HistoryBranches.
+func ParseHistory(value string) (History, error) {
+	switch History(value) {
+	case "":
+		return HistoryBranches, nil
+	case HistoryBranches, HistoryHead, HistoryNone:
+		return History(value), nil
+	}
+	return "", fmt.Errorf("history must be branches, head, or none")
+}
+
+// ImportGit imports local branches, tags and remote-tracking refs.
+func ImportGit(src, dest string) error { return ImportGitHistory(src, dest, HistoryBranches) }
+
+// ImportGitHistory copies a sanitized repository and then keeps only what mode
+// selects. Every mode drops what a checkout does not need and a secret often
+// survives in: the stash, reflogs, refs/original backups, other worktrees,
+// submodule repositories, and objects nothing references any more.
+func ImportGitHistory(src, dest string, mode History) error {
+	if mode == HistoryNone {
+		return ErrNoGit
+	}
+	if err := importGit(src, dest); err != nil {
+		return err
+	}
+	return pruneHistory(dest, mode)
+}
+
+func importGit(src, dest string) error {
 	resolved, err := filepath.EvalSymlinks(src)
 	if err != nil {
 		return err
@@ -890,6 +930,103 @@ func ImportGit(src, dest string) error {
 		return err
 	}
 	return materializeLocalHistory(gitPath, dest)
+}
+
+// pruneHistory runs on the temporary copy only.
+func pruneHistory(root string, mode History) error {
+	gitDir := filepath.Join(root, ".git")
+	for _, name := range []string{
+		"logs", "worktrees", "modules", "rr-cache", "lost-found", "FETCH_HEAD", "ORIG_HEAD", "MERGE_HEAD",
+		"CHERRY_PICK_HEAD", "REVERT_HEAD", "AUTO_MERGE", "BISECT_LOG", "BISECT_START", "BISECT_EXPECTED_REV",
+	} {
+		if err := os.RemoveAll(filepath.Join(gitDir, name)); err != nil {
+			return err
+		}
+	}
+	bin, err := hostGit()
+	if err != nil {
+		return err
+	}
+	home, err := os.MkdirTemp("", "microvm-prune-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(home)
+	env := gitEnv(home)
+	refs, err := runGit(bin, root, env, gitArgs(root, "for-each-ref", "--format=%(refname)"))
+	if err != nil {
+		return err
+	}
+	branch := headBranch(gitDir)
+	var drop strings.Builder
+	for _, ref := range strings.Split(strings.TrimSpace(string(refs)), "\n") {
+		if ref != "" && !keepRef(ref, mode, branch) {
+			fmt.Fprintf(&drop, "delete %s\n", ref)
+		}
+	}
+	if drop.Len() > 0 {
+		cmd := exec.Command(bin, gitArgs(root, "update-ref", "--no-deref", "--stdin")...)
+		cmd.Env = env
+		cmd.Stdin = strings.NewReader(drop.String())
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("drop refs outside the imported history: %s: %w", output, err)
+		}
+	}
+	for _, args := range [][]string{
+		{"reflog", "expire", "--expire=now", "--all"},
+		{"-c", "protocol.allow=never", "repack", "-a", "-d", "-q"},
+		{"prune", "--expire=now"},
+	} {
+		if _, err := runGit(bin, root, env, gitArgs(root, args...)); err != nil {
+			return fmt.Errorf("prune imported history: %w", err)
+		}
+	}
+	if err := os.RemoveAll(filepath.Join(gitDir, "logs")); err != nil {
+		return err
+	}
+	return removeEmptyRefDirs(filepath.Join(gitDir, "refs"))
+}
+
+// removeEmptyRefDirs drops directories left by deleted refs, so the import does
+// not even show that refs/original or refs/stash existed.
+func removeEmptyRefDirs(refs string) error {
+	var dirs []string
+	err := filepath.WalkDir(refs, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && p != refs {
+			dirs = append(dirs, p)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	for i := len(dirs) - 1; i >= 0; i-- {
+		rel, _ := filepath.Rel(refs, dirs[i])
+		if rel == "heads" || rel == "tags" {
+			continue
+		}
+		if entries, err := os.ReadDir(dirs[i]); err == nil && len(entries) == 0 {
+			if err := os.Remove(dirs[i]); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func keepRef(ref string, mode History, branch string) bool {
+	if mode == HistoryHead {
+		return branch != "" && ref == "refs/heads/"+branch
+	}
+	for _, prefix := range []string{"refs/heads/", "refs/tags/", "refs/remotes/"} {
+		if strings.HasPrefix(ref, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // Only the temporary copy is repacked. The source object store is read-only,

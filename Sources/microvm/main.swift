@@ -40,7 +40,10 @@ struct Main {
             if command.list {
                 print(formatExecutionList(logs, arguments: args), terminator: "")
             } else {
-                try replayExecutionLogs(logs, execution: command.execution)
+                try replayExecutionLogs(
+                    logs, execution: command.execution,
+                    stdoutFilter: TerminalSanitizer.forTerminal(STDOUT_FILENO, mode: .stream),
+                    stderrFilter: TerminalSanitizer.forTerminal(STDERR_FILENO, mode: .stream))
             }
         case .doctor(let request):
             try request.validate()
@@ -234,11 +237,16 @@ struct Main {
             print(try formatFinishResult(descriptor, output: invocation.output, now: unixNow()), terminator: "")
         case "diff":
             let preview = try JSONDecoder().decode(TaskPreview.self, from: data)
+            let warning = sensitiveWarning(sensitiveChanges(resultDirectory: preview.directory))
+            if !warning.isEmpty { FileHandle.standardError.write(Data((warning.joined(separator: "\n") + "\n").utf8)) }
             let file = try FileHandle(forReadingFrom: URL(fileURLWithPath: preview.patchPath))
             defer { try? file.close() }
+            // On a terminal the patch is shown, not interpreted: escapes and hidden characters become visible text.
+            var review = TerminalSanitizer.forTerminal(STDOUT_FILENO, mode: .review)
             while let chunk = try file.read(upToCount: 64 << 10), !chunk.isEmpty {
-                try FileHandle.standardOutput.write(contentsOf: chunk)
+                try FileHandle.standardOutput.write(contentsOf: review?.filter(chunk) ?? chunk)
             }
+            if let rest = review?.finish() { try FileHandle.standardOutput.write(contentsOf: rest) }
         case "remove":
             print(try formatRemovalResult(target: command.id ?? "", purged: command.purge == true, output: invocation.output), terminator: "")
         default:
@@ -305,12 +313,29 @@ struct Main {
             source.cancel()
             signal(SIGINT, SIG_DFL)
         }
+        // Without -t, guest bytes are command output, not a terminal session: a host terminal sees text and colors only.
+        var stdoutFilter = command.terminal == nil ? TerminalSanitizer.forTerminal(STDOUT_FILENO, mode: .stream) : nil
+        var stderrFilter = command.terminal == nil ? TerminalSanitizer.forTerminal(STDERR_FILENO, mode: .stream) : nil
+        defer {
+            if let rest = stdoutFilter?.finish(), !rest.isEmpty { try? FileHandle.standardOutput.write(contentsOf: rest) }
+            if let rest = stderrFilter?.finish(), !rest.isEmpty { try? FileHandle.standardError.write(contentsOf: rest) }
+        }
         do {
             let outcome = try client.exec(
                 command,
                 readStdin: command.input == "none" ? nil : { readExecStdin($0) },
-                onStdout: { data in output.withLock { try? FileHandle.standardOutput.write(contentsOf: data) } },
-                onStderr: { data in output.withLock { try? FileHandle.standardError.write(contentsOf: data) } },
+                onStdout: { data in
+                    output.withLock {
+                        let shown = stdoutFilter?.filter(data) ?? data
+                        try? FileHandle.standardOutput.write(contentsOf: shown)
+                    }
+                },
+                onStderr: { data in
+                    output.withLock {
+                        let shown = stderrFilter?.filter(data) ?? data
+                        try? FileHandle.standardError.write(contentsOf: shown)
+                    }
+                },
                 interrupt: interrupt,
                 resize: resize,
                 onDeadline: onDeadline

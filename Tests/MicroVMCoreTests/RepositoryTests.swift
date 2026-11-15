@@ -170,4 +170,26 @@ final class RepositoryTests: XCTestCase {
         XCTAssertEqual(local.projectPath, "/tmp/project")
         XCTAssertNil(local.repositoryUrl)
     }
+
+    func testHistoryChoosesHowMuchOfALocalRepositoryComesIn() throws {
+        let clone = try parseCommand(["microvm", "clone", "/tmp/project", "demo", "--history", "head"])
+        guard case .managed(let command) = clone.command else { return XCTFail("expected clone") }
+        XCTAssertEqual(command.history, "head")
+        XCTAssertEqual(try TaskSourceResolver.resolve(command), .directory("/tmp/project"))
+        let task = try parseCommand(["microvm", "task", "start", "/tmp/project", "--history=none"])
+        guard case .task(let started) = task.command else { return XCTFail("expected task") }
+        XCTAssertEqual(started.history, "none")
+        XCTAssertThrowsError(try parseCommand(["microvm", "clone", "/tmp/project", "demo", "--history", "all"]))
+        var url = TaskCommand(op: "start")
+        url.repositoryUrl = "https://github.com/org/repo.git"
+        url.network = .nat
+        url.history = "head"
+        XCTAssertThrowsError(try TaskSourceResolver.resolve(url)) { error in
+            XCTAssertEqual(String(describing: error), "--history applies to a local directory")
+        }
+        var sdk = TaskCommand(op: "start")
+        sdk.projectPath = "/tmp/project"
+        sdk.history = "everything"
+        XCTAssertThrowsError(try TaskSourceResolver.resolve(sdk), "the daemon rejects a value the CLI never sends")
+    }
 }

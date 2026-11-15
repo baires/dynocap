@@ -17,6 +17,12 @@ export type TaskOptions = ClientOptions & {
   ref?: string;
   gitToken?: string;
   sshKeyPath?: string;
+  /**
+   * Git history a local projectPath brings in. "branches" (the default) keeps local branches, tags and
+   * remote-tracking refs; "head" keeps only the checked-out commit's history; "none" imports files only.
+   * The stash, reflogs, refs/original and unreachable objects are never imported.
+   */
+  history?: "branches" | "head" | "none";
   /** Omit to let the daemon choose from the project's files (package.json, pyproject.toml, go.mod), else shell:1. */
   runtimes?: RuntimeSelection[];
   network?: "none" | "nat" | "filtered";
@@ -110,6 +116,7 @@ export class Task {
         ...(options.ref ? { ref: options.ref } : {}),
         ...(options.gitToken ? { gitToken: options.gitToken } : {}),
         ...(options.sshKeyPath ? { sshKeyPath: options.sshKeyPath } : {}),
+        ...(options.history ? { history: options.history } : {}),
       })
     );
     return new Task(

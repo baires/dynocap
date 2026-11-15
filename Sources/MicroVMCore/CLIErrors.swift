@@ -31,7 +31,7 @@ func cliFailureOptions(_ args: [String]) -> CLIFailureOptions {
     var positionals = 0
     var taskOperation: String?
     let valued = ["--home", "--env", "--git-token-env", "--ssh-key", "--runtime", "--network", "--ttl", "--timeout",
-                  "--boot-timeout", "--cwd", "--cpus", "--memory", "--ref", "--name", "--exec"]
+                  "--boot-timeout", "--cwd", "--cpus", "--memory", "--ref", "--history", "--name", "--exec"]
     while index < args.count {
         let token = args[index]
         if token == "--" { break }

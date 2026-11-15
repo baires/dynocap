@@ -392,16 +392,23 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
                 close(fd)
             }
             var buffer = [UInt8](repeating: 0, count: 4096)
+            // The guest controls this stream. Past the cap it is still read, so hvc0 never blocks, but not stored.
+            var room = consoleLogLimit
             while true {
                 let n = buffer.withUnsafeMutableBytes { raw -> Int in
                     guard let base = raw.baseAddress else { return 0 }
                     return read(fd, base, raw.count)
                 }
                 if n <= 0 { break }
-                if logFD >= 0 {
-                    _ = buffer.withUnsafeBytes { raw in
-                        write(logFD, raw.baseAddress, n)
-                    }
+                guard logFD >= 0, room > 0 else { continue }
+                let kept = min(n, room)
+                _ = buffer.withUnsafeBytes { raw in
+                    write(logFD, raw.baseAddress, kept)
+                }
+                room -= kept
+                if room == 0 {
+                    let note = "\n[microvm: console output truncated at \(consoleLogLimit >> 20) MiB]\n"
+                    _ = note.withCString { write(logFD, $0, strlen($0)) }
                 }
             }
         }
@@ -548,6 +555,9 @@ final class LinuxVM: NSObject, VZVirtualMachineDelegate {
     }
 }
 // Kept separate so the actual Virtualization configuration can be checked without booting a guest.
+/// Console bytes kept per boot. Guest root can write hvc0 at disk speed for the whole TTL.
+let consoleLogLimit = 8 << 20
+
 func networkDevices(for mode: NetworkMode) -> [VZNetworkDeviceConfiguration] {
     guard mode == .nat else { return [] }
     let network = VZVirtioNetworkDeviceConfiguration()

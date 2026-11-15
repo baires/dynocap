@@ -26,6 +26,76 @@ func safeName(name string) bool {
 func safeLink(name, target string) bool {
 	return !path.IsAbs(target) && safeName(path.Clean(path.Join(path.Dir(name), target)))
 }
+
+// resolvesInside follows the link at name the way the kernel would, through
+// any links among its components, and reports whether it stays under root.
+// safeLink alone reads the text: s -> ../../../x and t -> s/../../.. both look
+// inside, yet t resolves above root. A missing component ends link following;
+// the rest of the path is lexical.
+func resolvesInside(root, name string) bool {
+	target, err := os.Readlink(filepath.Join(root, filepath.FromSlash(name)))
+	if err != nil || path.IsAbs(target) {
+		return false
+	}
+	var resolved []string
+	if dir := path.Dir(name); dir != "." {
+		resolved = strings.Split(dir, "/")
+	}
+	pending := strings.Split(target, "/")
+	hops := 0
+	for len(pending) > 0 {
+		part := pending[0]
+		pending = pending[1:]
+		switch part {
+		case "", ".":
+			continue
+		case "..":
+			if len(resolved) == 0 {
+				return false
+			}
+			resolved = resolved[:len(resolved)-1]
+			continue
+		}
+		resolved = append(resolved, part)
+		p := filepath.Join(root, filepath.FromSlash(strings.Join(resolved, "/")))
+		st, err := os.Lstat(p)
+		if err != nil || st.Mode()&os.ModeSymlink == 0 {
+			continue
+		}
+		if hops++; hops > 40 {
+			return false
+		}
+		next, err := os.Readlink(p)
+		if err != nil || path.IsAbs(next) {
+			return false
+		}
+		resolved = resolved[:len(resolved)-1]
+		pending = append(strings.Split(next, "/"), pending...)
+	}
+	return true
+}
+
+// LinksStayInside checks every symlink under root after a whole tree exists,
+// because a later entry can turn an earlier link's component into a link.
+func LinksStayInside(root string) error {
+	return filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.Type()&fs.ModeSymlink == 0 {
+			return nil
+		}
+		rel, err := filepath.Rel(root, p)
+		if err != nil {
+			return err
+		}
+		if !resolvesInside(root, filepath.ToSlash(rel)) {
+			return fmt.Errorf("symlink %q resolves outside the tree", filepath.ToSlash(rel))
+		}
+		return nil
+	})
+}
+
 func parents(root, name string) error {
 	dir := filepath.Dir(filepath.Join(root, filepath.FromSlash(name)))
 	for dir != root {
@@ -41,8 +111,56 @@ func parents(root, name string) error {
 	return nil
 }
 
+// gitComponent reports a .git path component as macOS sees it: case-folded,
+// with the code points HFS+ and APFS ignore removed.
+func gitComponent(name string) bool {
+	for _, part := range strings.Split(name, "/") {
+		folded := strings.Map(func(r rune) rune {
+			if (r >= 0x200C && r <= 0x200F) || (r >= 0x202A && r <= 0x202E) || (r >= 0x206A && r <= 0x206F) || r == 0xFEFF {
+				return -1
+			}
+			return r
+		}, part)
+		if strings.EqualFold(folded, ".git") {
+			return true
+		}
+	}
+	return false
+}
+
+// UnpackFresh is the host side of a guest archive. The destination must be
+// missing or empty, so guest names cannot land beside host files, and .git
+// paths are refused. A failed unpack removes what it wrote.
+func UnpackFresh(root string, r io.Reader, limit int64) error {
+	st, err := os.Lstat(root)
+	switch {
+	case os.IsNotExist(err):
+	case err != nil:
+		return err
+	case !st.IsDir():
+		return fmt.Errorf("destination %s exists and is not an empty directory", root)
+	default:
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			return err
+		}
+		if len(entries) > 0 {
+			return fmt.Errorf("destination %s is not empty", root)
+		}
+	}
+	if err := unpack(root, r, limit, true); err != nil {
+		os.RemoveAll(root)
+		return err
+	}
+	return nil
+}
+
 // Unpack accepts only fresh, bounded trees. Links cannot become extraction parents.
 func Unpack(root string, r io.Reader, limit int64) error {
+	return unpack(root, r, limit, false)
+}
+
+func unpack(root string, r io.Reader, limit int64, refuseGit bool) error {
 	if err := os.MkdirAll(root, 0755); err != nil {
 		return err
 	}
@@ -57,7 +175,7 @@ func Unpack(root string, r io.Reader, limit int64) error {
 			if len(tracked.tail) != 1024 || !bytes.Equal(tracked.tail, make([]byte, 1024)) {
 				return fmt.Errorf("incomplete archive trailer")
 			}
-			return nil
+			return LinksStayInside(root)
 		}
 		if err != nil {
 			return err
@@ -65,6 +183,9 @@ func Unpack(root string, r io.Reader, limit int64) error {
 		name := strings.TrimSuffix(h.Name, "/")
 		if !safeName(name) || seen[name] {
 			return fmt.Errorf("invalid or duplicate archive path %q", h.Name)
+		}
+		if refuseGit && gitComponent(name) {
+			return fmt.Errorf("archive path %q is inside .git", h.Name)
 		}
 		seen[name] = true
 		if len(seen) > 100000 || h.Size < 0 || h.Size > limit-total {

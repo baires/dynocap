@@ -32,6 +32,10 @@ By default, `@microvm/mcp` enforces strict security boundaries:
 - **Opt-in Network Modes:** You must explicitly enable network flags via environment variables when launching the server:
   - `MICROVM_MCP_ALLOW_FILTERED=1`: Permits HTTPS access to the task runtime's package registry (`registry.npmjs.org` for node, `pypi.org` and `files.pythonhosted.org` for python, `proxy.golang.org` and `sum.golang.org` for go, and none for `shell:1`) and, for a repository URL, that URL's host.
   - `MICROVM_MCP_ALLOW_NAT=1`: Permits unrestricted outbound NAT connectivity.
+- **Server-chosen host paths:** `projectPath` must be inside `MICROVM_MCP_ROOTS` (default: the server's working directory) and is never the home directory or a dot directory in it. Desktop clients often start servers from `/` or `~`, which leaves no default root, so set `MICROVM_MCP_ROOTS` to your project directories.
+- **Repository hosts and keys:** `repositoryUrl` must name a host in `MICROVM_MCP_GIT_HOSTS` (default `github.com,gitlab.com,bitbucket.org`), and `sshKeyPath` needs `MICROVM_MCP_ALLOW_SSH_KEY=1`.
+
+Filtered egress limits destinations, not what leaves: the registries and Git hosts it allows accept uploads. See [What filtered egress does not stop](../explanation/security-and-isolation.mdx#what-filtered-egress-does-not-stop).
 
 ---
 
@@ -48,7 +52,8 @@ Add MicroVM to your Claude Desktop configuration file:
       "command": "node",
       "args": ["/Users/YOUR_USER/playground/microvm/sdk/mcp/dist/bin.js"],
       "env": {
-        "MICROVM_MCP_ALLOW_FILTERED": "1"
+        "MICROVM_MCP_ALLOW_FILTERED": "1",
+        "MICROVM_MCP_ROOTS": "/Users/YOUR_USER/code"
       }
     }
   }

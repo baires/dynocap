@@ -47,6 +47,20 @@ xattr -d com.apple.quarantine "$workdir/$name" 2>/dev/null || true
   cd "$workdir"
   shasum -a 256 -c "${name}.sha256"
 )
+# The checksum comes from the same release as the archive, so it only catches
+# corruption. The attestation proves this repository's release workflow built it.
+if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+  if ! gh attestation verify "$workdir/$name" --repo "${OWNER}/${REPO}" >/dev/null; then
+    echo "The archive has no valid build attestation from ${OWNER}/${REPO}. Not installing." >&2
+    exit 1
+  fi
+elif [ "${MICROVM_REQUIRE_ATTESTATION:-0}" = "1" ]; then
+  echo "MICROVM_REQUIRE_ATTESTATION=1 needs the GitHub CLI (gh), logged in, to verify the archive." >&2
+  exit 1
+else
+  echo "warning: gh is not installed or not logged in, so the build attestation was not verified." >&2
+  echo "         Install gh, run gh auth login, and rerun, or set MICROVM_REQUIRE_ATTESTATION=1 to refuse unverified installs." >&2
+fi
 
 prefix="${HOME}/.local/microvm"
 rm -rf "$prefix"

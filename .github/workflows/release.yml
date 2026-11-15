@@ -7,6 +7,9 @@ on:
 
 permissions:
   contents: write
+  # Build provenance: installers verify the archive came from this workflow, not just that it matches a checksum beside it.
+  id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -19,6 +22,10 @@ jobs:
           cache-dependency-path: guest/go.sum
       - name: Package darwin-arm64
         run: ./scripts/package-release.sh "${GITHUB_REF_NAME}"
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/microvm-${{ github.ref_name }}-darwin-arm64.tar.gz
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}

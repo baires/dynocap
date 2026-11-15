@@ -192,6 +192,10 @@ export class Sandbox {
     });
   }
 
+  /**
+   * Copy `guestPath` out of the sandbox into `localPath`, which must not exist yet or be an empty directory.
+   * Guest files never land beside host files: `.git` paths and symlinks that resolve outside `localPath` are refused.
+   */
   async download(
     guestPath: string,
     localPath: string,

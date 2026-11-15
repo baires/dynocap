@@ -40,6 +40,7 @@ func nodeRecipe(nodeVersion, npmVersion, sha256 string) recipeFunc {
 				VerifyCommand:             []string{"npm", "cache", "verify", "--cache", "/work/npm-cache"},
 				IncompatibleEnvPrefixes:   []string{"npm_config_"},
 				IncompatibleArgSubstrings: []string{"registry"},
+				SeedCommands:              [][]string{{"npm", "ci"}, {"npm", "install"}},
 			},
 		}, verify)
 	}

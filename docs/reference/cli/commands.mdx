@@ -52,6 +52,7 @@ microvm clone SOURCE NAME [options]
   - `--ttl <seconds>`: Maximum lifetime from creation (30s to 86400s). Default: `1800` (30m).
   - `--cpus <count>`: Number of virtual CPUs. Default: `2`.
   - `--memory <MB>`: RAM in megabytes. Default: `1024`.
+  - `--history <branches|head|none>`: Git history a local directory brings in. `branches` (the default) keeps local branches, tags and remote-tracking refs; `head` keeps only the checked-out commit's history; `none` imports files only. The stash, reflogs, `refs/original`, other worktrees, submodule repositories and unreachable objects are never imported. A repository URL rejects this flag.
   - `--json`: Output creation object to stdout as JSON.
 
 ---

@@ -65,7 +65,9 @@ The forwarder inspects initial TLS ClientHello packets and socket connections:
    - The remote Git origin host if the project was cloned from an HTTPS URL.
    - A plain `microvm run` sandbox has no runtime and keeps `registry.npmjs.org`.
 
-Any attempt to contact another IP or domain (e.g., pastebins, command-and-control servers, webhooks) is terminated immediately at the host boundary.
+A direct connection to another IP or domain (e.g., pastebins, command-and-control servers, webhooks) is terminated at the host boundary.
+
+> **Filtered egress is not an exfiltration barrier.** The allowed hosts accept data: `npm publish` reaches `registry.npmjs.org`, `proxy.golang.org` fetches module paths on attacker-chosen domains, and `git push` reaches the repository host. Assume a filtered sandbox can send out anything it can read. See [What filtered egress does not stop](../explanation/security-and-isolation.mdx#what-filtered-egress-does-not-stop).
 
 ### Inspecting Active Network Configuration
 
@@ -99,6 +101,7 @@ Under NAT mode:
 - Apple's `VZNATNetworkDeviceAttachment` provides NAT routing through your Mac's active network interfaces.
 - The guest obtains an IP via DHCP from macOS.
 - Outbound traffic is unrestricted; inbound traffic from external networks remains unreachable.
+- The guest can reach your local network and services your Mac listens on through any interface, such as development servers bound to `0.0.0.0`.
 
 > **Caution:** Do not use `nat` for untrusted agent evaluations when secrets or sensitive files are in scope, as the agent can send arbitrary payloads over the Internet.
 

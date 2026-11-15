@@ -65,6 +65,18 @@ microvm exec my-sandbox -t -- npm test -- --watch
 
 ---
 
+## What Guest Output Can Do to Your Terminal
+
+Guest output is untrusted. A terminal acts on escape sequences: they can write your clipboard (OSC 52), retitle the window, add hyperlinks, or make the terminal answer a query by typing into your shell.
+
+- `exec` without `-t` and `logs`: when stdout or stderr is a terminal, MicroVM passes text, colors, `\r`, `\b`, and the line-erase and column moves progress bars use, and drops every other escape sequence and control character.
+- `diff`: on a terminal nothing is interpreted. Control characters appear as `^[`, `^M` and so on, and characters that hide or reorder text (bidi overrides, zero-width characters) appear as `<U+202E>`, so hidden content in a patch is visible.
+- `shell` and `exec -t` are a real terminal session, like `ssh`, and are not filtered. Use them only with sandboxes whose output you are willing to let your terminal interpret.
+
+Output to a pipe or file is never filtered. To see the exact bytes, pipe through a viewer: `microvm diff demo | less -R` or `microvm logs demo | cat -v`.
+
+---
+
 ## Signal Handling and Keystrokes
 
 When attached to a terminal session in MicroVM:

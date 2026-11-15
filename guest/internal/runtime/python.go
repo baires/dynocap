@@ -43,6 +43,7 @@ func pythonRecipe(pythonVersion, uvVersion, uvSHA256 string) recipeFunc {
 				Registry:                  "https://pypi.org/simple",
 				IncompatibleEnvPrefixes:   []string{"UV_INDEX", "UV_DEFAULT_INDEX", "UV_EXTRA_INDEX", "UV_CACHE_DIR", "UV_NO_CACHE", "PIP_"},
 				IncompatibleArgSubstrings: []string{"index", "cache-dir", "no-cache"},
+				SeedCommands:              [][]string{{"uv", "sync"}},
 			},
 		}, verify)
 	}

@@ -22,6 +22,46 @@ type Change struct {
 	After   string `json:"afterSha256,omitempty"`
 	Mode    uint32 `json:"mode"`
 	Symlink string `json:"symlink,omitempty"`
+	// Sensitive says why applying this change can run code on the host or in CI.
+	Sensitive string `json:"sensitive,omitempty"`
+}
+
+var sensitiveDirs = map[string]string{
+	".github": "CI workflows and actions run with repository secrets",
+	".gitlab": "CI configuration", ".circleci": "CI configuration", ".buildkite": "CI configuration",
+	".husky": "Git hooks run on commit", ".githooks": "Git hooks", ".vscode": "editor tasks and settings can run commands",
+	".idea": "editor run configurations", ".devcontainer": "container definition runs on open",
+}
+
+var sensitiveFiles = map[string]string{
+	".envrc": "direnv runs it on cd", ".gitattributes": "Git filters and diff drivers", ".gitmodules": "submodule URLs",
+	".gitlab-ci.yml": "CI configuration", ".travis.yml": "CI configuration", "azure-pipelines.yml": "CI configuration",
+	".pre-commit-config.yaml": "pre-commit hooks", "lefthook.yml": "Git hooks", ".npmrc": "npm registry and script settings",
+	".yarnrc": "Yarn settings", ".yarnrc.yml": "Yarn settings and plugins", "package.json": "npm scripts run on install and test",
+	"Makefile": "build commands", "setup.py": "runs on install", "pyproject.toml": "build backend and scripts",
+	"go.mod": "module replacements", "Dockerfile": "image build commands", "justfile": "build commands",
+}
+
+// sensitiveReason names changes that act on their own once applied: configuration
+// that runs commands, symlinks, and new execute bits.
+func sensitiveReason(n, link string, before, after os.FileMode, deleted bool) string {
+	parts := strings.Split(n, "/")
+	if reason, ok := sensitiveDirs[parts[0]]; ok {
+		return reason
+	}
+	if reason, ok := sensitiveFiles[parts[len(parts)-1]]; ok {
+		return reason
+	}
+	if deleted {
+		return ""
+	}
+	if link != "" {
+		return "symlink to " + link
+	}
+	if after.Perm()&0o111 != 0 && before.Perm()&0o111 == 0 {
+		return "becomes executable"
+	}
+	return ""
 }
 
 func identity(root, n string) (string, os.FileMode, string, error) {
@@ -116,6 +156,7 @@ func Result(before, after, out string) error {
 		}
 		changes = append(changes, Change{
 			Path: n, Kind: kind, From: from, Before: x, After: y, Mode: uint32(ym.Perm()), Symlink: link,
+			Sensitive: sensitiveReason(n, link, xm, ym, y == ""),
 		})
 		if from != "" {
 			fmt.Fprintf(&review, "renamed %s -> %s (mode %04o -> %04o)\n", from, n, xm.Perm(), ym.Perm())
@@ -163,12 +204,26 @@ func Result(before, after, out string) error {
 			return fmt.Errorf("review exceeds limit")
 		}
 	}
+	// files/ holds only changed paths, so a link can resolve differently here than in the tree.
+	if e = LinksStayInside(filepath.Join(out, "files")); e != nil {
+		return e
+	}
 	raw, e := json.MarshalIndent(changes, "", "  ")
 	if e != nil {
 		return e
 	}
 	if e = os.WriteFile(filepath.Join(out, "changes.json"), raw, 0600); e != nil {
 		return e
+	}
+	var flagged bytes.Buffer
+	for _, c := range changes {
+		if c.Sensitive != "" {
+			fmt.Fprintf(&flagged, "  %s %s: %s\n", c.Kind, c.Path, c.Sensitive)
+		}
+	}
+	if flagged.Len() > 0 {
+		header := "Review carefully before applying. These changes can run code on this Mac or in CI:\n" + flagged.String() + "\n"
+		review = *bytes.NewBuffer(append([]byte(header), review.Bytes()...))
 	}
 	if e = os.WriteFile(filepath.Join(out, "review.txt"), review.Bytes(), 0600); e != nil {
 		return e

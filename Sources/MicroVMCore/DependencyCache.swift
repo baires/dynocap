@@ -6,8 +6,10 @@ enum DependencyCache {
     struct Seed {
         var key: String
         var runtimeDigest: String
+        var source: String?
     }
-    static func key(baseline: URL, runtime: RuntimeArtifact) throws -> String? {
+    /// The key covers the task's source, so a seed never crosses into another project with the same lockfile.
+    static func key(baseline: URL, runtime: RuntimeArtifact, source: String?) throws -> String? {
         guard let spec = runtime.dependencyCache, !spec.lockfiles.isEmpty else { return nil }
         let fm = FileManager.default
         var inputs = ""
@@ -17,6 +19,7 @@ enum DependencyCache {
             inputs += try fileDigest(lock)
         }
         inputs += runtime.artifactDigest + runtime.arch + spec.registry
+        inputs += "\u{0}source=" + (source ?? "")
         for name in spec.configFiles ?? [] {
             let config = baseline.appendingPathComponent(name)
             if fm.fileExists(atPath: config.path) { inputs += try fileDigest(config) }
@@ -39,19 +42,32 @@ enum DependencyCache {
             _ = try execute(id, ["rm", "-rf", spec.directory], [], nil, nil, 1 << 20)
         }
     }
-    /// Commands that point the package manager at another registry or cache must not publish a seed.
+    /// Only the runtime's install commands may publish a seed. Anything else the task runs, such as tests or a shell,
+    /// is project code that could rewrite the cache, and commands that point the package manager at another registry
+    /// or cache would publish the wrong one.
     static func compatibleCommand(argv: [String], env: [String], spec: DependencyCacheSpec) -> Bool {
+        let argv = unwrappedShell(argv)
+        guard (spec.seedCommands ?? []).contains(where: { !$0.isEmpty && argv.starts(with: $0) }) else { return false }
         let prefixes = (spec.incompatibleEnvPrefixes ?? []).map { $0.lowercased() }
         let substrings = (spec.incompatibleArgSubstrings ?? []).map { $0.lowercased() }
         return !env.contains { entry in prefixes.contains { entry.lowercased().hasPrefix($0) } }
             && !argv.contains { arg in substrings.contains { arg.lowercased().contains($0) } }
+    }
+    /// `sh -c "npm ci"` from the SDK's string form is the plain argv when the script is only words.
+    /// Anything with shell syntax stays a shell command.
+    static func unwrappedShell(_ argv: [String]) -> [String] {
+        guard argv.count == 3, argv[0] == "sh" || argv[0] == "/bin/sh", argv[1] == "-c" else { return argv }
+        let plain = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: " ._-=/@:+,"))
+        guard argv[2].unicodeScalars.allSatisfy({ $0.isASCII && plain.contains($0) }) else { return argv }
+        return argv[2].split(separator: " ").map(String.init)
     }
     static func publish(seed: Seed, finalTree: URL, home: URL, id: String, execute: TaskManager.Execute) throws {
         let key = seed.key
         let runtimeDigest = seed.runtimeDigest
         let artifact = try JSONDecoder().decode(
             RuntimeArtifact.self, from: Data(contentsOf: home.appendingPathComponent("runtimes/\(runtimeDigest)/runtime.json")))
-        guard let spec = artifact.dependencyCache, try self.key(baseline: finalTree, runtime: artifact) == key else { return }
+        guard let spec = artifact.dependencyCache, try self.key(baseline: finalTree, runtime: artifact, source: seed.source) == key
+        else { return }
         let fm = FileManager.default
         let directory = home.appendingPathComponent(directoryName)
         try fm.createDirectory(at: directory, withIntermediateDirectories: true)

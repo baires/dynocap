@@ -12,6 +12,35 @@ private struct FinishResult: Encodable {
     var baseline = "imported_checkout_including_uncommitted_changes"
     var hostCheckout = "unchanged"
     var applyCommand: String
+    var sensitivePaths: [SensitiveChange]
+}
+
+/// A change that can run code on the host or in CI once applied, as `microvm-workspace result` tagged it.
+public struct SensitiveChange: Codable, Equatable {
+    public var path: String
+    public var kind: String
+    public var reason: String
+}
+
+/// Flagged changes from a result or preview directory's changes.json; empty when it is missing.
+public func sensitiveChanges(resultDirectory: String) -> [SensitiveChange] {
+    struct Entry: Decodable {
+        var path: String
+        var kind: String
+        var sensitive: String?
+    }
+    let file = URL(fileURLWithPath: resultDirectory).appendingPathComponent("changes.json")
+    guard let data = try? Data(contentsOf: file), let entries = try? JSONDecoder().decode([Entry].self, from: data) else { return [] }
+    return entries.compactMap { entry in
+        entry.sensitive.map { SensitiveChange(path: entry.path, kind: entry.kind, reason: $0) }
+    }
+}
+
+/// Human warning lines for flagged changes; empty when nothing is flagged.
+public func sensitiveWarning(_ changes: [SensitiveChange]) -> [String] {
+    guard !changes.isEmpty else { return [] }
+    return ["Review carefully before applying. These changes can run code on this Mac or in CI:"]
+        + changes.map { "  \(finishText($0.kind)) \(finishText($0.path)): \(finishText($0.reason))" }
 }
 
 public func formatFinishResult(_ descriptor: TaskDescriptor, output: CLIOutput, now: Int64) throws -> String {
@@ -20,10 +49,12 @@ public func formatFinishResult(_ descriptor: TaskDescriptor, output: CLIOutput, 
     let quoted = patch.map(shellQuote) ?? shellQuote("unavailable")
     let apply = "git apply --check \(quoted) && git apply \(quoted)"
     let priorCommandFailure = descriptor.phase == "failed"
+    let sensitive = directory.map { sensitiveChanges(resultDirectory: $0) } ?? []
     if output == .json {
         let result = FinishResult(
             id: descriptor.id, name: descriptor.name, phase: descriptor.phase, resultDirectory: directory, patch: patch,
-            resultExpiresAtUnix: descriptor.expiresAtUnix, priorCommandFailure: priorCommandFailure, applyCommand: apply)
+            resultExpiresAtUnix: descriptor.expiresAtUnix, priorCommandFailure: priorCommandFailure, applyCommand: apply,
+            sensitivePaths: sensitive)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         return (String(data: try encoder.encode(result), encoding: .utf8) ?? "") + "\n"
@@ -40,6 +71,7 @@ public func formatFinishResult(_ descriptor: TaskDescriptor, output: CLIOutput, 
         "Result retention: \(remaining) (\(date))",
         "The patch applies only to a checkout matching the imported baseline, including uncommitted changes that were imported. "
             + "microvm does not modify the host checkout.",
+    ] + sensitiveWarning(sensitive) + [
         "Apply: \(apply)",
     ]
     if priorCommandFailure {

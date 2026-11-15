@@ -71,14 +71,28 @@ Returned when a task is finalized and exported:
 
 ```json
 {
+  "applyCommand": "git apply --check '/Users/user/.microvm/tasks/task-8f92b7c1/result/changes.patch' && git apply '/Users/user/.microvm/tasks/task-8f92b7c1/result/changes.patch'",
+  "baseline": "imported_checkout_including_uncommitted_changes",
+  "hostCheckout": "unchanged",
   "id": "task-8f92b7c1",
   "name": "demo",
+  "patch": "/Users/user/.microvm/tasks/task-8f92b7c1/result/changes.patch",
   "phase": "completed",
-  "patchPath": "/Users/user/.microvm/tasks/task-8f92b7c1/result/changes.patch",
+  "priorCommandFailure": false,
   "resultDirectory": "/Users/user/.microvm/tasks/task-8f92b7c1/result",
-  "expiresAtUnix": 1795563000
+  "resultExpiresAtUnix": 1795563000,
+  "sandbox": "stopped",
+  "sensitivePaths": [
+    {
+      "kind": "added",
+      "path": ".husky/pre-commit",
+      "reason": "Git hooks run on commit"
+    }
+  ]
 }
 ```
+
+`sensitivePaths` lists changes that can run code on the host or in CI once the patch is applied: Git hooks, CI workflows, editor tasks, package and build scripts, `.envrc`, symlinks, and files that become executable. It is empty when there are none. Each entry also appears in `changes.json` as `sensitive`.
 
 ---
 

@@ -114,6 +114,21 @@ microvm exec worker -- npm test
 
 ---
 
+## Which tasks publish a seed
+
+A seed is the package cache a networked install produced, and later offline sandboxes trust it. MicroVM therefore publishes a seed only from a task where:
+
+- every command was one of the runtime's install commands: `npm ci` or `npm install` for node, `uv sync` for python, `go mod download` for go (a plain `sh -c "npm ci"` from the SDK counts; anything with shell syntax does not);
+- no command pointed the package manager at another registry or cache.
+
+A task that runs anything else, such as `npm test`, a shell, or a script, never publishes or republishes a seed, because that code could rewrite the cache. Keep the `deps` sandbox to the install alone.
+
+Seeds are keyed by the task's source (its directory or repository URL) as well as the lockfile, so a seed never crosses into another project.
+
+A seed is only as trustworthy as the install that produced it: packages' install scripts ran with network access. npm re-checks each package against the lockfile's integrity hashes when it installs offline; uv and Go reuse their caches as they are.
+
+---
+
 ## Cache invalidation and updates
 
 - **If you change dependencies:** a lockfile change produces a different key, so later clones find no matching seed.

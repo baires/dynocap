@@ -25,7 +25,8 @@ func main() {
 	case "pack":
 		err = workspace.Pack(os.Args[2], os.Stdout, len(os.Args) > 3, workspace.Limit)
 	case "unpack":
-		err = workspace.Unpack(os.Args[2], os.Stdin, workspace.Limit)
+		// Every host unpack reads a guest or freshly packed tree into a new directory.
+		err = workspace.UnpackFresh(os.Args[2], os.Stdin, workspace.Limit)
 	case "names":
 		var n []string
 		n, err = workspace.Names(os.Args[2], true)
@@ -45,10 +46,16 @@ func main() {
 	case "pack-git":
 		err = workspace.PackGit(os.Args[2], os.Stdout, workspace.Limit)
 	case "import-git":
-		if len(os.Args) != 4 {
-			err = fmt.Errorf("import-git SOURCE DEST")
+		if len(os.Args) != 4 && len(os.Args) != 5 {
+			err = fmt.Errorf("import-git SOURCE DEST [branches|head|none]")
 		} else {
-			err = workspace.ImportGit(os.Args[2], os.Args[3])
+			history := workspace.HistoryBranches
+			if len(os.Args) == 5 {
+				history, err = workspace.ParseHistory(os.Args[4])
+			}
+			if err == nil {
+				err = workspace.ImportGitHistory(os.Args[2], os.Args[3], history)
+			}
 			if errors.Is(err, workspace.ErrNoGit) {
 				fmt.Fprint(os.Stdout, "none")
 				err = nil

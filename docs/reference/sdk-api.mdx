@@ -24,6 +24,7 @@ Clones a local directory or remote Git URL into an isolated sandbox and boots th
 const task = await Task.start({
   name: "worker-1",
   projectPath: "./my-app",
+  history: "head", // "branches" (default), "head", or "none"; see microvm clone --history
   runtimes: [{ name: "node", version: "24" }],
   network: "none",
   ttlSeconds: 1800,

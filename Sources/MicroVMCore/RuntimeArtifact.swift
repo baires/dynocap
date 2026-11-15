@@ -38,6 +38,8 @@ public struct DependencyCacheSpec: Codable, Equatable {
     public var verifyCommand: [String]?
     public var incompatibleEnvPrefixes: [String]?
     public var incompatibleArgSubstrings: [String]?
+    /// Argv prefixes that may publish a seed. Missing means none may: a runtime prepared before this field never seeds.
+    public var seedCommands: [[String]]?
 }
 
 /// Resolves supported selections; task execution treats the result as an opaque disk artifact.

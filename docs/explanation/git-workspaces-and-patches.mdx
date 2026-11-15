@@ -19,7 +19,14 @@ When you run `microvm clone ./project my-task`, the `microvm-workspace` companio
 1. **Local Object Packing:** It extracts commits, trees, and blobs from your local Git object database without exposing host configuration files.
 2. **Alternates & Borrowed Objects:** If your host repository uses shared Git alternates or worktrees, `microvm-workspace` resolves borrowed objects and copies them into the guest's standalone repository so the sandbox never attempts to read host object stores.
 3. **Hook Disabling:** Host Git hooks (`.git/hooks/*`, such as pre-commit or post-checkout scripts) are deliberately **not imported**. This prevents malicious repositories from triggering arbitrary host hook scripts during import.
-4. **Clean Baseline:** The imported HEAD commit and uncommitted working directory state are recorded as the baseline commit inside the guest.
+4. **Only the History You Choose:** Sandbox code can read everything imported and, on `filtered` or `nat`, send it out. So the import keeps only refs and the objects they reach:
+   - `--history branches` (the default): local branches, tags and remote-tracking refs.
+   - `--history head`: only the history of the checked-out commit.
+   - `--history none`: files only; the sandbox has no Git repository.
+
+   Every mode drops the stash, reflogs, `refs/original` (filter-branch backups), notes and other refs, other worktrees' metadata, submodule repositories in `.git/modules`, merge and rebase pseudo-refs, and every object nothing references any more, so a secret removed from history does not come back in the sandbox. A secret still reachable from a kept branch or tag is imported; use `head` or `none` when other branches hold work the sandbox should not see.
+
+5. **Clean Baseline:** The imported HEAD commit and uncommitted working directory state are recorded as the baseline commit inside the guest.
 
 ---
 

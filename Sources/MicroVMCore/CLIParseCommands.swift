@@ -295,6 +295,9 @@ func applyStartFlag(_ command: inout TaskCommand, _ flag: String, _ raw: String,
         command.runtimes = try runtimeSelections(raw)
     case "--ref":
         command.ref = raw
+    case "--history":
+        guard taskHistoryModes.contains(raw) else { throw usageError("history must be branches, head, or none, got \(raw)") }
+        command.history = raw
     case "--ssh-key":
         command.sshKeyPath = raw
     case "--git-token-env":
@@ -306,6 +309,9 @@ func applyStartFlag(_ command: inout TaskCommand, _ flag: String, _ raw: String,
         throw usageError("unknown flag \(flag)")
     }
 }
+
+/// Values `microvm-workspace import-git` accepts.
+let taskHistoryModes = ["branches", "head", "none"]
 
 func integerFlag(_ flag: String, _ raw: String, min: Int) throws -> Int {
     guard let value = Int(raw), value >= min else {

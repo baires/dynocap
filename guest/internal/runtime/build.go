@@ -42,6 +42,9 @@ type CacheSpec struct {
 	VerifyCommand             []string `json:"verifyCommand"`
 	IncompatibleEnvPrefixes   []string `json:"incompatibleEnvPrefixes"`
 	IncompatibleArgSubstrings []string `json:"incompatibleArgSubstrings"`
+	// SeedCommands are argv prefixes that may publish a seed. A task that runs
+	// anything else, such as its tests, never republishes the cache it holds.
+	SeedCommands [][]string `json:"seedCommands"`
 }
 
 // Recipe is everything language-specific; the manifest carries it to the language-agnostic host.

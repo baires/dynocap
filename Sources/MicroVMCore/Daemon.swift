@@ -893,6 +893,16 @@ public final class Daemon {
                 command.name, ["/usr/local/bin/microvm-agent", "unpack", command.guestPath], input: temp, output: nil, limit: 256 << 20,
                 requireOffline: command.requireOffline == true)
         } else if command.direction == "download" {
+            // Guest names never land beside host files; checked again by the unpacker.
+            if let entries = try? FileManager.default.contentsOfDirectory(atPath: command.localPath), !entries.isEmpty {
+                throw MicroVMError(
+                    "download destination \(command.localPath) is not empty",
+                    recovery: "Download into a new or empty directory, then move what you need.")
+            }
+            if let kind = try? FileManager.default.attributesOfItem(atPath: command.localPath)[.type] as? FileAttributeType,
+                kind != .typeDirectory {
+                throw MicroVMError("download destination \(command.localPath) exists and is not a directory")
+            }
             _ = try executeInternal(
                 command.name, ["/usr/local/bin/microvm-agent", "pack", command.guestPath], input: nil, output: temp, limit: 256 << 20,
                 requireOffline: command.requireOffline == true)

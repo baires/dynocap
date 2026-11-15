@@ -23,8 +23,10 @@ public func formatExecutionList(_ logs: ExecutionLogs, arguments: [String] = [])
 
 /// Copies each ordinary stream independently. It does not claim to restore cross-stream chronology.
 /// A terminal transcript is already one chronological stream and is copied to stdout alone.
+/// A filter, set when that output is a terminal, keeps guest escape sequences from acting on it.
 public func replayExecutionLogs(
-    _ logs: ExecutionLogs, execution: Int?, stdout: FileHandle = .standardOutput, stderr: FileHandle = .standardError
+    _ logs: ExecutionLogs, execution: Int?, stdout: FileHandle = .standardOutput, stderr: FileHandle = .standardError,
+    stdoutFilter: TerminalSanitizer? = nil, stderrFilter: TerminalSanitizer? = nil
 ) throws {
     guard let entry = execution.flatMap({ id in logs.executions.first { $0.id == id } }) ?? (execution == nil ? logs.executions.last : nil) else {
         throw MicroVMError("no recorded execution\(execution.map { " \($0)" } ?? "") for \(logs.name ?? logs.id)", code: .notFound,
@@ -50,15 +52,15 @@ public func replayExecutionLogs(
     defer { try? out.close() }
     if entry.format == "terminal" {
         try checkLogLength(out, entry.stdout)
-        try copyLog(out, to: stdout, bytes: entry.stdout.bytes ?? 0)
+        try copyLog(out, to: stdout, bytes: entry.stdout.bytes ?? 0, filter: stdoutFilter)
         return
     }
     let err = try openLog(entry.stderr, directory: logs.directory)
     defer { try? err.close() }
     // Validate both handles before writing either stream, including races with finish/expiry/external truncation.
     for (file, stream) in [(out, entry.stdout), (err, entry.stderr)] { try checkLogLength(file, stream) }
-    try copyLog(out, to: stdout, bytes: entry.stdout.bytes ?? 0)
-    try copyLog(err, to: stderr, bytes: entry.stderr.bytes ?? 0)
+    try copyLog(out, to: stdout, bytes: entry.stdout.bytes ?? 0, filter: stdoutFilter)
+    try copyLog(err, to: stderr, bytes: entry.stderr.bytes ?? 0, filter: stderrFilter)
 }
 
 private func checkLogLength(_ file: FileHandle, _ stream: RecordedLogStream) throws {
@@ -78,13 +80,15 @@ private func openLog(_ stream: RecordedLogStream, directory: String) throws -> F
     }
 }
 
-private func copyLog(_ source: FileHandle, to output: FileHandle, bytes: Int64) throws {
+private func copyLog(_ source: FileHandle, to output: FileHandle, bytes: Int64, filter: TerminalSanitizer?) throws {
+    var filter = filter
+    defer { if let rest = filter?.finish(), !rest.isEmpty { try? output.write(contentsOf: rest) } }
     var remaining = bytes
     while remaining > 0 {
         guard let chunk = try source.read(upToCount: Int(min(65536, remaining))), !chunk.isEmpty else {
             throw MicroVMError("execution log was truncated during replay", recovery: "Inspect the retained files; output already written is partial.")
         }
-        try output.write(contentsOf: chunk)
+        try output.write(contentsOf: filter?.filter(chunk) ?? chunk)
         remaining -= Int64(chunk.count)
     }
 }

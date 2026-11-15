@@ -164,6 +164,9 @@ let cliCommandSpecs: [CLICommandSpec] = [
             CLIFlag(name: "--memory", value: "MB", summary: "Guest memory in megabytes, at least 128."),
             CLIFlag(name: "--ref", value: "NAME", summary: "Git branch or tag to fetch for a repository URL."),
             CLIFlag(
+                name: "--history", value: "branches|head|none",
+                summary: "Git history a local directory brings in. The default is branches; stash, reflogs and unreachable objects never come."),
+            CLIFlag(
                 name: "--git-token-env",
                 value: "VAR",
                 summary: "Environment variable holding an HTTPS token for the guest fetch."
@@ -171,8 +174,8 @@ let cliCommandSpecs: [CLICommandSpec] = [
             CLIFlag(name: "--ssh-key", value: "PATH", summary: "Private key used only for an ssh guest fetch."),
         ],
         examples: [
-            "microvm clone ./project demo --runtime node:24 --network none --ttl 1800 --cpus 2 --memory 1024 --ref main --json",
-            "microvm clone git@github.com:org/repo.git demo --network nat --git-token-env MICROVM_EXAMPLE_TOKEN --ssh-key /tmp/key",
+            "microvm clone ./project demo --runtime node:24 --network none --ttl 1800 --cpus 2 --memory 1024 --history head --json",
+            "microvm clone git@github.com:org/repo.git demo --network nat --ref main --git-token-env MICROVM_EXAMPLE_TOKEN --ssh-key /tmp/key",
         ],
         discussion: networkChoice
             + " Names match [A-Za-z0-9][A-Za-z0-9._-]* and cannot start with task- or runtime-."
@@ -454,12 +457,15 @@ let cliCommandSpecs: [CLICommandSpec] = [
             CLIFlag(name: "--cpus", value: "N", summary: "Guest CPUs, at least 1."),
             CLIFlag(name: "--memory", value: "MB", summary: "Guest memory in megabytes, at least 128."),
             CLIFlag(name: "--ref", value: "NAME", summary: "Git branch or tag to fetch for a repository URL."),
+            CLIFlag(
+                name: "--history", value: "branches|head|none",
+                summary: "Git history a local directory brings in. The default is branches; stash, reflogs and unreachable objects never come."),
             CLIFlag(name: "--git-token-env", value: "VAR", summary: "Environment variable holding an HTTPS token for the guest fetch."),
             CLIFlag(name: "--ssh-key", value: "PATH", summary: "Private key used only for an ssh guest fetch."),
         ],
         examples: [
             "microvm task start /tmp/project --name demo --runtime node:24 --network none --ttl 1800 "
-                + "--cpus 2 --memory 1024 --ref main --ssh-key /tmp/key --git-token-env MICROVM_EXAMPLE_TOKEN",
+                + "--cpus 2 --memory 1024 --history head --ref main --ssh-key /tmp/key --git-token-env MICROVM_EXAMPLE_TOKEN",
             "microvm task start /tmp/project --name demo --json",
         ],
         discussion: networkChoice + " Creation, progress, output, and JSON are the same as clone; see docs/reference/cli/json-schemas.mdx."

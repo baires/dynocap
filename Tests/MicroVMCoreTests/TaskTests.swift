@@ -74,32 +74,33 @@ final class TaskTests: XCTestCase {
         var runtime = RuntimeArtifact(
             runtimes: RuntimeArtifact.defaultRuntimes, arch: "aarch64", baseImageDigest: "base", artifactDigest: "first", tools: [:],
             environment: [:], formatVersion: RuntimeArtifact.currentFormatVersion, verificationCommand: [], dependencyCache: npmSpec)
-        let first = try DependencyCache.key(baseline: root, runtime: runtime)
+        let first = try DependencyCache.key(baseline: root, runtime: runtime, source: "/p")
         runtime.artifactDigest = "second"
-        XCTAssertNotEqual(first, try DependencyCache.key(baseline: root, runtime: runtime))
+        XCTAssertNotEqual(first, try DependencyCache.key(baseline: root, runtime: runtime, source: "/p"))
         runtime.artifactDigest = "first"
         try Data("lock two".utf8).write(to: root.appendingPathComponent("package-lock.json"))
-        XCTAssertNotEqual(first, try DependencyCache.key(baseline: root, runtime: runtime))
+        XCTAssertNotEqual(first, try DependencyCache.key(baseline: root, runtime: runtime, source: "/p"))
     }
     private let npmSpec = DependencyCacheSpec(
         lockfiles: ["package-lock.json"], configFiles: [".npmrc"], directory: "/work/npm-cache/_cacache",
         registry: "https://registry.npmjs.org/", verifyCommand: ["npm", "cache", "verify"], incompatibleEnvPrefixes: ["npm_config_"],
-        incompatibleArgSubstrings: ["registry"])
+        incompatibleArgSubstrings: ["registry"], seedCommands: [["npm", "ci"], ["npm", "install"]])
     func testDependencyCacheKeyFollowsTheDeclaredSpec() throws {
         let root = try home()
         var runtime = RuntimeArtifact(
             runtimes: RuntimeArtifact.defaultRuntimes, arch: "aarch64", baseImageDigest: "base", artifactDigest: "disk", tools: [:],
             environment: [:], formatVersion: RuntimeArtifact.currentFormatVersion, verificationCommand: [])
         try Data("lock".utf8).write(to: root.appendingPathComponent("package-lock.json"))
-        XCTAssertNil(try DependencyCache.key(baseline: root, runtime: runtime), "a runtime without a cache spec gets no seed")
+        XCTAssertNil(try DependencyCache.key(baseline: root, runtime: runtime, source: "/p"), "a runtime without a cache spec gets no seed")
         runtime.dependencyCache = npmSpec
-        let npm = try XCTUnwrap(try DependencyCache.key(baseline: root, runtime: runtime))
+        let npm = try XCTUnwrap(try DependencyCache.key(baseline: root, runtime: runtime, source: "/p"))
         try Data("registry=https://example.com/".utf8).write(to: root.appendingPathComponent(".npmrc"))
-        XCTAssertNotEqual(npm, try DependencyCache.key(baseline: root, runtime: runtime), "config files are part of the key")
+        XCTAssertNotEqual(npm, try DependencyCache.key(baseline: root, runtime: runtime, source: "/p"), "config files are part of the key")
         runtime.dependencyCache = DependencyCacheSpec(lockfiles: ["uv.lock"], directory: "/work/uv-cache", registry: "https://pypi.org/simple")
-        XCTAssertNil(try DependencyCache.key(baseline: root, runtime: runtime), "a missing lockfile gets no seed")
+        XCTAssertNil(try DependencyCache.key(baseline: root, runtime: runtime, source: "/p"), "a missing lockfile gets no seed")
         try Data("lock".utf8).write(to: root.appendingPathComponent("uv.lock"))
-        XCTAssertNotNil(try DependencyCache.key(baseline: root, runtime: runtime))
+        let uv = try XCTUnwrap(try DependencyCache.key(baseline: root, runtime: runtime, source: "/p"))
+        XCTAssertNotEqual(uv, try DependencyCache.key(baseline: root, runtime: runtime, source: "/other"), "seeds are per source")
     }
     func testIncompatibleCommandsFollowTheDeclaredSpec() {
         XCTAssertTrue(DependencyCache.compatibleCommand(argv: ["npm", "ci"], env: ["CI=1"], spec: npmSpec))
@@ -108,8 +109,21 @@ final class TaskTests: XCTestCase {
         let go = DependencyCacheSpec(
             lockfiles: ["go.sum"], directory: "/work/go/pkg/mod/cache/download", registry: "https://proxy.golang.org",
             incompatibleEnvPrefixes: ["GOPROXY"])
-        XCTAssertTrue(DependencyCache.compatibleCommand(argv: ["go", "test", "--registry"], env: [], spec: go))
-        XCTAssertFalse(DependencyCache.compatibleCommand(argv: ["go", "build"], env: ["GOPROXY=off"], spec: go))
+        XCTAssertFalse(DependencyCache.compatibleCommand(argv: ["go", "mod", "download"], env: [], spec: go), "no seedCommands, no seed")
+        var seeded = go
+        seeded.seedCommands = [["go", "mod", "download"]]
+        XCTAssertTrue(DependencyCache.compatibleCommand(argv: ["go", "mod", "download"], env: [], spec: seeded))
+        XCTAssertFalse(DependencyCache.compatibleCommand(argv: ["go", "mod", "download"], env: ["GOPROXY=off"], spec: seeded))
+    }
+    func testOnlyInstallCommandsPublishASeed() {
+        XCTAssertTrue(DependencyCache.compatibleCommand(argv: ["sh", "-c", "npm ci"], env: [], spec: npmSpec), "SDK string form")
+        XCTAssertTrue(DependencyCache.compatibleCommand(argv: ["npm", "install", "--no-audit"], env: [], spec: npmSpec))
+        for argv in [
+            ["npm", "test"], ["npm", "run", "build"], ["node", "poison.js"], ["/bin/sh"],
+            ["sh", "-c", "npm ci && node poison.js"], ["sh", "-c", "npm ci; rm -rf /work"], ["sh", "-c", "npm ci $(x)"],
+        ] {
+            XCTAssertFalse(DependencyCache.compatibleCommand(argv: argv, env: [], spec: npmSpec), argv.joined(separator: " "))
+        }
     }
     func testTaskAndTransferControlFrames() throws {
         var task = TaskCommand(op: "start")

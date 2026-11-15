@@ -662,15 +662,9 @@ func TestNestedGitMetadataIsStripped(t *testing.T) {
 			t.Fatal(rel)
 		}
 	}
-	nested, err := os.ReadFile(filepath.Join(destGit, "modules", "vendor", "config"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bytes.Contains(bytes.ToLower(nested), []byte("helper")) {
-		t.Fatalf("nested config:\n%s", nested)
-	}
-	if !bytes.Contains(nested, []byte("repositoryformatversion = 0")) || !bytes.Contains(nested, []byte("[credential] # keep")) || !bytes.Contains(nested, []byte("[remote \"origin\"]")) || !bytes.Contains(nested, []byte("[branch \"main\"]")) || !bytes.Contains(nested, []byte("[credential \"https://example\"]")) {
-		t.Fatalf("nested config:\n%s", nested)
+	// Submodule repositories are other projects' whole histories; they are not imported.
+	if _, err := os.Lstat(filepath.Join(destGit, "modules")); !os.IsNotExist(err) {
+		t.Fatal("modules imported")
 	}
 	worktree, err := os.ReadFile(filepath.Join(destGit, "config.worktree"))
 	if err != nil {
@@ -1131,5 +1125,192 @@ func TestSharedImportMaterializesBorrowedHistoryAndIndex(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+func TestRejectLinkChainsThatResolveOutside(t *testing.T) {
+	for _, headers := range [][]*tar.Header{
+		{
+			{Name: "x/", Typeflag: tar.TypeDir, Mode: 0755},
+			{Name: "p/q/r/s", Typeflag: tar.TypeSymlink, Linkname: "../../../x"},
+			{Name: "p/q/r/t", Typeflag: tar.TypeSymlink, Linkname: "s/../../.."},
+		},
+		// The intermediate link arrives after the link that goes through it.
+		{
+			{Name: "x/", Typeflag: tar.TypeDir, Mode: 0755},
+			{Name: "p/q/r/t", Typeflag: tar.TypeSymlink, Linkname: "s/../../.."},
+			{Name: "p/q/r/s", Typeflag: tar.TypeSymlink, Linkname: "../../../x"},
+		},
+		{{Name: "a", Typeflag: tar.TypeSymlink, Linkname: "b"}, {Name: "b", Typeflag: tar.TypeSymlink, Linkname: "a"}},
+	} {
+		if Unpack(t.TempDir(), bytes.NewReader(archive(t, headers...)), Limit) == nil {
+			t.Fatal("accepted a link that resolves outside the tree")
+		}
+	}
+	inside := archive(t,
+		&tar.Header{Name: "lib/", Typeflag: tar.TypeDir, Mode: 0755},
+		&tar.Header{Name: "lib/real.js", Typeflag: tar.TypeReg, Mode: 0644, Size: 1},
+		&tar.Header{Name: "node_modules/.bin/tool", Typeflag: tar.TypeSymlink, Linkname: "../../lib/real.js"},
+		&tar.Header{Name: "alias", Typeflag: tar.TypeSymlink, Linkname: "lib"},
+		&tar.Header{Name: "via", Typeflag: tar.TypeSymlink, Linkname: "alias/../lib/real.js"},
+		&tar.Header{Name: "dangling", Typeflag: tar.TypeSymlink, Linkname: "missing/file"},
+	)
+	if err := Unpack(t.TempDir(), bytes.NewReader(inside), Limit); err != nil {
+		t.Fatalf("rejected links that stay inside: %v", err)
+	}
+}
+
+func TestUnpackFreshRefusesHostFilesAndGit(t *testing.T) {
+	hook := archive(t, &tar.Header{Name: ".git/hooks/pre-commit", Typeflag: tar.TypeReg, Mode: 0755, Size: 1})
+	repo := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repo, ".git", "hooks"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if UnpackFresh(repo, bytes.NewReader(hook), Limit) == nil {
+		t.Fatal("unpacked into a non-empty directory")
+	}
+	if _, err := os.Lstat(filepath.Join(repo, ".git", "hooks", "pre-commit")); !os.IsNotExist(err) {
+		t.Fatal("planted a hook in an existing checkout")
+	}
+	for _, name := range []string{".git/hooks/pre-commit", "sub/.GIT/config", "sub/.g‌it/config"} {
+		dest := filepath.Join(t.TempDir(), "out")
+		tree := archive(t, &tar.Header{Name: name, Typeflag: tar.TypeReg, Mode: 0644, Size: 1})
+		if UnpackFresh(dest, bytes.NewReader(tree), Limit) == nil {
+			t.Fatalf("accepted %q", name)
+		}
+		if _, err := os.Lstat(dest); !os.IsNotExist(err) {
+			t.Fatalf("left a partial destination after rejecting %q", name)
+		}
+	}
+	dest := filepath.Join(t.TempDir(), "out")
+	tree := archive(t, &tar.Header{Name: "dist/app.js", Typeflag: tar.TypeReg, Mode: 0644, Size: 1})
+	if err := UnpackFresh(dest, bytes.NewReader(tree), Limit); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestResultFlagsChangesThatRunCode(t *testing.T) {
+	before, after, out := t.TempDir(), t.TempDir(), t.TempDir()
+	os.WriteFile(filepath.Join(before, "package.json"), []byte("{}\n"), 0644)
+	os.WriteFile(filepath.Join(before, "run.sh"), []byte("echo\n"), 0644)
+	os.WriteFile(filepath.Join(after, "package.json"), []byte("{\"scripts\":{}}\n"), 0644)
+	os.WriteFile(filepath.Join(after, "run.sh"), []byte("echo\n"), 0755)
+	os.MkdirAll(filepath.Join(after, ".husky"), 0755)
+	os.WriteFile(filepath.Join(after, ".husky", "pre-commit"), []byte("npm test\n"), 0755)
+	os.WriteFile(filepath.Join(after, "notes.txt"), []byte("plain\n"), 0644)
+	os.Symlink("notes.txt", filepath.Join(after, "alias"))
+	if err := Result(before, after, out); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(out, "changes.json"))
+	var changes []Change
+	if err := json.Unmarshal(raw, &changes); err != nil {
+		t.Fatal(err)
+	}
+	flagged := map[string]string{}
+	for _, c := range changes {
+		flagged[c.Path] = c.Sensitive
+	}
+	for _, name := range []string{"package.json", "run.sh", ".husky/pre-commit", "alias"} {
+		if flagged[name] == "" {
+			t.Fatalf("%s not flagged: %s", name, raw)
+		}
+	}
+	if flagged["notes.txt"] != "" {
+		t.Fatalf("plain file flagged: %s", raw)
+	}
+	review, _ := os.ReadFile(filepath.Join(out, "review.txt"))
+	if !bytes.HasPrefix(review, []byte("Review carefully before applying.")) || !bytes.Contains(review, []byte(".husky/pre-commit")) {
+		t.Fatalf("review:\n%s", review)
+	}
+}
+
+// historyFixture hides secrets where a checkout does not need them: a deleted
+// branch (reachable only from the reflog), the stash, refs/original, and a
+// loose object nothing references.
+func historyFixture(t *testing.T) (source string, secrets map[string]string, feature string) {
+	t.Helper()
+	source = t.TempDir()
+	gitCmd(t, source, "init", "-b", "main")
+	must(t, os.WriteFile(filepath.Join(source, "README"), []byte("hello\n"), 0644))
+	gitCmd(t, source, "add", "README")
+	gitCmd(t, source, "commit", "-m", "initial")
+	gitCmd(t, source, "tag", "v1")
+	gitCmd(t, source, "checkout", "-b", "feature")
+	must(t, os.WriteFile(filepath.Join(source, "feature.txt"), []byte("feature work\n"), 0644))
+	gitCmd(t, source, "add", "feature.txt")
+	gitCmd(t, source, "commit", "-m", "feature")
+	feature = gitOutputIn(t, source, "rev-parse", "HEAD")
+	gitCmd(t, source, "checkout", "-b", "leaked")
+	must(t, os.WriteFile(filepath.Join(source, ".env"), []byte("AWS_SECRET=deleted-branch\n"), 0644))
+	gitCmd(t, source, "add", "-f", ".env")
+	gitCmd(t, source, "commit", "-m", "oops")
+	leaked := gitOutputIn(t, source, "rev-parse", "HEAD")
+	gitCmd(t, source, "checkout", "main")
+	gitCmd(t, source, "branch", "-D", "leaked")
+	gitCmd(t, source, "update-ref", "refs/original/refs/heads/main", leaked)
+	must(t, os.WriteFile(filepath.Join(source, "README"), []byte("hello\nSTASHED_SECRET=1\n"), 0644))
+	gitCmd(t, source, "stash")
+	loose := filepath.Join(t.TempDir(), "loose")
+	must(t, os.WriteFile(loose, []byte("LOOSE_SECRET=1\n"), 0644))
+	secrets = map[string]string{
+		"deleted branch": gitOutputIn(t, source, "rev-parse", leaked+":.env"),
+		"stash":          gitOutputIn(t, source, "rev-parse", "stash@{0}:README"),
+		"loose object":   gitOutputIn(t, source, "hash-object", "-w", loose),
+	}
+	return source, secrets, feature
+}
+
+func TestImportGitHistoryDropsWhatACheckoutDoesNotNeed(t *testing.T) {
+	for _, mode := range []History{HistoryBranches, HistoryHead} {
+		t.Run(string(mode), func(t *testing.T) {
+			source, secrets, feature := historyFixture(t)
+			before := treeDigest(t, source)
+			dest := filepath.Join(t.TempDir(), "history")
+			if err := ImportGitHistory(source, dest, mode); err != nil {
+				t.Fatal(err)
+			}
+			if treeDigest(t, source) != before {
+				t.Fatal("source checkout changed")
+			}
+			for where, object := range secrets {
+				if exec.Command("git", "-C", dest, "cat-file", "-e", object).Run() == nil {
+					t.Fatalf("%s object %s was imported", where, object)
+				}
+			}
+			for _, rel := range []string{"logs", "refs/stash", "refs/original"} {
+				if _, err := os.Lstat(filepath.Join(dest, ".git", rel)); !os.IsNotExist(err) {
+					t.Fatalf("%s imported", rel)
+				}
+			}
+			refs := gitOutputIn(t, dest, "for-each-ref", "--format=%(refname)")
+			if strings.Contains(refs, "refs/stash") || strings.Contains(refs, "refs/original") {
+				t.Fatalf("refs:\n%s", refs)
+			}
+			hasFeature := exec.Command("git", "-C", dest, "cat-file", "-e", feature).Run() == nil
+			if mode == HistoryBranches && (!hasFeature || !strings.Contains(refs, "refs/heads/feature") || !strings.Contains(refs, "refs/tags/v1")) {
+				t.Fatalf("branches lost a branch or tag:\n%s", refs)
+			}
+			if mode == HistoryHead && (hasFeature || strings.TrimSpace(refs) != "refs/heads/main") {
+				t.Fatalf("head kept another branch:\n%s", refs)
+			}
+			gitCmd(t, dest, "fsck", "--full")
+			if got, want := gitOutputIn(t, dest, "rev-parse", "HEAD"), gitOutputIn(t, source, "rev-parse", "HEAD"); got != want {
+				t.Fatalf("HEAD %s want %s", got, want)
+			}
+		})
+	}
+}
+
+func TestImportGitHistoryNoneImportsNoGit(t *testing.T) {
+	source, _, _ := historyFixture(t)
+	dest := filepath.Join(t.TempDir(), "history")
+	if err := ImportGitHistory(source, dest, HistoryNone); !errors.Is(err, ErrNoGit) {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(dest); !os.IsNotExist(err) {
+		t.Fatal("history none wrote a repository")
+	}
+	if _, err := ParseHistory("all"); err == nil {
+		t.Fatal("accepted an unknown history mode")
 	}
 }

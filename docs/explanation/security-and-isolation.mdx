@@ -62,4 +62,29 @@ MicroVM neutralizes this attack at multiple layers:
 
 1. **Host Environment Isolation:** The guest receives only explicitly declared environment variables via `--env`. Host secrets and shell environment variables are never inherited.
 2. **Offline-by-Default Boundary:** In default mode (`none`), the guest microVM has no network interface device. The attacker's `curl`, `fetch`, or `wget` command fails at the kernel level because no route or adapter exists.
-3. **Filtered Egress Enforcement:** Even when `--network filtered` is enabled to download npm packages, the host forwarder inspects initial TLS handshakes. Packets destined for `evil.com` or arbitrary IP addresses are dropped immediately by the macOS host forwarder.
+3. **Filtered Egress Enforcement:** When `--network filtered` is enabled to download packages, the host forwarder answers DNS only for the runtime's registry hosts (and a repository URL's host), connects only to addresses it resolved for them, on port 443, and checks the TLS server name of each connection. A direct connection to `evil.com` or an arbitrary IP address is dropped by the macOS host forwarder.
+
+### What filtered egress does not stop
+
+Filtered egress limits **who** the guest talks to, not **what** it sends. Every allowed host accepts data:
+
+- `registry.npmjs.org` accepts `npm publish` with any account's token.
+- `proxy.golang.org` fetches any public module path on the guest's behalf, so a module path on an attacker's domain makes Google's proxy contact that domain, carrying whatever the path encodes.
+- A repository URL's host (for example `github.com`) accepts `git push` to any repository the guest has credentials for.
+
+Treat a filtered sandbox as able to send out anything it can read. Keep secrets and private code you cannot afford to leak in `none` sandboxes, and install dependencies in a separate filtered `deps` sandbox (see [Manage Dependencies and Caching](../how-to/manage-dependencies-and-caching.mdx)).
+
+`--network nat` is unrestricted: the guest is on your Mac's network, and it can reach services your Mac or your local network exposes on any interface.
+
+---
+
+## 4. What Comes Back to the Host
+
+The sandbox cannot write to your Mac directly. It can still affect it through what you take back:
+
+- **Patches.** A patch can add Git hooks (`.husky/`), CI workflows (`.github/`), editor tasks (`.vscode/`), `package.json` scripts, `Makefile` targets, `.envrc`, symlinks or execute bits. Once applied, these run on your Mac or in CI with your secrets. `finish` and `diff` list such changes under **Review carefully before applying**, and the JSON and MCP results return them as `sensitivePaths`. Read those files before you apply the patch.
+- **Downloads.** `Sandbox.download` writes only into a new or empty directory, refuses `.git` paths, and rejects any symlink that resolves outside the destination, following link chains.
+- **Exports.** `finish` and `diff` reject a workspace whose symlinks resolve outside it, so an escaping link never reaches the result or the patch.
+- **Dependency seeds.** A seed is the package cache of a sandbox that ran an install with network access, including the packages' install scripts. MicroVM publishes one only from a task that ran nothing but the runtime's install commands, and restores it only into tasks from the same source and lockfile. It is as trustworthy as the packages that install installed.
+- **Guest output.** Command output, logs and patches are guest-controlled text. On a terminal, `exec` and `logs` drop escape sequences that act on the terminal and `diff` shows them as visible text; `shell` and `exec -t` are raw terminal sessions (see [What Guest Output Can Do to Your Terminal](../how-to/interactive-shells-and-terminal.mdx#what-guest-output-can-do-to-your-terminal)). An agent reading output through MCP should treat it as data, not instructions.
+- **Imported history.** Only the refs `--history` keeps, and the objects they reach, enter the sandbox; the stash, reflogs and unreachable objects never do (see [Git Workspaces and Patches](git-workspaces-and-patches.mdx)).
