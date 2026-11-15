@@ -8,13 +8,13 @@ Read the relevant reference before changing a public contract:
 - CLI behavior, errors, or JSON output: [CLI reference](docs/reference/cli/commands.mdx), [errors](docs/reference/cli/errors.mdx), and [schemas](docs/reference/cli/json-schemas.mdx).
 - SDK or MCP behavior: [SDK API](docs/reference/sdk-api.mdx) and [MCP tools](docs/reference/mcp-tools.mdx).
 - Host/guest protocol: [wire protocol](docs/reference/guest-wire-protocol.mdx).
-- Runtime preparation, registry access, or dependency seeds: [dependency guide](docs/how-to/manage-dependencies-and-caching.mdx) and [runtime manifest ADR](docs/adr/0003-runtime-manifest-owns-ecosystem.md).
+- Runtime preparation, registry access, or dependency seeds: [dependency guide](docs/how-to/manage-dependencies-and-caching.mdx).
 - Task finalization, retention, or Git import/export: [task lifecycle](docs/explanation/task-lifecycle-and-ttl.mdx) and [Git workspaces](docs/explanation/git-workspaces-and-patches.mdx).
 - Isolation or networking: [security boundary](docs/explanation/security-and-isolation.mdx) and [egress guide](docs/how-to/network-isolation-and-egress.mdx).
 
-Consult [CONTEXT.md](CONTEXT.md) for domain terminology and [docs/adr/](docs/adr/)
-before changing architectural boundaries. Treat plans and research as background;
-check current behavior against the reference docs and implementation. Update the
+Consult [CONTEXT.md](CONTEXT.md) for domain terminology before changing
+architectural boundaries. Treat research as background; check current behavior
+against the reference docs and implementation. Update the
 relevant docs when behavior or contracts change.
 
 ## Project Structure & Boundaries
