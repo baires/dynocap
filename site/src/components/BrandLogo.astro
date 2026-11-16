@@ -1,0 +1,145 @@
+---
+import wordmark from "./brand-wordmark.svg?raw";
+
+interface Props {
+  large?: boolean;
+}
+const { large = false } = Astro.props;
+---
+
+<a
+  class:list={["brand-logo", { "brand-logo--large": large }]}
+  href="/"
+  aria-label="DynoCap home"
+>
+  <svg
+    class="brand-logo__capsule"
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="120 20 272 480"
+    width="32"
+    height="56"
+    aria-hidden="true"
+    focusable="false"
+  >
+    <g
+      fill="none"
+      stroke="currentColor"
+      stroke-width="8"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    >
+      <g class="brand-logo__rails">
+        <path d="M161 198v141m190-141v141" stroke-width="7" />
+      </g>
+      <g class="brand-logo__guest">
+        <g transform="translate(0 -12)">
+          <path d="m256 205 72 36v82l-72 36-72-36v-82Z" fill="var(--c-bg)" />
+          <path d="m184 241 72 36 72-36m-72 36v82" stroke-width="6" />
+          <path
+            d="m205 275 18 19-18 1"
+            stroke="var(--c-accent)"
+            stroke-width="7"
+          />
+          <path d="m279 310 22-11" stroke-width="7" />
+        </g>
+      </g>
+      <g class="brand-logo__top">
+        <path d="M136 172V164a120 120 0 0 1 240 0v8" fill="var(--c-bg)" />
+        <path d="M136 172c0-38 240-38 240 0" />
+        <path
+          d="M136 172c0 12 16 21 35 25m170 0c19-4 35-13 35-25"
+          stroke-width="5"
+        />
+        <path d="m282 104 10-17m10 17 10-17m10 17 10-17" stroke-width="6" />
+      </g>
+      <g class="brand-logo__bottom">
+        <path
+          d="M136 348c0-12 12-22 25-26m190 0c13 4 25 14 25 26"
+          stroke-width="5"
+        />
+        <path d="M136 348v8a120 120 0 0 0 240 0v-8" fill="var(--c-bg)" />
+        <path d="M136 348c0 38 240 38 240 0" />
+        <rect
+          x="229"
+          y="404"
+          width="54"
+          height="12"
+          rx="6"
+          fill="var(--c-accent)"
+          stroke="none"
+        />
+      </g>
+    </g>
+  </svg>
+  <span class="brand-logo__wordmark" aria-hidden="true" set:html={wordmark} />
+</a>
+
+<style>
+  .brand-logo {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.65rem;
+    width: max-content;
+    min-height: 3.5rem;
+    color: var(--c-fg);
+    cursor: pointer;
+  }
+  .brand-logo__capsule {
+    width: 2rem;
+    height: 3.5rem;
+    flex: none;
+  }
+  .brand-logo__wordmark {
+    display: block;
+    width: 7rem;
+  }
+  .brand-logo__wordmark :global(svg) {
+    width: 100%;
+    height: auto;
+  }
+  .brand-logo--large {
+    gap: 1rem;
+  }
+  .brand-logo--large .brand-logo__capsule {
+    width: 3rem;
+    height: 5.25rem;
+  }
+  .brand-logo--large .brand-logo__wordmark {
+    width: 9rem;
+  }
+  .brand-logo:active {
+    color: var(--c-accent);
+  }
+
+  /* Touch and reduced-motion visitors see the complete open mark. */
+  @media (prefers-reduced-motion: no-preference) and (hover: hover) and (pointer: fine) {
+    .brand-logo__top,
+    .brand-logo__bottom,
+    .brand-logo__guest,
+    .brand-logo__rails {
+      transition:
+        transform 500ms var(--ease),
+        opacity 300ms ease;
+    }
+    .brand-logo__top {
+      transform: translateY(88px);
+    }
+    .brand-logo__bottom {
+      transform: translateY(-88px);
+    }
+    .brand-logo__guest,
+    .brand-logo__rails {
+      opacity: 0;
+      transform-box: view-box;
+      transform-origin: 256px 280px;
+      transform: scale(0.65);
+    }
+    .brand-logo:is(:hover, :focus-visible) .brand-logo__top,
+    .brand-logo:is(:hover, :focus-visible) .brand-logo__bottom,
+    .brand-logo:is(:hover, :focus-visible) .brand-logo__guest,
+    .brand-logo:is(:hover, :focus-visible) .brand-logo__rails {
+      transform: none;
+      opacity: 1;
+    }
+  }
+</style>

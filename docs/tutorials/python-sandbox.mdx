@@ -1,0 +1,62 @@
+---
+title: "Python Sandbox on macOS: Run uv and Tests in Local Linux"
+description: "Run Python in an isolated Linux sandbox on Apple Silicon. Prepare Python 3.14, cache uv dependencies, run tests offline, and review an exported patch."
+sidebar_position: 5
+---
+
+# Python Sandbox on macOS
+
+Use DynoCap to run a Python project in a disposable Linux workspace on your Mac. An agent can change the copied source and run tests without mounting your original checkout into the guest. This guide uses Python 3.14, uv, and a project with a committed `uv.lock`.
+
+## Prepare the Python runtime
+
+After [installing DynoCap](getting-started.mdx) on an Apple Silicon Mac with macOS 13 or newer, run these commands from your Python project directory:
+
+```sh
+dynocap doctor --fix --runtime python:3.14
+```
+
+The runtime includes Python and uv. uv uses the runtime's interpreter and never downloads another Python version. Your project's `requires-python` must allow Python 3.14; this guide does not select an older interpreter automatically.
+
+Start with `pyproject.toml` and a matching `uv.lock`. A requirements-only project can trigger Python runtime detection, but it does not supply the uv lockfile needed for this dependency seed workflow. Prepare and review that lockfile before continuing. A virtual environment created on macOS is not a portable Linux environment; let uv create the guest environment instead.
+
+## Warm the uv cache in a dependency-only task
+
+```sh
+dynocap clone . python-deps --runtime python:3.14 --network filtered
+dynocap exec python-deps --timeout 300 -- uv sync --frozen
+dynocap finish python-deps
+```
+
+Filtered networking permits HTTPS to `pypi.org` and `files.pythonhosted.org`. A private package index or a dependency hosted elsewhere is outside that policy. Overriding uv's index or cache configuration makes the task ineligible to publish a dependency seed.
+
+`--frozen` uses the existing lockfile. The seed key includes the source project, runtime digest, `uv.lock`, and `uv.toml` when present. Finish publishes the package cache only if the lockfile remains unchanged and every execution was an eligible install. Running tests in this warm task would prevent publication.
+
+## Create the offline worker and run tests
+
+```sh
+dynocap clone . python-worker --runtime python:3.14
+dynocap exec python-worker --timeout 300 -- uv sync --offline --frozen
+dynocap exec python-worker --timeout 300 -- .venv/bin/python -m unittest discover
+```
+
+The worker has no network device. A matching uv dependency seed is restored before the first command, and uv builds the project's environment from it. The test command uses Python's standard-library unittest runner. If your project uses pytest and declares it in the synced dependencies, replace that command with `.venv/bin/python -m pytest`.
+
+Calling the environment's interpreter directly keeps the test step separate from dependency resolution. Tests must use local fixtures rather than rely on external services in this network mode.
+
+## Export changes for review
+
+```sh
+dynocap diff python-worker
+dynocap finish python-worker
+```
+
+Review the patch at the path printed by finish before applying it to your host project. Finish publishes verified results before destroying the sandbox. The task's default TTL is 30 minutes including boot; activity does not renew it. Results expire seven days from task creation.
+
+## Python-specific troubleshooting
+
+- **Interpreter mismatch:** a lockfile or package requiring another Python version cannot be repaired by enabling network access; the runtime intentionally disables interpreter downloads.
+- **No compatible wheel:** the guest is Linux on ARM64. Packages without suitable distributions may need native build dependencies that are not provided by this runtime. A working macOS installation alone does not establish guest compatibility.
+- **Offline cache miss:** repeat the warm task for the same project and runtime, checking that `uv.lock` and `uv.toml` match. uv reuses its cache as-is; the seed is only as trustworthy as the networked install that produced it.
+
+For other toolchains, see the [Node.js](nodejs-sandbox.mdx) and [Go](go-sandbox.mdx) guides or the [runtime sandbox hub](runtime-sandboxes.mdx). Read [dependency seed rules](../how-to/manage-dependencies-and-caching.mdx) before automating installs, and use the [TypeScript SDK](../how-to/integrate-typescript-sdk.mdx) to drive Python tasks from your own agent application.

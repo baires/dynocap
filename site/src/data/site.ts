@@ -14,6 +14,7 @@ export const site = {
   placeholder: true,
   description:
     "Local Linux sandboxes for coding agents and developers on macOS. Copy a project, run code, review the diff, and export a patch with the CLI, SDK, or MCP.",
+  repository: "https://github.com/baires/dynocap",
   license: "Apache-2.0",
   licenseHref: "https://www.apache.org/licenses/LICENSE-2.0",
 };
@@ -192,6 +193,7 @@ export const nav = [
   { href: "/#agents", label: "Agents" },
   { href: "/#install", label: "Get started" },
   { href: "/docs", label: "Docs" },
+  { href: site.repository, label: "GitHub" },
 ];
 
 export const guides = [

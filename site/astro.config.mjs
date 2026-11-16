@@ -5,9 +5,9 @@ import { rehypeHeadingIds } from "@astrojs/markdown-remark";
 import { rehypeDocs } from "./src/lib/rehype-docs.mjs";
 import { dynocapTheme } from "./src/lib/shiki-theme.mjs";
 
-// Replace `site` with the production URL before deploying.
 export default defineConfig({
   site: "https://dynocap.dev",
+  trailingSlash: "never",
   integrations: [mdx(), sitemap()],
   prefetch: { prefetchAll: true, defaultStrategy: "hover" },
   build: { inlineStylesheets: "auto" },

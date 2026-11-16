@@ -1,11 +1,18 @@
 ---
+import BrandLogo from "./BrandLogo.astro";
 import { site } from "../data/site";
 const year = new Date().getFullYear();
 ---
 
 <footer class="site-footer">
-  <p>{site.name}. Local Linux VMs. Apple Silicon. macOS 13 or newer. {year}.</p>
+  <div class="site-footer__identity">
+    <BrandLogo large />
+    <p>
+      {site.name}. Local Linux VMs. Apple Silicon. macOS 13 or newer. {year}.
+    </p>
+  </div>
   <nav aria-label="About">
+    <a href={site.repository}>GitHub</a>
     <a href={site.licenseHref}>Apache-2.0</a>
     <a href="/docs">Docs</a>
   </nav>

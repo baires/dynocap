@@ -1,0 +1,62 @@
+---
+title: "Go Sandbox on macOS: Run Go Tests in Isolated Linux"
+description: "Run Go module tests in a local Linux sandbox on your Mac. Prepare Go 1.27, seed module downloads, test offline, and export changes for review with DynoCap."
+sidebar_position: 6
+---
+
+# Go Sandbox on macOS
+
+Run a Go project's tests inside a Linux sandbox on your Apple Silicon Mac, with a copied source tree and a separate kernel. DynoCap's Go runtime uses a fixed toolchain and a declared module download cache. This guide is for Go module projects that can build with CGO disabled.
+
+## Prepare Go 1.27
+
+[Install DynoCap](getting-started.mdx) on macOS 13 or newer, then run this from your Go module directory:
+
+```sh
+dynocap doctor --fix --runtime go:1.27
+```
+
+The host tooling used to prepare a runtime is separate from the guest toolchain. Inside the sandbox, `GOTOOLCHAIN=local` prevents automatic toolchain downloads. Your `go.mod` must be compatible with the prepared Go 1.27 runtime.
+
+Use a project with reviewed `go.mod` and `go.sum` files. If downloading dependencies changes `go.sum`, review and update it before warming the seed; a changed lockfile prevents cache publication at finish.
+
+## Download modules in a warm task
+
+```sh
+dynocap clone . go-deps --runtime go:1.27 --network filtered
+dynocap exec go-deps --timeout 300 -- go mod download
+dynocap finish go-deps
+```
+
+The runtime permits HTTPS to `proxy.golang.org` and `sum.golang.org` in filtered mode. It does not allow arbitrary private module servers or direct VCS fallback hosts for a local-directory task. Changes to `GOPROXY`, `GOPRIVATE`, or related registry settings prevent seed publication.
+
+Only run `go mod download` in the warm task. Tests, shell scripts, and other arbitrary commands make the task ineligible to publish a seed. The seed contains the module download cache under `/work/go/pkg/mod/cache/download`, keyed by the source project, runtime digest, and `go.sum`.
+
+## Run Go tests offline
+
+```sh
+dynocap clone . go-worker --runtime go:1.27
+dynocap exec go-worker --timeout 300 -- go mod download
+dynocap exec go-worker --timeout 300 -- go test ./...
+```
+
+The same download command now resolves modules from the restored cache. The worker's default network mode is `none`, so a missing module cannot silently fall back to the internet. Tests run from `/workspace`, the copied module directory.
+
+The dependency seed is not a compiled build cache: Go's build cache lives separately under `/work/go-build`. Expect the worker to compile packages even after module downloads have been seeded. Tests that reach external services need local fixtures or an explicitly chosen network policy.
+
+## Inspect and finish the task
+
+```sh
+dynocap diff go-worker
+dynocap finish go-worker
+```
+
+Finish publishes a verified patch and execution logs before destroying the sandbox. It prints the retained result path; review any changes before applying them to your host checkout. A task that only tests code may export an empty patch. The default TTL is 30 minutes from creation, and results expire seven days from task creation.
+
+## Go-specific constraints
+
+- **CGO:** the runtime sets `CGO_ENABLED=0`. Code requiring C libraries or a C compiler needs a different toolchain setup; this guide does not provide it.
+- **Newer toolchain directives:** network access does not override `GOTOOLCHAIN=local`. Use a project compatible with the prepared toolchain.
+- **Missing modules offline:** check the warm task completed without changing `go.sum`, and that both tasks use the same source directory and runtime. Private module hosts are outside the default filtered registry list.
+
+Compare [Node.js](nodejs-sandbox.mdx) and [Python](python-sandbox.mdx) sandboxes, or return to [local code sandboxes](runtime-sandboxes.mdx). See [dependency caching](../how-to/manage-dependencies-and-caching.mdx) for seed eligibility and [network isolation](../how-to/network-isolation-and-egress.mdx) for the egress contract.

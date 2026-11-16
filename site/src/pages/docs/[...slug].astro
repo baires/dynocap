@@ -22,7 +22,11 @@ const { previous, next } = neighbors(flat, entry.id);
 const markdown = docMarkdownHref(entry.id);
 ---
 
-<Base title={title} description={description}>
+<Base title={title} description={description} breadcrumbs={[
+  { name: "Home", path: "/" },
+  { name: "Docs", path: "/docs" },
+  { name: title, path: docHref(entry.id) },
+]}>
   <div class="docs-shell">
     <DocsSidebar groups={groups} current={docHref(entry.id)} />
     <article class="prose">

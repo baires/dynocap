@@ -1,0 +1,66 @@
+---
+title: "Node.js Sandbox on macOS: Run npm Tests in Local Linux"
+description: "Run a Node.js project in a local Linux sandbox on your Mac. Prepare Node 24 or 22, seed npm dependencies, test offline, and export a patch with DynoCap."
+sidebar_position: 4
+---
+
+# Node.js Sandbox on macOS
+
+Run JavaScript or TypeScript tests in a disposable Linux workspace while your editor and original checkout stay on your Mac. DynoCap copies the project into a sandbox, attaches a read-only Node runtime, and returns command output and a reviewable patch. This guide uses npm and a committed `package-lock.json`.
+
+## Prepare Node 24 or Node 22
+
+First [install DynoCap](getting-started.mdx) on an Apple Silicon Mac with macOS 13 or newer. From your Node project directory, run:
+
+```sh
+dynocap doctor --fix --runtime node:24
+```
+
+The default detected runtime for a local project containing `package.json` is `node:24`. If the project requires Node 22, use `node:22` in doctor and both clone commands below. The prepared runtime supplies Node, npm, bash, Git, and an SSH client. Unsupported runtime versions fail rather than silently selecting another version.
+
+Use a project with a `test` script in `package.json` and a lockfile consistent with that manifest. Do not rely on a macOS `node_modules` tree: dependencies with platform-specific binaries need a Linux installation in the guest.
+
+## Warm the npm dependency seed
+
+Create a task whose only execution is the install, then finish it:
+
+```sh
+dynocap clone . node-deps --runtime node:24 --network filtered
+dynocap exec node-deps --timeout 300 -- npm ci
+dynocap finish node-deps
+```
+
+Filtered networking permits HTTPS to `registry.npmjs.org`. It does not allow arbitrary download hosts used by package install scripts. Private registries and dependencies fetched from other hosts need a separately considered network policy; changing npm's registry or cache settings prevents seed publication.
+
+The seed stores npm's package cache, not an installed `node_modules` directory. It is keyed by the source project, runtime digest, `package-lock.json`, and `.npmrc` when present. Keep the lockfile unchanged, and run no tests or other commands in `node-deps`, so the task remains eligible to publish that cache.
+
+## Install and test without a network device
+
+Start a new task from the same directory:
+
+```sh
+dynocap clone . node-worker --runtime node:24
+dynocap exec node-worker --timeout 300 -- npm ci --offline
+dynocap exec node-worker --timeout 300 -- npm test
+```
+
+The worker starts in `/workspace` with network mode `none`. A matching dependency seed is restored before clone returns. npm installs from the restored cache and checks package integrity against the lockfile. Tests that depend on external APIs will need fixtures or a network mode chosen explicitly for that task.
+
+Your agent can now edit the copied project through sandbox commands. Your host checkout is not mounted into the guest.
+
+## Review and export the result
+
+```sh
+dynocap diff node-worker
+dynocap finish node-worker
+```
+
+`diff` previews changes; `finish` publishes a verified patch and execution logs before destroying the sandbox. Use the result path printed by finish to review and apply the patch yourself. A test-only task can have an empty patch. The default TTL remains 30 minutes from creation, and result retention is seven days from creation.
+
+## If the offline install fails
+
+- **Missing cached package:** rerun the dependency-only warm task from the same source directory after checking the lockfile and `.npmrc`. Seeds are specific to the project and runtime; a Node 24 seed is not reused by Node 22.
+- **Download attempted by an install script:** `--offline` governs npm's package fetching; a package script can invoke another downloader. The worker's absent network device still blocks that connection.
+- **pnpm or Yarn project:** this prepared runtime's declared package manager and dependency seed workflow are npm. This recipe does not promise pnpm or Yarn cache support.
+
+Compare the [Python](python-sandbox.mdx) and [Go](go-sandbox.mdx) workflows, or return to [local code sandboxes](runtime-sandboxes.mdx). For automation, continue with the [MCP setup guide](../how-to/configure-mcp-server.mdx); for cache eligibility details, use the [dependency reference guide](../how-to/manage-dependencies-and-caching.mdx).

@@ -1,0 +1,45 @@
+---
+title: "Local Code Sandboxes for Node.js, Python, and Go on macOS"
+description: "Choose a local Linux sandbox for Node.js, Python, or Go on Apple Silicon. Follow runtime-specific guides for dependency installs, offline tests, and patch export."
+sidebar_position: 3
+---
+
+# Local Code Sandboxes for Node.js, Python, and Go on macOS
+
+DynoCap runs a copied project in a Linux sandbox on your Apple Silicon Mac. Use it to test code changes from a coding agent, exercise an unfamiliar dependency, or check a project in Linux without mounting your host checkout into the guest. Each task has a separate Linux kernel, a read-only runtime disk, and a disposable workspace.
+
+Choose the guide that matches your project's dependency format. Each walks through a dependency-only warm task, an offline worker task, and exporting the result for review.
+
+| Project                           | Guide                                          | Prepared runtime       | Dependency seed key                             |
+| --------------------------------- | ---------------------------------------------- | ---------------------- | ----------------------------------------------- |
+| JavaScript or TypeScript with npm | [Node.js sandbox on macOS](nodejs-sandbox.mdx) | `node:24` or `node:22` | `package-lock.json`, plus `.npmrc` when present |
+| Python with uv                    | [Python sandbox on macOS](python-sandbox.mdx)  | `python:3.14`          | `uv.lock`, plus `uv.toml` when present          |
+| Go modules                        | [Go sandbox on macOS](go-sandbox.mdx)          | `go:1.27`              | `go.sum`                                        |
+
+## What you need on the Mac
+
+Use an Apple Silicon Mac running macOS 13 or newer. [Install DynoCap](getting-started.mdx) with Homebrew or curl before following a runtime guide. Runtime preparation also needs Go 1.22+ and `mke2fs` from e2fsprogs on the host. The host Go version and the Go runtime inside a guest are separate selections.
+
+The commands in these guides start from your project directory. Each uses `doctor --fix` with an explicit runtime to prepare the guest image and toolchain and check the daemon. Initial preparation downloads verified runtime inputs; later tasks reuse the prepared disk.
+
+## Choose by dependency workflow
+
+For npm projects, the Node.js guide explains why a macOS `node_modules` directory is not the Linux installation you need, and how to reuse the npm package cache. It covers both supported Node runtimes in one page rather than duplicating the tutorial per version.
+
+For Python, the guide uses a committed uv lockfile and the runtime's Python interpreter. It explains why an existing host virtual environment and a requirements-only project need different preparation.
+
+For Go, the guide separates the downloaded module cache from the build cache and explains the runtime's fixed toolchain and disabled CGO setting.
+
+## What isolation changes about your workflow
+
+Tasks start with network mode `none`: no network device is attached. A dependency-only task can opt into `filtered`, which permits HTTPS to the selected runtime's registry hosts. It restricts destinations, not upload contents. Only copy project files you intend the guest to read; isolation does not remove secrets already present in the imported tree.
+
+Run installs in the warm task and tests in a separate worker. A task that executes tests or arbitrary code does not publish a dependency seed. Seeds are tied to the source project, runtime digest, and dependency files; changing those inputs requires a new warm task.
+
+The default task TTL is 30 minutes from creation, including boot. Activity never renews it. `finish` publishes verified results before destroying the sandbox; retained results expire seven days from task creation. Review the exported patch before applying it to your checkout.
+
+## Connect the workflow to an agent
+
+The CLI guides make the execution boundary visible before you automate it. To drive the same lifecycle from an application, use the [TypeScript SDK](../how-to/integrate-typescript-sdk.mdx). For a compatible coding assistant, configure the [MCP server](../how-to/configure-mcp-server.mdx) and ask it to start a task, execute commands, inspect the diff, and finish.
+
+For the full cache publication rules, see [Manage Dependencies and Caching](../how-to/manage-dependencies-and-caching.mdx). For what the boundary protects and what it does not, read [Security and Isolation](../explanation/security-and-isolation.mdx).

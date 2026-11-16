@@ -7,7 +7,7 @@ Idea:        Give a coding agent a copied project in a local Linux sandbox, then
 Metaphor:    The task lifecycle, shown as a short command sequence beside the promise.
 Signature:   Four annotated commands, clone → exec → diff → finish, with a live caret at the entry point.
 Emotion:     I understand what this does, how to start, and what happens to my files.
-Motion verb: snap. A label shifts 4px and its rule locks. Nothing travels, pins, or illustrates.
+Motion verb: snap. A label shifts 4px and its rule locks. The capsule brand mark opens on hover or keyboard focus; the page content never travels or pins.
 Screenshot:  The outcome at display size, beside the complete task lifecycle.
 ```
 
@@ -25,7 +25,7 @@ Concept alternatives (originality / fit / feasibility / portability, lower porta
 - Guest boundary, from the isolation architecture: 4 / 5 / 3 / 2. A host/guest dividing line could explain separation but would delay the first useful action. Signature would be commands crossing the boundary; emotion is control.
 - Command grammar, from the CLI's formal system: 3 / 4 / 5 / 3. A page organized by verbs would be concise but too close to reference documentation. Signature would be a command index; emotion is precision.
 
-Idle: the caret, and the demo recording, which plays only while half on screen and never autoplays under reduced motion. Docs and the 404 stay still. Native scrolling. No loader, progress bar, pinned chapters, or figure.
+Idle: the caret, and the demo recording, which plays only while half on screen and never autoplays under reduced motion. Docs and the 404 stay still. Native scrolling. No loader, progress bar, or pinned chapters. The capsule logo is the sole illustrative brand element.
 
 ## Palette
 
@@ -38,7 +38,7 @@ Idle: the caret, and the demo recording, which plays only while half on screen a
 | accent  | `#F0A202` | The ready mark: caret, focus, current rule |
 | curtain | `#000000` | Page transition panel                      |
 
-The accent is the caret and the lock rule. It is never a filled button and never a colored word in a headline.
+The accent is the caret, the lock rule, and the capsule logo’s prompt and indicator. It is never a filled button and never a colored word in a headline.
 
 ## Type
 
@@ -58,6 +58,12 @@ One easing family from the engine (`expo.out`, `expo.inOut`, `power3.out`). Larg
 - Primary targets (nav, copy, command links, CTAs): the label snaps 4px right and a 2px rule locks from the left. Press shifts 1px down. Under reduced motion the rule is already there and nothing translates.
 - Utility links (license, docs in the footer): color only.
 - Inline links in docs: muted underline at rest, accent underline on hover. The guide sidebar and the page outline share one treatment: a 1px line rail, a 2px accent rule on the current page or section.
+
+## Capsule identity
+
+The shared `BrandLogo.astro` owns the horizontal capsule-and-wordmark lockup in the header and a larger footer version. Its outlined Avenir Next wordmark comes from `assets/brand`; UI typography stays Switzer/Plex. SVG ink, ground, and amber map to the existing `--c-fg`, `--c-bg`, and `--c-accent` tokens in `src/styles/tokens.css`.
+
+On fine hover pointers, the shell rests closed; hover or visible keyboard focus opens the two halves and reveals the guest cube. Leaving or blurring closes it. Only transforms and opacity transition, within reserved bounds; there is no idle loop or new JavaScript. Touch and reduced-motion visitors see the complete open mark without animation. Home links retain their accessible name, visible focus, and normal navigation. The favicon uses the simplified capsule mark at a larger optical size, with SVG and 16/32/48px ICO variants. The 1200 × 630 social image pairs the open capsule with the outlined wordmark and a short product description, on the site’s black ground. Regenerate with `python3 scripts/generate-site-brand.py` (requires Pillow and `rsvg-convert`). GitHub links in the primary navigation and footer point to the canonical `site.repository` in `src/data/site.ts`.
 
 ## Docs
 
