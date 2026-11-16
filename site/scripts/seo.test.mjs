@@ -26,6 +26,14 @@ const cluster = [
 const links = (html) =>
   [...html.matchAll(/<a\b[^>]*href="([^"]+)"/g)].map((match) => match[1]);
 
+test("conventional sitemap URL redirects to the generated sitemap index", () => {
+  assert.match(
+    read("_redirects"),
+    /^\/sitemap\.xml\s+\/sitemap-index\.xml\s+301\s*$/m
+  );
+  assert.ok(locations(read("sitemap-index.xml")).length > 0);
+});
+
 test("XML sitemap contains unique, indexable HTML URLs matching their canonicals", () => {
   assert.equal(new Set(urls).size, urls.length);
   const titles = new Set();
