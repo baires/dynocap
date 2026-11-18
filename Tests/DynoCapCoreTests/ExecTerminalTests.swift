@@ -220,14 +220,19 @@ final class ExecTerminalTests: XCTestCase {
     func testExpiryExplainsTheLossInATypedError() throws {
         let harness = try TerminalHarness()
         defer { harness.close() }
-        _ = try harness.client.run(RunRequest(name: "short", cpus: 1, memoryMB: 256, ttlSeconds: 1, bootTimeoutSeconds: 5))
-        XCTAssertThrowsError(try harness.client.exec(ExecCommand(name: "short", argv: ["top"], env: [], cwd: "", timeoutSeconds: 30))) {
+        // Backdate the running fixture so expiry happens after boot, regardless of the wall clock.
+        let store = StateStore(paths: harness.daemon.paths)
+        var record = try XCTUnwrap(store.load("demo"))
+        record.createdAtUnix = 1
+        try store.save(record)
+        XCTAssertThrowsError(try harness.client.exec(ExecCommand(name: "demo", argv: ["top"], env: [], cwd: "", timeoutSeconds: 30))) {
             let error = $0 as? DynoCapError
             XCTAssertEqual(error?.code, .invalidPhase)
-            XCTAssertEqual(error?.message, "sandbox short lifetime expired; its unexported edits are lost")
+            XCTAssertEqual(error?.message, "sandbox demo lifetime expired; its unexported edits are lost")
             XCTAssertTrue(error?.recovery.contains("does not renew the TTL or export") == true)
-            XCTAssertTrue(error?.recovery.contains("own retention deadline; see dynocap inspect short") == true)
+            XCTAssertTrue(error?.recovery.contains("own retention deadline; see dynocap inspect demo") == true)
         }
+        XCTAssertTrue(harness.backend.requests.isEmpty)
     }
 
     func testNonTerminalInputIsRefusedBeforeDaemonWork() throws {
