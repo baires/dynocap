@@ -1,0 +1,128 @@
+import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { after, before, test } from "node:test";
+import { unstable_startWorker } from "wrangler";
+
+const markdown = "text/markdown";
+const html = "text/html";
+let worker;
+let origin;
+
+before(async () => {
+  worker = await unstable_startWorker({
+    config: "wrangler.jsonc",
+    dev: { server: { port: 0 } },
+  });
+  origin = await worker.url;
+});
+
+after(async () => {
+  await worker?.dispose();
+});
+
+function request(path, accept, options = {}) {
+  const headers = new Headers(options.headers);
+  if (accept) headers.set("Accept", accept);
+  return fetch(new URL(path, origin), { ...options, headers });
+}
+
+function assertVariant(response, type, status = 200) {
+  assert.equal(response.status, status, response.url);
+  assert.equal(response.headers.get("Content-Type")?.split(";")[0], type);
+  assert.match(response.headers.get("Vary") ?? "", /(?:^|,\s*)accept(?:,|$)/i);
+}
+
+test("every page in the sitemap serves HTML by default and Markdown on request", async () => {
+  const locations = (xml) => [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)];
+  const index = await request("/sitemap-index.xml");
+  const sitemaps = locations(await index.text());
+  assert.ok(sitemaps.length);
+
+  for (const [, sitemap] of sitemaps) {
+    const xml = await request(new URL(sitemap).pathname);
+    const pages = locations(await xml.text());
+    assert.ok(pages.length);
+    for (const [, page] of pages) {
+      const path = new URL(page).pathname;
+      const browser = await request(path);
+      assertVariant(browser, html);
+      assert.match(await browser.text(), /<!doctype html>/i);
+
+      const agent = await request(path, markdown);
+      assertVariant(agent, markdown);
+      const body = await agent.text();
+      assert.match(body, /^# .+/);
+
+      if (path.startsWith("/docs/")) {
+        assert.ok(
+          !existsSync(new URL(`../dist${path}/index.md`, import.meta.url))
+        );
+        const standalone = await request(`${path}.md`, html);
+        assert.equal(standalone.status, 200);
+        assert.match(
+          standalone.headers.get("Content-Type"),
+          /^text\/markdown\b/
+        );
+        assert.equal(standalone.headers.get("ETag"), agent.headers.get("ETag"));
+        assert.equal(await standalone.text(), body);
+      }
+    }
+  }
+});
+
+test("Markdown contains page content, formatted code and tables", async () => {
+  const home = await (await request("/", markdown)).text();
+  assert.match(home, /brew install baires\/tap\/dynocap/);
+  assert.doesNotMatch(home, /<script\b|<svg\b|Play recording|Copy commands/);
+
+  const guide = await (
+    await request("/docs/tutorials/getting-started", markdown)
+  ).text();
+  assert.match(guide, /```sh\nbrew install/);
+  assert.match(guide, /^\| File at the project root\s+\| Runtime\s+\|$/m);
+  assert.doesNotMatch(guide, /<nav\b|<aside\b|On this page|View as Markdown/);
+});
+
+test("Accept preferences, HEAD, and conditional requests select the correct variant", async () => {
+  for (const accept of [
+    "text/*, */*;q=0.1",
+    "text/markdown;q=0",
+    "text/html, text/markdown;q=0.5",
+  ]) {
+    const response = await request("/", accept);
+    assertVariant(response, html);
+    await response.body.cancel();
+  }
+
+  const agent = await request("/", "Text/Markdown; q=1, text/html;q=0.5", {
+    method: "HEAD",
+  });
+  assertVariant(agent, markdown);
+  assert.equal(await agent.text(), "");
+  const etag = agent.headers.get("ETag");
+  assert.ok(etag);
+
+  const options = { headers: { "If-None-Match": etag } };
+  const unchanged = await request("/", markdown, options);
+  assertVariant(unchanged, markdown, 304);
+  const browser = await request("/", html, options);
+  assertVariant(browser, html);
+  await browser.body.cancel();
+});
+
+test("redirects, 404s, and existing standalone assets retain their behavior", async () => {
+  const redirect = await request("/docs?source=test", markdown, {
+    redirect: "manual",
+  });
+  assert.equal(redirect.status, 307);
+  assert.equal(redirect.headers.get("Location"), "/docs/?source=test");
+
+  const missing = await request("/docs/missing/", markdown);
+  assert.equal(missing.status, 404);
+  assert.match(missing.headers.get("Content-Type"), /^text\/html\b/);
+  await missing.body.cancel();
+
+  const index = await request("/llms.txt", markdown);
+  assert.match(index.headers.get("Content-Type"), /^text\/plain\b/);
+  assert.match(await index.text(), /^# DynoCap/);
+});

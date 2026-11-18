@@ -33,7 +33,7 @@ jobs:
           cache: npm
           cache-dependency-path: site/package-lock.json
       - run: npm ci
-      - run: npm run build
+      - run: npm run test:markdown
       - if: github.event_name == 'pull_request'
         run: npx wrangler deploy --dry-run
       - if: github.event_name == 'push' && github.ref == 'refs/heads/main'

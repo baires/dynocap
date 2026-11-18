@@ -1,5 +1,6 @@
 import { getCollection, type CollectionEntry } from "astro:content";
 import { quadrants, site } from "../data/site";
+import { markdownAssetPath } from "./markdown-asset-path.mjs";
 
 export type DocEntry = CollectionEntry<"docs">;
 
@@ -8,7 +9,7 @@ export function docHref(id: string) {
 }
 
 export function docMarkdownHref(id: string) {
-  return `${docHref(id)}.md`;
+  return markdownAssetPath(docHref(id));
 }
 
 export function docTitle(entry: DocEntry) {

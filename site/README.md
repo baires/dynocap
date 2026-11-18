@@ -35,8 +35,30 @@ All commands are run from the root of the project, from a terminal:
 | `npm run dev`             | Starts local dev server at `localhost:4321`      |
 | `npm run build`           | Build your production site to `./dist/`          |
 | `npm run preview`         | Preview your build locally, before deploying     |
+| `npm run test:markdown`   | Build and test Markdown negotiation in Wrangler  |
 | `npm run astro ...`       | Run CLI commands like `astro add`, `astro check` |
 | `npm run astro -- --help` | Get help using the Astro CLI                     |
+
+## Markdown for agents
+
+Request any page with `Accept: text/markdown` to get its main content as
+Markdown. HTML is the default. Both representations send `Vary: Accept`.
+Follow redirects when requesting a URL without its trailing slash.
+
+```sh
+curl -fsSL -H 'Accept: text/markdown' https://dynocap.dev/docs/tutorials/getting-started
+```
+
+The same request works against Astro's dev server.
+
+```sh
+curl -fsS -H 'Accept: text/markdown' http://localhost:4321/docs/tutorials/getting-started
+```
+
+The Astro build generates Markdown alongside the HTML, and the Cloudflare Worker
+selects the representation in production. Use Wrangler to test that setup locally.
+Each docs page uses the same file for its direct `.md` URL and its negotiated
+response. Find those URLs in `llms.txt`.
 
 ## 👀 Want to learn more?
 
