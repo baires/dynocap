@@ -24,6 +24,13 @@ export const hero = {
   lede: "Each task gets a fresh microVM on your Mac, with its own kernel, no network, and no host folders mounted. It is ready in 299 ms, sized to the job, and hands back a patch you review before anything touches your checkout.",
 };
 
+export const worktreeComparison = {
+  path: "/dynocap-vs-git-worktrees",
+  title: "DynoCap vs. Git Worktrees",
+  description:
+    "Compare Git worktrees and DynoCap for AI coding agents. Learn when to use a separate checkout, when to run code in a Linux sandbox, and how to use both.",
+};
+
 export const workflow = [
   {
     title: "Copy your project",

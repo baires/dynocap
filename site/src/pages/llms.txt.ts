@@ -1,5 +1,5 @@
 import type { APIRoute } from "astro";
-import { site } from "../data/site";
+import { site, worktreeComparison } from "../data/site";
 import {
   docDescription,
   docMarkdownHref,
@@ -16,6 +16,10 @@ export const GET: APIRoute = async () => {
     `> ${site.description}`,
     "",
     "The HTML docs and these Markdown files describe the same pages. Prefer a single page URL when you only need one topic.",
+    "",
+    "## Workflow comparison",
+    "",
+    `- [${worktreeComparison.title}](${origin}${worktreeComparison.path}): ${worktreeComparison.description}`,
     "",
   ];
   for (const group of groups) {
