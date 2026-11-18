@@ -1,0 +1,174 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "DynoCap CLI",
+    "version": "0.2.0",
+    "description": "Local dynocap command. This is not an HTTP API and it has no network server. Commands that accept --json print one JSON document to stdout. Absent values are null, timestamps are integer Unix seconds in UTC, and consumers must tolerate extra fields. Field definitions: https://dynocap.dev/docs/reference/cli/json-schemas"
+  },
+  "externalDocs": {
+    "description": "CLI command reference",
+    "url": "https://dynocap.dev/docs/reference/cli/commands"
+  },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "ListingRecord": {
+        "description": "One element of the array printed by dynocap ls --json and dynocap ps --json.",
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": ["string", "null"] },
+          "kind": { "enum": ["task", "sandbox"] },
+          "phase": {
+            "enum": [
+              "booting",
+              "running",
+              "stopping",
+              "stopped",
+              "completed",
+              "failed"
+            ]
+          },
+          "runtime": { "type": "string" },
+          "network": { "enum": ["none", "filtered", "nat", null] },
+          "sandboxExpiresAtUnix": { "type": ["integer", "null"] },
+          "resultExpiresAtUnix": { "type": ["integer", "null"] },
+          "resultDirectory": { "type": ["string", "null"] }
+        }
+      },
+      "CreationResult": {
+        "description": "Printed by dynocap clone --json, dynocap task start --json, and dynocap run --json.",
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "phase": { "type": "string" },
+          "runtimeDigest": { "type": "string" },
+          "createdAtUnix": { "type": "integer" },
+          "expiresAtUnix": { "type": "integer" },
+          "sourceUrl": { "type": ["string", "null"] },
+          "sourceRevision": { "type": ["string", "null"] }
+        }
+      },
+      "SensitivePath": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "kind": { "type": "string" },
+          "path": { "type": "string" },
+          "reason": { "type": "string" }
+        }
+      },
+      "FinishResult": {
+        "description": "Printed by dynocap finish --json and dynocap task finish --json.",
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "applyCommand": { "type": "string" },
+          "baseline": { "type": "string" },
+          "hostCheckout": { "type": "string" },
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "patch": { "type": "string" },
+          "phase": { "type": "string" },
+          "priorCommandFailure": { "type": "boolean" },
+          "resultDirectory": { "type": "string" },
+          "resultExpiresAtUnix": { "type": "integer" },
+          "sandbox": { "type": "string" },
+          "sensitivePaths": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/SensitivePath" }
+          }
+        }
+      },
+      "InspectionResult": {
+        "description": "Printed by dynocap inspect --json.",
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "kind": { "enum": ["task", "sandbox"] },
+          "taskPhase": { "type": "string" },
+          "sandboxPhase": { "type": "string" },
+          "runtime": { "type": "string" },
+          "network": { "enum": ["none", "filtered", "nat", null] },
+          "createdAtUnix": { "type": "integer" },
+          "sandboxExpiresAtUnix": { "type": ["integer", "null"] },
+          "resultExpiresAtUnix": { "type": ["integer", "null"] },
+          "resultDirectory": { "type": ["string", "null"] },
+          "patchPath": { "type": ["string", "null"] },
+          "sourcePath": { "type": ["string", "null"] },
+          "sourceRevision": { "type": ["string", "null"] }
+        }
+      },
+      "RemovalResult": {
+        "description": "Printed by dynocap rm --json and dynocap destroy --json.",
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "target": { "type": "string" },
+          "removed": { "type": "boolean" },
+          "purged": { "type": "boolean" }
+        }
+      },
+      "DoctorCheck": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "id": { "type": "string" },
+          "status": { "enum": ["ok", "warning", "error"] },
+          "message": { "type": "string" },
+          "recovery": { "type": ["string", "null"] },
+          "fix": {
+            "enum": ["restart-daemon", "build-images", "prepare-runtime", null]
+          }
+        }
+      },
+      "DoctorRepair": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "fix": { "type": "string" },
+          "status": { "enum": ["fixed", "failed", "skipped"] },
+          "summary": { "type": "string" },
+          "recovery": { "type": ["string", "null"] },
+          "logPath": { "type": ["string", "null"] },
+          "note": { "type": ["string", "null"] },
+          "seconds": { "type": "number" }
+        }
+      },
+      "DoctorReport": {
+        "description": "Printed by dynocap doctor --json. The command exits 1 when a required check fails. repairs is present after --fix.",
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "ok": { "type": "boolean" },
+          "home": { "type": "string" },
+          "arch": { "type": "string" },
+          "runtimes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "name": { "type": "string" },
+                "version": { "type": "string" }
+              }
+            }
+          },
+          "checks": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/DoctorCheck" }
+          },
+          "repairs": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/DoctorRepair" }
+          }
+        }
+      }
+    }
+  }
+}

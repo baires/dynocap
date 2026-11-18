@@ -110,6 +110,49 @@ test("Accept preferences, HEAD, and conditional requests select the correct vari
   await browser.body.cancel();
 });
 
+test("api catalog is an RFC 9727 linkset for each local interface", async () => {
+  const response = await request("/.well-known/api-catalog");
+  assert.equal(response.status, 200);
+  assert.equal(
+    response.headers.get("Content-Type")?.split(";")[0],
+    "application/linkset+json"
+  );
+  assert.match(
+    response.headers.get("Content-Type") ?? "",
+    /profile="https:\/\/www\.rfc-editor\.org\/info\/rfc9727"/
+  );
+  assert.match(response.headers.get("Link") ?? "", /rel="api-catalog"/);
+
+  const catalog = await response.json();
+  assert.ok(catalog.linkset.length >= 3);
+  for (const entry of catalog.linkset) {
+    assert.match(entry.anchor, /^https:\/\/dynocap\.dev\/docs\/reference\//);
+    const specUrl = new URL(entry["service-desc"][0].href);
+    const spec = await request(specUrl.pathname);
+    assert.equal(spec.status, 200);
+    assert.match(
+      spec.headers.get("Content-Type") ?? "",
+      /^application\/openapi\+json\b/
+    );
+    const document = await spec.json();
+    assert.match(document.openapi, /^3\./);
+    assert.equal(typeof document.info.title, "string");
+    assert.deepEqual(document.paths, {});
+
+    const doc = await request(new URL(entry["service-doc"][0].href).pathname);
+    assert.equal(doc.status, 200);
+    assert.match(doc.headers.get("Content-Type") ?? "", /^text\/html\b/);
+    await doc.body.cancel();
+  }
+
+  const head = await request("/.well-known/api-catalog", undefined, {
+    method: "HEAD",
+  });
+  assert.equal(head.status, 200);
+  assert.match(head.headers.get("Link") ?? "", /rel="api-catalog"/);
+  assert.equal(await head.text(), "");
+});
+
 test("redirects, 404s, and existing standalone assets retain their behavior", async () => {
   const redirect = await request("/docs?source=test", markdown, {
     redirect: "manual",

@@ -1,0 +1,121 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "DynoCap MCP server",
+    "version": "0.1.0",
+    "description": "Local @dynocap/mcp server. This is not an HTTP API. The server speaks the Model Context Protocol over stdio. The host, not the model, decides which project paths and network modes a task may use. Tool parameters are the schemas below. The human reference is https://dynocap.dev/docs/reference/mcp-tools"
+  },
+  "externalDocs": {
+    "description": "MCP tools reference",
+    "url": "https://dynocap.dev/docs/reference/mcp-tools"
+  },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "TaskStart": {
+        "description": "dynocap_task_start. Provide projectPath or repositoryUrl. network defaults to none. ttlSeconds defaults to 1800 and must be from 30 to 86400.",
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "projectPath": { "type": "string" },
+          "repositoryUrl": { "type": "string" },
+          "history": { "enum": ["branches", "head", "none"] },
+          "name": { "type": "string" },
+          "network": { "enum": ["none", "filtered", "nat"] },
+          "ttlSeconds": { "type": "integer", "minimum": 30, "maximum": 86400 },
+          "cpus": { "type": "integer" },
+          "memoryMB": { "type": "integer" }
+        }
+      },
+      "TaskExec": {
+        "description": "dynocap_task_exec. cwd defaults to /workspace. timeoutSeconds defaults to 30.",
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["name", "command"],
+        "properties": {
+          "name": { "type": "string" },
+          "command": { "type": "string" },
+          "cwd": { "type": "string" },
+          "env": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          },
+          "timeoutSeconds": { "type": "integer" },
+          "terminal": { "type": "boolean" }
+        }
+      },
+      "Diff": {
+        "description": "dynocap_diff.",
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["target"],
+        "properties": { "target": { "type": "string" } }
+      },
+      "TaskFinish": {
+        "description": "dynocap_task_finish.",
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["id"],
+        "properties": { "id": { "type": "string" } }
+      },
+      "List": {
+        "description": "dynocap_ls. Takes no parameters.",
+        "type": "object",
+        "additionalProperties": false
+      },
+      "Remove": {
+        "description": "dynocap_rm. force and purge default to false.",
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["target"],
+        "properties": {
+          "target": { "type": "string" },
+          "force": { "type": "boolean" },
+          "purge": { "type": "boolean" }
+        }
+      },
+      "Run": {
+        "description": "dynocap_run. network defaults to none. ttlSeconds defaults to 1800. cpus defaults to 1. memoryMB defaults to 1024.",
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string" },
+          "network": { "enum": ["none", "filtered", "nat"] },
+          "ttlSeconds": { "type": "integer" },
+          "cpus": { "type": "integer" },
+          "memoryMB": { "type": "integer" }
+        }
+      },
+      "Exec": {
+        "description": "dynocap_exec. Parameters match dynocap_task_exec. The default working directory is /.",
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["name", "command"],
+        "properties": {
+          "name": { "type": "string" },
+          "command": { "type": "string" },
+          "cwd": { "type": "string" },
+          "env": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          },
+          "timeoutSeconds": { "type": "integer" },
+          "terminal": { "type": "boolean" }
+        }
+      },
+      "Ps": {
+        "description": "dynocap_ps. Takes no parameters.",
+        "type": "object",
+        "additionalProperties": false
+      },
+      "Destroy": {
+        "description": "dynocap_destroy.",
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["name"],
+        "properties": { "name": { "type": "string" } }
+      }
+    }
+  }
+}

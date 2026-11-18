@@ -4,6 +4,7 @@ import { toMdast } from "hast-util-to-mdast";
 import { gfmToMarkdown } from "mdast-util-gfm";
 import { toMarkdown } from "mdast-util-to-markdown";
 import { acceptsMarkdown } from "./accepts-markdown.mjs";
+import { apiCatalogBody, apiCatalogHeaders } from "./api-catalog.mjs";
 import { markdownAssetPath } from "./markdown-asset-path.mjs";
 
 const omittedTags = new Set([
@@ -104,10 +105,26 @@ export function markdownPages() {
       },
       "astro:server:setup": ({ server }) => {
         server.middlewares.use((request, response, next) => {
+          const pathname = request.url?.split("?", 1)[0];
+          if (pathname === "/.well-known/api-catalog") {
+            if (!["GET", "HEAD"].includes(request.method ?? "")) {
+              response.statusCode = 405;
+              response.setHeader("Allow", "GET, HEAD");
+              response.end();
+              return;
+            }
+            response.statusCode = 200;
+            for (const [name, value] of Object.entries(apiCatalogHeaders)) {
+              response.setHeader(name, value);
+            }
+            response.end(
+              request.method === "HEAD" ? undefined : apiCatalogBody
+            );
+            return;
+          }
           if (!request.url || !["GET", "HEAD"].includes(request.method)) {
             return next();
           }
-          const [pathname] = request.url.split("?", 1);
           const page = pathname.replace(/\/$/, "") || "/";
           if (
             page === "/" ||

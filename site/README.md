@@ -60,6 +60,17 @@ selects the representation in production. Use Wrangler to test that setup locall
 Each docs page uses the same file for its direct `.md` URL and its negotiated
 response. Find those URLs in `llms.txt`.
 
+## API catalog
+
+`/.well-known/api-catalog` is an [RFC 9727](https://www.rfc-editor.org/rfc/rfc9727)
+linkset. It lists the CLI, the TypeScript SDK, and the MCP server. Each entry
+links to an OpenAPI document under `/openapi/` and to the HTML reference.
+Those interfaces run on the local machine. They are not HTTP routes on this host.
+
+```sh
+curl -fsS -D - https://dynocap.dev/.well-known/api-catalog
+```
+
 ## 👀 Want to learn more?
 
 Feel free to check [our documentation](https://docs.astro.build) or jump into our [Discord server](https://astro.build/chat).

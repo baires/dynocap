@@ -1,0 +1,112 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "DynoCap TypeScript SDK",
+    "version": "0.1.0",
+    "description": "Local @dynocap/sdk client. This is not an HTTP API. Methods talk to the per-user daemon over the Unix socket at ~/.dynocap/daemon.sock. Task manages a project workspace. Sandbox manages a raw microVM. The human reference is https://dynocap.dev/docs/reference/sdk-api"
+  },
+  "externalDocs": {
+    "description": "TypeScript SDK API reference",
+    "url": "https://dynocap.dev/docs/reference/sdk-api"
+  },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "RuntimeSelection": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "name": { "type": "string" },
+          "version": { "type": "string" }
+        }
+      },
+      "TaskStartOptions": {
+        "description": "Argument to Task.start. history is branches, head, or none.",
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "name": { "type": "string" },
+          "projectPath": { "type": "string" },
+          "history": { "enum": ["branches", "head", "none"] },
+          "runtimes": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/RuntimeSelection" }
+          },
+          "network": { "enum": ["none", "filtered", "nat"] },
+          "ttlSeconds": { "type": "integer" },
+          "cpus": { "type": "integer" },
+          "memoryMB": { "type": "integer" }
+        }
+      },
+      "ExecOptions": {
+        "description": "Options for Task.exec and Sandbox.exec. timeoutSeconds defaults to 60. cwd defaults to /workspace for a task and / for a raw sandbox.",
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "timeoutSeconds": { "type": "integer" },
+          "cwd": { "type": "string" },
+          "env": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          },
+          "terminal": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "rows": { "type": "integer" },
+              "cols": { "type": "integer" }
+            }
+          }
+        }
+      },
+      "ExecResult": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "exitCode": { "type": "integer" },
+          "stdout": { "type": "string" },
+          "stderr": { "type": "string" }
+        }
+      },
+      "TaskPreview": {
+        "description": "Returned by task.diff.",
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "directory": { "type": "string" },
+          "patchPath": { "type": "string" },
+          "reviewPath": { "type": "string" },
+          "changesPath": { "type": "string" }
+        }
+      },
+      "SandboxCreateOptions": {
+        "description": "Argument to Sandbox.create.",
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "name": { "type": "string" },
+          "network": { "enum": ["none", "filtered", "nat"] },
+          "cpus": { "type": "integer" },
+          "memoryMB": { "type": "integer" },
+          "ttlSeconds": { "type": "integer" }
+        }
+      },
+      "SandboxError": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "kind": {
+            "enum": [
+              "daemon",
+              "not_found",
+              "timeout",
+              "policy",
+              "invalid_state"
+            ]
+          },
+          "message": { "type": "string" }
+        }
+      }
+    }
+  }
+}
