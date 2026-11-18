@@ -1,0 +1,282 @@
+---
+import Base from "../layouts/Base.astro";
+import { worktreeComparison } from "../data/site";
+
+const rows = [
+  ["Project files", "Separate checkout, shared Git repository", "Copied workspace, no host folders mounted"],
+  ["Command execution", "On your Mac, with whatever permissions the agent already has", "In a Linux microVM with its own kernel"],
+  ["Outbound network", "Uses your existing host network policy", "Offline by default"],
+  ["How changes come back", "Already on disk in the linked checkout", "Review and apply an exported Git patch"],
+  ["Lifetime", "Persists until you remove it", "Fixed deadline from creation"],
+];
+
+const commands = [
+  "git worktree add -b fix/ci ../ci-fix",
+  "dynocap doctor --fix ../ci-fix --runtime shell:1",
+  "dynocap clone ../ci-fix ci-fix --runtime shell:1 --history head",
+  "dynocap shell ci-fix",
+  "dynocap exec ci-fix -- bash scripts/check.sh",
+  "dynocap diff ci-fix",
+  "dynocap finish ci-fix",
+].join("\n");
+---
+
+<Base
+  title={worktreeComparison.title}
+  description={worktreeComparison.description}
+>
+  <article class="band">
+    <header class="hero">
+      <div>
+        <h1 id="content" tabindex="-1">{worktreeComparison.title}</h1>
+        <p class="lede">
+          A Git worktree gives your coding agent a separate checkout. DynoCap
+          gives its commands a separate Linux machine on your Mac. Use a worktree
+          for parallel edits, DynoCap for isolated execution, or both for a fix
+          you want to test in Linux and land on a branch.
+        </p>
+        <div class="actions">
+          <a class="seal-link hero__cta" href="#use-both">
+            <span>See the combined workflow</span>
+            <i aria-hidden="true"></i>
+          </a>
+          <a class="seal-link" href="/#install">
+            <span>Get started with DynoCap</span>
+            <i aria-hidden="true"></i>
+          </a>
+        </div>
+      </div>
+      <dl class="choice">
+        <div>
+          <dt>Git worktree</dt>
+          <dd>Give each agent its own branch and working directory.</dd>
+        </div>
+        <div>
+          <dt>DynoCap</dt>
+          <dd>Give the code it runs a disposable, offline-by-default Linux VM.</dd>
+        </div>
+      </dl>
+    </header>
+
+    <section class="section" aria-labelledby="compare-title">
+      <h2 id="compare-title">What each tool isolates</h2>
+      <table aria-labelledby="compare-title">
+        <thead>
+          <tr>
+            <th scope="col">Feature</th>
+            <th scope="col">Git worktree</th>
+            <th scope="col">DynoCap task</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(([dimension, worktree, sandbox]) => (
+            <tr>
+              <th scope="row">{dimension}</th>
+              <td>{worktree}</td>
+              <td>{sandbox}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p class="note references">
+        <a href="https://git-scm.com/docs/git-worktree">Git worktree reference</a>
+        <a href="/docs/explanation/security-and-isolation">DynoCap isolation boundary</a>
+      </p>
+    </section>
+
+    <section class="section" aria-labelledby="daily-title">
+      <h2 id="daily-title">When to use each with a coding agent</h2>
+      <dl class="situations">
+        <div>
+          <dt>Two agents editing a repo you trust</dt>
+          <dd>
+            Use a worktree per branch for tasks like adding tests and updating
+            docs in parallel. Keep your normal editor, local tooling, and Git
+            workflow.
+          </dd>
+        </div>
+        <div>
+          <dt>A PR ships a repro script you want to try</dt>
+          <dd>
+            Run the script in a DynoCap task. It works on a project copy in an
+            offline guest, with no host directories mounted. If the project
+            needs packages, you can
+            <a href="/docs/how-to/manage-dependencies-and-caching">prepare a dependency cache</a>
+            for offline installs.
+          </dd>
+        </div>
+        <div>
+          <dt>CI fails on Linux and passes on macOS</dt>
+          <dd>
+            Run the failing command in DynoCap to investigate Linux-specific
+            shell or tooling behavior. Use a worktree for the fix and bring
+            the reviewed patch back when the guest test passes.
+          </dd>
+        </div>
+      </dl>
+    </section>
+
+    <section class="section" id="use-both" aria-labelledby="workflow-title">
+      <div class="section-intro">
+        <h2 id="workflow-title">Keep the branch. Sandbox the commands.</h2>
+        <p class="lede">
+          From the main checkout, create a worktree and copy it into DynoCap.
+          This example assumes an installed DynoCap CLI and a project with a
+          Bash-only check at <code>scripts/check.sh</code>. Use the guest shell
+          to investigate and edit, then exit it before running the check.
+        </p>
+      </div>
+      <div class="command">
+        <p class="command-bar">Run one line at a time</p>
+        <pre><code>{commands}</code></pre>
+      </div>
+      <p class="note">
+        Run <code>finish</code> before the task expires. It exports the patch and
+        logs, then tears down the VM. Review the patch and run <code>git apply --check</code>
+        with the printed patch path from inside <code>../ci-fix</code>. Then apply it
+        there and commit as usual.
+      </p>
+      <p class="note">
+        If your coding agent runs on your Mac, give it the
+        <a href="/docs/how-to/configure-mcp-server">DynoCap MCP tools</a>
+        to run commands in the guest. Commands issued through its regular host
+        shell still run on your Mac.
+      </p>
+      <div class="actions">
+        <a class="seal-link hero__cta" href="/docs/tutorials/agent-task-workflow">
+          <span>Follow the agent task tutorial</span>
+          <i aria-hidden="true"></i>
+        </a>
+      </div>
+    </section>
+  </article>
+</Base>
+
+<style>
+  .hero h1 {
+    max-width: 17ch;
+  }
+
+  .choice {
+    border-inline-start: 2px solid var(--c-accent);
+    padding-inline-start: var(--gutter);
+  }
+
+  .choice > div {
+    padding-block: 1.25rem;
+  }
+
+  .choice > div + div {
+    border-block-start: 1px solid var(--c-line);
+  }
+
+  .choice dt,
+  .command-bar,
+  thead th {
+    font: var(--t-xs) / 1.5 var(--f-mono);
+  }
+
+  .choice dd {
+    max-width: 27ch;
+    margin-block-start: 0.5rem;
+    font-size: var(--t-m);
+    line-height: 1.25;
+  }
+
+  table {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+  }
+
+  thead th:first-child {
+    width: 23%;
+  }
+
+  th,
+  td {
+    padding: clamp(0.5rem, 1.5vw, 1.25rem);
+    border-block-end: 1px solid var(--c-line);
+    text-align: start;
+    vertical-align: top;
+    overflow-wrap: anywhere;
+  }
+
+  tbody th {
+    font-weight: 500;
+  }
+
+  tbody td,
+  .situations dd,
+  .command-bar {
+    color: var(--c-muted);
+  }
+
+  .references {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.5rem;
+  }
+
+  .situations > div {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+    gap: 0.5rem var(--gutter);
+    border-block-start: 1px solid var(--c-line);
+    padding-block: 1.25rem;
+  }
+
+  .situations dt {
+    font-size: var(--t-m);
+    line-height: 1.25;
+  }
+
+  .situations dd {
+    max-width: 54ch;
+  }
+
+  .note a,
+  .situations a {
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+  }
+
+  .note a:hover,
+  .situations a:hover {
+    text-decoration-color: var(--c-accent);
+  }
+
+  .command {
+    border: 1px solid var(--c-line);
+  }
+
+  .command-bar {
+    padding: 0.75rem var(--gutter);
+    border-block-end: 1px solid var(--c-line);
+  }
+
+  pre {
+    padding: 1rem var(--gutter);
+    font: var(--t-s) / 1.65 var(--f-mono);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  #use-both .actions {
+    margin-block-start: 1rem;
+  }
+
+  @media (max-width: 767px) {
+    .situations > div {
+      grid-template-columns: 1fr;
+    }
+
+    table {
+      font-size: var(--t-s);
+    }
+
+    thead th:first-child {
+      width: 28%;
+    }
+  }
+</style>

@@ -11,6 +11,7 @@ import {
   runtimes,
   setup,
   site,
+  worktreeComparison,
   workflow,
 } from "../data/site";
 
@@ -203,10 +204,16 @@ const labelSpan = 19;
             Let the agent install, delete, and run whatever it needs. It is
             working on a copy, inside a virtual machine, with the doors closed.
           </p>
-          <a class="seal-link" href="/docs/explanation/security-and-isolation">
-            <span>Read the security boundary</span>
-            <i aria-hidden="true"></i>
-          </a>
+          <div class="actions">
+            <a class="seal-link" href="/docs/explanation/security-and-isolation">
+              <span>Read the security boundary</span>
+              <i aria-hidden="true"></i>
+            </a>
+            <a class="seal-link" href={worktreeComparison.path}>
+              <span>Compare DynoCap and Git worktrees</span>
+              <i aria-hidden="true"></i>
+            </a>
+          </div>
         </div>
       </div>
       <div class="boundary" role="table" aria-label="What stays on your Mac and what the microVM gets">

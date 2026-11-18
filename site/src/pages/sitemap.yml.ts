@@ -1,5 +1,5 @@
 import type { APIRoute } from "astro";
-import { site } from "../data/site";
+import { site, worktreeComparison } from "../data/site";
 import {
   docDescription,
   docHref,
@@ -22,6 +22,7 @@ export const GET: APIRoute = async () => {
       path: "/",
       description: site.description,
     },
+    worktreeComparison,
     {
       title: "Docs",
       path: "/docs",

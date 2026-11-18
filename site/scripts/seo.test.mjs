@@ -23,6 +23,7 @@ const cluster = [
   "python-sandbox",
   "go-sandbox",
 ].map((slug) => `/docs/tutorials/${slug}`);
+const worktreeComparison = "/dynocap-vs-git-worktrees";
 const links = (html) =>
   [...html.matchAll(/<a\b[^>]*href="([^"]+)"/g)].map((match) => match[1]);
 
@@ -88,8 +89,17 @@ test("runtime guides are discoverable from home and available in machine-readabl
   }
 });
 
-test("runtime guides link to real pages and anchor targets", () => {
-  for (const path of cluster) {
+test("worktree comparison is linked from home and listed in machine-readable indexes", () => {
+  assert.ok(links(pages.get("/")).includes(worktreeComparison));
+  assert.ok(pages.has(worktreeComparison));
+  assert.ok(
+    read("llms.txt").includes(`https://dynocap.dev${worktreeComparison})`)
+  );
+  assert.ok(read("sitemap.yml").includes(`path: "${worktreeComparison}"`));
+});
+
+test("runtime guides and worktree comparison link to real pages and anchor targets", () => {
+  for (const path of [...cluster, worktreeComparison]) {
     for (const href of links(pages.get(path))) {
       const url = new URL(href, `https://dynocap.dev${path}`);
       if (url.origin !== "https://dynocap.dev") continue;
