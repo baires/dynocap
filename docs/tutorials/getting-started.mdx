@@ -110,7 +110,7 @@ To prepare a different runtime, pass `--runtime`, for example `dynocap doctor --
 dynocap doctor --fix
 ```
 
-`--fix` copies a bundled guest image when the install has one, and builds it otherwise. It prepares your project's runtime and restarts a daemon left over from an older build. Every download is pinned and verified. It then runs the checks again and ends with `Required checks passed.`
+`--fix` copies a bundled guest image when the install has one, and builds it otherwise. It prepares your project's runtime and restarts a daemon left over from an older build. Release installs include the pinned Alpine inputs for runtime preparation. DynoCap verifies them and downloads any remaining inputs, such as the language toolchain. It then runs the checks again and ends with `Required checks passed.`
 
 Doctor finds that prefix from the `dynocap` binary, whether it is a source checkout or a Homebrew or curl install, so you can run it in any directory. You can also name the project instead of changing directory: `dynocap doctor --fix ~/code/my-app`.
 
@@ -169,7 +169,7 @@ dynocap exec my-first-box -- uname -a
 Output:
 
 ```text
-Linux dynocap 6.18.62-0-virt #1-Alpine SMP PREEMPT_DYNAMIC aarch64 Linux
+Linux dynocap 6.18.64-0-virt #1-Alpine SMP PREEMPT_DYNAMIC aarch64 Linux
 ```
 
 Test running an isolated shell command:

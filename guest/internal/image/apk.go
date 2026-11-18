@@ -124,5 +124,5 @@ func InstallVerifiedAPK(file, root string) error {
 		return e
 	}
 	f.Close()
-	return extractTarFile(f.Name(), root)
+	return extractTarFile(f.Name(), root, false)
 }

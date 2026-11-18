@@ -51,7 +51,7 @@ For scripts, `dynocap doctor --json` prints the same report. Each check has a `f
 | `images`  | Builds the guest kernel and initrd. Mismatched files are moved to `replaced-<time>/`, not deleted. | Checkout, Go, network               |
 | `runtime` | Prepares and verifies the runtime in an offline guest, like `dynocap runtime prepare`.             | Checkout, Go, network, a signed CLI |
 
-Repairs run in that order, and progress goes to stderr. Each repair prints a build log path, so a failure shows what to read. `--fix` then runs every check again and reports the result.
+Repairs run in that order, and progress goes to stderr. Each repair prints a build log path, so a failure shows what to read. Release installs use bundled Alpine inputs during runtime preparation. `--fix` then runs every check again and reports the result.
 
 `--fix` never:
 
@@ -97,3 +97,5 @@ The guest agent is compiled during image and runtime builds. Install Go 1.22 or 
 ### A repair failed
 
 The repair line shows the error, a `Log:` path, and a `Next:` step. The build log has the full download or compile output.
+
+If a pinned Alpine package returns `404 Not Found`, update DynoCap and retry. Older releases fetched these packages from Alpine's rolling package directories. A current release includes the verified copies used at build time.

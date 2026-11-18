@@ -9,13 +9,16 @@ import (
 
 func main() {
 	if len(os.Args) < 3 || (os.Args[1] != "workspace" && len(os.Args) < 4) {
-		fmt.Fprintln(os.Stderr, "mkruntime REPO HOME ARCH | workspace PATH")
+		fmt.Fprintln(os.Stderr, "mkruntime REPO HOME ARCH | workspace PATH | cache-alpine DIR ARCH")
 		os.Exit(2)
 	}
 	var err error
-	if os.Args[1] == "workspace" {
+	switch os.Args[1] {
+	case "workspace":
 		err = rt.Mkfs(os.Args[2], "", 8<<30)
-	} else {
+	case "cache-alpine":
+		err = rt.CacheAlpineInputs(os.Args[3], os.Args[2])
+	default:
 		var m rt.Manifest
 		requests := []rt.Request{{Name: "node", Version: "24"}}
 		if len(os.Args) > 4 {

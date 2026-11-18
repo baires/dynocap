@@ -53,14 +53,14 @@ func Build(opts Options) (Manifest, error) {
 	if err := os.MkdirAll(opts.OutDir, 0o755); err != nil {
 		return Manifest{}, err
 	}
-	fmt.Fprintf(opts.Log, "downloading Alpine %s minirootfs\n", AlpineVersion)
-	rootfsTar := filepath.Join(opts.CacheDir, filepath.Base(pin.MinirootURL))
-	if err := download(pin.MinirootURL, rootfsTar, pin.MinirootSHA256); err != nil {
+	fmt.Fprintf(opts.Log, "loading Alpine %s minirootfs\n", AlpineVersion)
+	rootfsTar, err := imageInput(opts.RepoRoot, pin.MinirootURL, filepath.Join(opts.CacheDir, filepath.Base(pin.MinirootURL)), pin.MinirootSHA256)
+	if err != nil {
 		return Manifest{}, err
 	}
-	fmt.Fprintf(opts.Log, "downloading %s (%s)\n", KernelPackage, opts.Arch)
-	apkPath := filepath.Join(opts.CacheDir, opts.Arch+"-"+filepath.Base(pin.KernelURL))
-	if err := download(pin.KernelURL, apkPath, pin.KernelSHA256); err != nil {
+	fmt.Fprintf(opts.Log, "loading %s (%s)\n", KernelPackage, opts.Arch)
+	apkPath, err := imageInput(opts.RepoRoot, pin.KernelURL, filepath.Join(opts.CacheDir, opts.Arch+"-"+filepath.Base(pin.KernelURL)), pin.KernelSHA256)
+	if err != nil {
 		return Manifest{}, err
 	}
 
@@ -106,7 +106,7 @@ func Build(opts Options) (Manifest, error) {
 		return Manifest{}, err
 	}
 	fmt.Fprintf(opts.Log, "extracting minirootfs\n")
-	if err := extractTarFile(rootfsTar, root); err != nil {
+	if err := extractTarFile(rootfsTar, root, true); err != nil {
 		return Manifest{}, err
 	}
 	if err := installModules(dataTar, release, plan, root); err != nil {
@@ -296,14 +296,14 @@ func installGuest(root string, agent []byte, plan modulePlan, release string) er
 	return os.WriteFile(filepath.Join(binDir, "dynocap-agent"), agent, 0o755)
 }
 
-func extractTarFile(tarPath, dest string) error {
+func extractTarFile(tarPath, dest string, compressed bool) error {
 	f, err := os.Open(tarPath)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 	var r io.Reader = f
-	if strings.HasSuffix(tarPath, ".gz") || strings.HasSuffix(tarPath, ".tgz") {
+	if compressed {
 		gz, err := gzip.NewReader(f)
 		if err != nil {
 			return err

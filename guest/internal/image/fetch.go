@@ -11,6 +11,32 @@ import (
 	"time"
 )
 
+// CacheBaseInputs collects the pinned image inputs in a release's content-addressed input directory.
+func CacheBaseInputs(arch, dir string) error {
+	pin, ok := Pins[arch]
+	if !ok {
+		return fmt.Errorf("unsupported arch %q (want aarch64 or x86_64)", arch)
+	}
+	if err := download(pin.MinirootURL, filepath.Join(dir, pin.MinirootSHA256), pin.MinirootSHA256); err != nil {
+		return err
+	}
+	return download(pin.KernelURL, filepath.Join(dir, pin.KernelSHA256), pin.KernelSHA256)
+}
+
+// BundledInput returns an input from the install prefix only if it matches the compiled pin.
+func BundledInput(repo, wantSHA string) (string, bool) {
+	path := filepath.Join(repo, "alpine-inputs", wantSHA)
+	data, err := os.ReadFile(path)
+	return path, err == nil && sha256Sum(data) == wantSHA
+}
+
+func imageInput(repo, url, dest, wantSHA string) (string, error) {
+	if path, ok := BundledInput(repo, wantSHA); ok {
+		return path, nil
+	}
+	return dest, download(url, dest, wantSHA)
+}
+
 func download(url, dest, wantSHA string) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err
