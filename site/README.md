@@ -67,7 +67,11 @@ linkset. It lists the CLI, the TypeScript SDK, and the MCP server. Each entry
 links to an OpenAPI document under `/openapi/` and to the HTML reference.
 Those interfaces run on the local machine. They are not HTTP routes on this host.
 
+The homepage response advertises that catalog with [RFC 8288](https://www.rfc-editor.org/rfc/rfc8288)
+`Link` headers: `api-catalog`, `service-desc`, `service-doc`, and `describedby`.
+
 ```sh
+curl -fsSI https://dynocap.dev/
 curl -fsS -D - https://dynocap.dev/.well-known/api-catalog
 ```
 

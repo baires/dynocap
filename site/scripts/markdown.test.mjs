@@ -110,6 +110,33 @@ test("Accept preferences, HEAD, and conditional requests select the correct vari
   await browser.body.cancel();
 });
 
+test("homepage Link headers advertise the catalog and each interface", async () => {
+  for (const [path, accept, method] of [
+    ["/", undefined, "GET"],
+    ["/", undefined, "HEAD"],
+    ["/", markdown, "GET"],
+  ]) {
+    const response = await request(path, accept, { method });
+    assert.equal(response.status, 200, `${method} ${path}`);
+    const link = response.headers.get("Link") ?? "";
+    assert.match(link, /<\/\.well-known\/api-catalog>; rel="api-catalog"/);
+    assert.match(link, /rel="service-desc"/);
+    assert.match(link, /rel="service-doc"/);
+    assert.match(link, /<\/llms\.txt>; rel="describedby"/);
+    await response.body?.cancel();
+  }
+
+  const home = await request("/");
+  const targets = [...(home.headers.get("Link") ?? "").matchAll(/<([^>]+)>/g)];
+  assert.ok(targets.length >= 4);
+  for (const [, target] of targets) {
+    const resource = await request(target, undefined, { redirect: "manual" });
+    assert.equal(resource.status, 200, target);
+    await resource.body?.cancel();
+  }
+  await home.body?.cancel();
+});
+
 test("api catalog is an RFC 9727 linkset for each local interface", async () => {
   const response = await request("/.well-known/api-catalog");
   assert.equal(response.status, 200);

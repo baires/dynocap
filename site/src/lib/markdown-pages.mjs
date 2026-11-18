@@ -4,7 +4,11 @@ import { toMdast } from "hast-util-to-mdast";
 import { gfmToMarkdown } from "mdast-util-gfm";
 import { toMarkdown } from "mdast-util-to-markdown";
 import { acceptsMarkdown } from "./accepts-markdown.mjs";
-import { apiCatalogBody, apiCatalogHeaders } from "./api-catalog.mjs";
+import {
+  apiCatalogBody,
+  apiCatalogHeaders,
+  homepageLinks,
+} from "./api-catalog.mjs";
 import { markdownAssetPath } from "./markdown-asset-path.mjs";
 
 const omittedTags = new Set([
@@ -133,6 +137,11 @@ export function markdownPages() {
             (page.startsWith("/docs/") && !page.endsWith(".md"))
           ) {
             response.appendHeader("Vary", "Accept");
+            if (page === "/") {
+              for (const link of homepageLinks) {
+                response.appendHeader("Link", link);
+              }
+            }
             // Astro strips request headers before rendering prerendered routes.
             if (acceptsMarkdown(request.headers.accept)) {
               request.url =

@@ -1,5 +1,9 @@
 import { acceptsMarkdown } from "./lib/accepts-markdown.mjs";
-import { apiCatalogBody, apiCatalogHeaders } from "./lib/api-catalog.mjs";
+import {
+  apiCatalogBody,
+  apiCatalogHeaders,
+  appendHomepageLinks,
+} from "./lib/api-catalog.mjs";
 import { markdownAssetPath } from "./lib/markdown-asset-path.mjs";
 
 export default {
@@ -38,21 +42,20 @@ export default {
       });
     }
     // Static Assets redirects directory URLs to their trailing-slash form.
-    if (
-      !["GET", "HEAD"].includes(request.method) ||
-      !url.pathname.endsWith("/")
-    ) {
+    const page = url.pathname;
+    if (!["GET", "HEAD"].includes(request.method) || !page.endsWith("/")) {
       return env.ASSETS.fetch(request);
     }
 
     if (acceptsMarkdown(request.headers.get("Accept"))) {
-      url.pathname = markdownAssetPath(url.pathname);
+      url.pathname = markdownAssetPath(page);
       const markdown = await env.ASSETS.fetch(new Request(url, request));
       if (markdown.ok || markdown.status === 304) {
         const response = new Response(markdown.body, markdown);
         response.headers.set("Content-Type", "text/markdown; charset=utf-8");
         response.headers.set("X-Content-Type-Options", "nosniff");
         response.headers.append("Vary", "Accept");
+        appendHomepageLinks(response.headers, page);
         return response;
       }
       await markdown.body?.cancel();
@@ -62,6 +65,7 @@ export default {
     if (!asset.ok && asset.status !== 304) return asset;
     const response = new Response(asset.body, asset);
     response.headers.append("Vary", "Accept");
+    appendHomepageLinks(response.headers, page);
     return response;
   },
 };

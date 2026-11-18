@@ -36,3 +36,36 @@ export const apiCatalogHeaders = {
   Link: '</.well-known/api-catalog>; rel="api-catalog"',
   "X-Content-Type-Options": "nosniff",
 };
+
+function linkHeader(pathname, relation, type) {
+  return `<${pathname}>; rel="${relation}"; type="${type}"`;
+}
+
+// RFC 9727 §3: the site root points at the API catalog. The other registered
+// relations point at the machine-readable descriptions, the HTML references,
+// and the agent index. Service docs use the trailing-slash URL that returns 200.
+export const homepageLinks = [
+  linkHeader(
+    "/.well-known/api-catalog",
+    "api-catalog",
+    "application/linkset+json"
+  ),
+  ...apis.flatMap((api) => [
+    linkHeader(
+      new URL(api.spec).pathname,
+      "service-desc",
+      "application/openapi+json"
+    ),
+    linkHeader(
+      `${new URL(api.doc).pathname.replace(/\/$/, "")}/`,
+      "service-doc",
+      "text/html"
+    ),
+  ]),
+  linkHeader("/llms.txt", "describedby", "text/plain"),
+];
+
+export function appendHomepageLinks(headers, pathname) {
+  if (pathname !== "/") return;
+  for (const value of homepageLinks) headers.append("Link", value);
+}

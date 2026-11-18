@@ -19,7 +19,7 @@ export const GET: APIRoute = async () => {
     "",
     "## API catalog",
     "",
-    `- [API catalog](${origin}/.well-known/api-catalog): RFC 9727 linkset for the local CLI, TypeScript SDK, and MCP server. Each entry links to an OpenAPI description and the HTML reference.`,
+    `- [API catalog](${origin}/.well-known/api-catalog): RFC 9727 linkset for the local CLI, TypeScript SDK, and MCP server. Each entry links to an OpenAPI description and the HTML reference. The homepage Link header points here.`,
     "",
     "## Workflow comparison",
     "",
