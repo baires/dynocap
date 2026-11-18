@@ -12,8 +12,8 @@
     "sha256": "d0a573c27d337c369ad3abe3f39f09ffe67b95af23861577a8d134738375176a"
   },
   {
-    "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/git-2.54.0-r0.apk",
-    "sha256": "ea41e2f837f1f6a8b66e72a5ece0fc75cca44f76f49cf5500d467fc5627d0ab7"
+    "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/git-2.54.1-r0.apk",
+    "sha256": "6a9dc5e00013a8daecedd1c2951ec16fc69f0e5ade6847db81e86a9e658323b7"
   },
   {
     "url": "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/aarch64/libcrypto3-3.5.9-r0.apk",

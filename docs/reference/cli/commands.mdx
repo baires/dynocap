@@ -209,7 +209,7 @@ The runtime checked is the one `PROJECT` (default: the current directory) uses, 
 
 ### `dynocap runtime prepare`
 
-Download, build, and verify a runtime rootfs disk.
+Build and verify a runtime rootfs disk. Release installs include pinned Alpine inputs. The host downloads any required inputs that are unavailable in the release bundle or local cache.
 
 ```sh
 dynocap runtime prepare [REPO_PATH] [options]

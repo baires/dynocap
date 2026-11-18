@@ -1,11 +1,11 @@
 #!/bin/sh
 # Pack a darwin-arm64 prefix: signed binaries, the guest tree, Package.swift,
-# the virtualization entitlement, and images/aarch64. Walking up from bin/dynocap
+# the virtualization entitlement, images/aarch64, and pinned Alpine inputs. Walking up from bin/dynocap
 # finds guest/mkimage/main.go and Package.swift.
 #
 # Set DYNOCAP_RELEASE_IMAGE to a directory that already holds kernel, initrd,
-# and manifest.json to reuse a built image. Otherwise this runs mkimage, which
-# downloads pinned Alpine files.
+# and manifest.json to reuse a built image. Otherwise mkimage builds from the
+# same pinned Alpine files that ship in the archive.
 set -eu
 cd "$(dirname "$0")/.."
 root=$(pwd)
@@ -29,6 +29,7 @@ chmod 755 "$stage/bin/dynocap" "$stage/bin/dynocap-workspace" "$stage/bin/dynoca
 cp Package.swift "$stage/Package.swift"
 cp entitlements/dynocap.entitlements "$stage/entitlements/dynocap.entitlements"
 tar -C "$root/guest" -cf - --exclude agent/dynocap-agent . | tar -C "$stage/guest" -xf -
+"$stage/bin/dynocap-mkruntime" cache-alpine "$stage/alpine-inputs" aarch64
 
 if [ -n "${DYNOCAP_RELEASE_IMAGE:-}" ]; then
   for file in kernel initrd manifest.json; do
@@ -41,11 +42,11 @@ if [ -n "${DYNOCAP_RELEASE_IMAGE:-}" ]; then
 else
   cache="${DYNOCAP_IMAGE_CACHE:-$stage/cache}"
   mkdir -p "$cache"
-  (cd "$root/guest" && go run ./mkimage --arch aarch64 --out "$stage/images/aarch64" --cache "$cache" --repo "$root")
+  (cd "$root/guest" && go run ./mkimage --arch aarch64 --out "$stage/images/aarch64" --cache "$cache" --repo "$stage")
 fi
 
 mkdir -p "$root/dist"
-tar -C "$stage" -czf "$root/dist/$name" bin guest Package.swift entitlements images
+tar -C "$stage" -czf "$root/dist/$name" bin guest Package.swift entitlements images alpine-inputs
 # Stable names are byte copies for the curl installer. The versioned archive is what the tap pins.
 cp "$root/dist/$name" "$root/dist/dynocap-darwin-arm64.tar.gz"
 (

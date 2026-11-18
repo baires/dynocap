@@ -25,8 +25,9 @@ re-sign the CLI on your Mac with `codesign --sign -` and the bundled
 virtualization entitlement, and they clear the download quarantine flag.
 There is no Homebrew bottle, because pouring one would skip that re-sign.
 Runtime preparation still needs `mke2fs` from `e2fsprogs`. The first runtime
-preparation also needs Go 1.22 or newer. The guest image is in the release
-archive.
+preparation also needs Go 1.22 or newer. The release archive includes the guest
+image and the pinned Alpine packages used to build runtimes. Runtime preparation
+verifies these files and downloads language toolchains separately.
 
 ### Homebrew
 
@@ -246,7 +247,7 @@ initramfs:
 | Piece              | Source                                             |
 | ------------------ | -------------------------------------------------- |
 | Rootfs             | `alpine-minirootfs-3.24.4-{aarch64,x86_64}.tar.gz` |
-| Kernel and modules | `linux-virt-6.18.62-r0.apk` (Alpine v3.24)         |
+| Kernel and modules | `linux-virt-6.18.64-r0.apk` (Alpine v3.24)         |
 
 The virt kernel has virtio-pci and virtio-console built in. vsock and
 virtio-net are modules (`CONFIG_VIRTIO_VSOCKETS=m`, `CONFIG_VIRTIO_NET=m`);

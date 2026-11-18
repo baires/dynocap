@@ -81,7 +81,38 @@ func hashFile(p string) (string, error) {
 	_, e = io.Copy(h, f)
 	return hex.EncodeToString(h.Sum(nil)), e
 }
-func fetch(in Input, cache string) (string, error) {
+
+// CacheAlpineInputs collects the verified Alpine inputs for every supported runtime in a release.
+func CacheAlpineInputs(arch, dir string) error {
+	if err := image.CacheBaseInputs(arch, dir); err != nil {
+		return err
+	}
+	seen := make(map[string]bool)
+	for _, selection := range Supported() {
+		name, version, _ := strings.Cut(selection, ":")
+		recipe, err := Resolve([]Request{{Name: name, Version: version}}, arch)
+		if err != nil {
+			return err
+		}
+		for _, input := range recipe.Inputs {
+			if input.Install != nil || !strings.HasSuffix(input.URL, ".apk") || seen[input.SHA256] {
+				continue
+			}
+			if _, err := fetch(input, dir, ""); err != nil {
+				return err
+			}
+			seen[input.SHA256] = true
+		}
+	}
+	return nil
+}
+
+func fetch(in Input, cache, repo string) (string, error) {
+	if repo != "" {
+		if path, ok := image.BundledInput(repo, in.SHA256); ok {
+			return path, nil
+		}
+	}
 	p := filepath.Join(cache, in.SHA256)
 	if sum, _ := hashFile(p); sum == in.SHA256 {
 		return p, nil
@@ -275,7 +306,7 @@ func Build(repo, home, arch string, requests []Request) (Manifest, error) {
 		return Manifest{}, e
 	}
 	for _, in := range recipe.Inputs {
-		p, e := fetch(in, cache)
+		p, e := fetch(in, cache, repo)
 		if e != nil {
 			return Manifest{}, e
 		}
