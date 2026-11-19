@@ -181,13 +181,20 @@ test("api catalog is an RFC 9727 linkset for each local interface", async () => 
 });
 
 test("redirects, 404s, and existing standalone assets retain their behavior", async () => {
-  const redirect = await request("/docs?source=test", markdown, {
+  const canonical = await request("/docs", html, { redirect: "manual" });
+  assert.equal(canonical.status, 200);
+  assert.match(
+    await canonical.text(),
+    /<link rel="canonical" href="https:\/\/dynocap\.dev\/docs"/
+  );
+
+  const redirect = await request("/docs/?source=test", markdown, {
     redirect: "manual",
   });
   assert.equal(redirect.status, 307);
-  assert.equal(redirect.headers.get("Location"), "/docs/?source=test");
+  assert.equal(redirect.headers.get("Location"), "/docs?source=test");
 
-  const missing = await request("/docs/missing/", markdown);
+  const missing = await request("/docs/missing", markdown);
   assert.equal(missing.status, 404);
   assert.match(missing.headers.get("Content-Type"), /^text\/html\b/);
   await missing.body.cancel();

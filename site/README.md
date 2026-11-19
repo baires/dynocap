@@ -43,7 +43,8 @@ All commands are run from the root of the project, from a terminal:
 
 Request any page with `Accept: text/markdown` to get its main content as
 Markdown. HTML is the default. Both representations send `Vary: Accept`.
-Follow redirects when requesting a URL without its trailing slash.
+Canonical page URLs have no trailing slash; a trailing slash redirects to the
+slashless form.
 
 ```sh
 curl -fsSL -H 'Accept: text/markdown' https://dynocap.dev/docs/tutorials/getting-started

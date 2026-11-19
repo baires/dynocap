@@ -6,6 +6,15 @@ import {
 } from "./lib/api-catalog.mjs";
 import { markdownAssetPath } from "./lib/markdown-asset-path.mjs";
 
+function isNegotiableHtmlPage(pathname) {
+  return (
+    pathname === "/" ||
+    pathname === "/docs" ||
+    (pathname.startsWith("/docs/") && !pathname.endsWith(".md")) ||
+    pathname === "/dynocap-vs-git-worktrees"
+  );
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -41,9 +50,14 @@ export default {
         headers,
       });
     }
-    // Static Assets redirects directory URLs to their trailing-slash form.
+    // html_handling drop-trailing-slash makes slashless paths the 200 URLs.
+    // Pass trailing-slash requests through so Assets can 307 to the canonical.
     const page = url.pathname;
-    if (!["GET", "HEAD"].includes(request.method) || !page.endsWith("/")) {
+    if (
+      !["GET", "HEAD"].includes(request.method) ||
+      (page !== "/" && page.endsWith("/")) ||
+      !isNegotiableHtmlPage(page)
+    ) {
       return env.ASSETS.fetch(request);
     }
 

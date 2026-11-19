@@ -43,7 +43,7 @@ function linkHeader(pathname, relation, type) {
 
 // RFC 9727 §3: the site root points at the API catalog. The other registered
 // relations point at the machine-readable descriptions, the HTML references,
-// and the agent index. Service docs use the trailing-slash URL that returns 200.
+// and the agent index. Service docs use the slashless URL that returns 200.
 export const homepageLinks = [
   linkHeader(
     "/.well-known/api-catalog",
@@ -57,7 +57,7 @@ export const homepageLinks = [
       "application/openapi+json"
     ),
     linkHeader(
-      `${new URL(api.doc).pathname.replace(/\/$/, "")}/`,
+      new URL(api.doc).pathname.replace(/\/$/, ""),
       "service-doc",
       "text/html"
     ),
