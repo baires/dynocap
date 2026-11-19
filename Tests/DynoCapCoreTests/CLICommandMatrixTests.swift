@@ -75,7 +75,19 @@ final class CLICommandMatrixTests: XCTestCase {
             XCTAssertNoThrow(try parseCommand(["dynocap"] + sample), label)
             XCTAssertEqual(try parseCommand(["dynocap"] + path + ["--help"]).command, .help(topic: path), label)
             XCTAssertEqual(try parseCommand(["dynocap", "help"] + path).command, .help(topic: path), label)
-            XCTAssertTrue(commandHelp(path).contains(spec.usage), label)
+            let help = commandHelp(path)
+            XCTAssertTrue(help.hasPrefix("dynocap " + label + "\n"), label)
+            let sections = help.components(separatedBy: "\n")
+            let usage = try XCTUnwrap(sections.firstIndex(of: "USAGE"), label)
+            let examples = try XCTUnwrap(sections.firstIndex(of: "EXAMPLES"), label)
+            let details = try XCTUnwrap(sections.firstIndex(of: "DETAILS"), label)
+            let globals = try XCTUnwrap(sections.firstIndex(of: "GLOBAL OPTIONS"), label)
+            XCTAssertEqual([usage, examples, details, globals], [usage, examples, details, globals].sorted(), label)
+            XCTAssertEqual(sections[usage + 1], "  " + spec.usage, label)
+            XCTAssertTrue(try parseCommand(["dynocap"] + path + ["--help", "--no-color"]).noColor, label)
+            for args in [with(sample, "--no-color"), ["--no-color"] + sample] {
+                XCTAssertTrue(try parseCommand(["dynocap"] + args).noColor, label)
+            }
             XCTAssertThrowsError(try parseCommand(["dynocap"] + with(sample, "--bogus")), label) {
                 XCTAssertEqual(($0 as? DynoCapError)?.exitCode, 2, label)
                 XCTAssertTrue(($0 as? DynoCapError)?.message.contains("--bogus") == true, label)
@@ -150,7 +162,7 @@ final class CLICommandMatrixTests: XCTestCase {
             for args in [["help"] + path, path + ["--help"]] {
                 let result = try runCLI(home: home, args)
                 XCTAssertEqual(result.status, 0, label)
-                XCTAssertEqual(result.stdout, commandHelp(path) + "\n", label)
+                XCTAssertEqual(result.stdout, commandHelp(path), label)
                 XCTAssertEqual(result.stderr, "", label)
             }
             let bogus = try runCLI(home: home, with(sample, "--bogus"))

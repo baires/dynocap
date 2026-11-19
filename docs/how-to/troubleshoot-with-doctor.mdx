@@ -23,23 +23,23 @@ The runtime doctor checks is the one your project uses: `package.json` means `no
 ## Reading the Report
 
 ```text
-Home: /Users/you/.dynocap
-
-OK      platform           macOS 13+; guest architecture aarch64
-OK      signing            CLI signature validates and includes the virtualization entitlement.
-ERROR   images             The guest image for aarch64 does not match its manifest.
-                           Next: Run dynocap doctor --fix to build the guest image (downloads pinned Alpine files; needs Go).
-ERROR   daemon             The running daemon started before this dynocap binary was rebuilt, so it runs the old build.
-                           Next: Run dynocap doctor --fix to restart the daemon with this dynocap build.
-
-2 required checks failed. Run dynocap doctor --fix to repair them.
+Host needs attention
+  8 passed · 0 warnings · 1 failed
+  Home: /Users/you/.dynocap
+  ERROR  daemon  The running daemon started before this dynocap binary was rebuilt, so it runs the old build.
+    Next: Run dynocap doctor --fix to restart the daemon with this dynocap build.
+  OK  runtime  Prepared runtimes: shell:1.
+  Use --verbose to show passing checks.
 ```
 
-- `OK` passed; a stopped daemon or a home that does not exist yet is normal. `WARNING` is worth knowing but does not block sandboxes, such as having no runtime prepared outside a project. `ERROR` blocks sandboxes, and the command exits 1.
-- `Next:` is the one thing to do. When it names `dynocap doctor --fix`, the command already includes any `--home` or `--runtime` you passed, so you can paste it as printed.
-- The last line says whether `--fix` can repair everything, some of it, or nothing.
+`WARNING` reports a finding that allows sandbox use. `ERROR` blocks sandbox use
+and exits 1. Follow the `Next:` step for each finding. A suggested
+`dynocap doctor --fix` command includes the applicable `--home` or
+`--runtime` options.
 
-For scripts, `dynocap doctor --json` prints the same report. Each check has a `fix` field naming its automatic repair. See [JSON Schemas](../reference/cli/json-schemas.mdx).
+Run `dynocap doctor --verbose` to see every check in the terminal. For scripts,
+`dynocap doctor --json` includes every check and its automatic repair, if one is
+available. See [JSON Schemas](../reference/cli/json-schemas.mdx).
 
 ---
 

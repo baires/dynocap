@@ -4,18 +4,36 @@ struct InvocationPrefix {
     var home: String?
     var json = false
     var verbose = false
+    var noColor = false
     var help = false
     var version = false
 }
 
 public func parseCommand(_ args: [String]) throws -> CLIInvocation {
+    var invocation = try parseInvocation(args)
+    // Help and version can stop parsing early. Honor presentation flags after them too.
+    if invocation.command.isInformational, !invocation.noColor {
+        invocation.noColor = invocationRequestsNoColor(args)
+    }
+    return invocation
+}
+
+private extension CLICommand {
+    var isInformational: Bool {
+        switch self {
+        case .help, .version: return true
+        default: return false
+        }
+    }
+}
+
+private func parseInvocation(_ args: [String]) throws -> CLIInvocation {
     var prefix = InvocationPrefix()
     let rest = try peelLeadingGlobals(Array(args.dropFirst()), into: &prefix)
     if prefix.help {
-        let positionals = rest.filter { $0 != "--" && !$0.hasPrefix("-") }
-        let strict = positionals.first == "help"
-        let body = strict ? Array(positionals.dropFirst()) : positionals
-        return makeInvocation(prefix, .help(topic: try helpTopic(from: body, strict: strict)))
+        let strict = rest.first == "help"
+        let tokens = strict ? Array(rest.dropFirst()) : rest
+        return makeInvocation(prefix, .help(topic: try helpTopic(from: helpPositionals(tokens, limit: strict ? 3 : 2), strict: strict)))
     }
     if prefix.version {
         return makeInvocation(prefix, .version)
@@ -43,12 +61,13 @@ public func parseCommand(_ args: [String]) throws -> CLIInvocation {
         return try finishParse(prefix, [sub], .managed(command))
     case "runtime":
         let preparation = try parseRuntime(commandArgs, &prefix)
-        return try finishParse(prefix, runtimeHelpTopic(commandArgs), .runtimePrepare(preparation))
+        let path = prefix.help ? try groupHelpTopic("runtime", commandArgs) : ["runtime", "prepare"]
+        return try finishParse(prefix, path, .runtimePrepare(preparation))
     case "task":
         let command = try parseTask(commandArgs, &prefix)
         let path: [String]
         if prefix.help || prefix.version {
-            path = taskHelpTopic(commandArgs)
+            path = try groupHelpTopic("task", commandArgs)
         } else if case .task(let task) = command {
             path = ["task", task.op]
         } else {
@@ -92,7 +111,8 @@ func makeInvocation(_ prefix: InvocationPrefix, _ command: CLICommand) -> CLIInv
         home: prefix.home.map { URL(fileURLWithPath: $0) },
         command: command,
         output: prefix.json ? .json : .human,
-        verbose: prefix.verbose
+        verbose: prefix.verbose,
+        noColor: prefix.noColor
     )
 }
 
@@ -105,18 +125,23 @@ func finishParse(_ prefix: InvocationPrefix, _ path: [String], _ command: CLICom
     return makeInvocation(prefix, command)
 }
 
-func taskHelpTopic(_ args: [String]) -> [String] {
-    let positionals = args.filter { $0 != "--" && !$0.hasPrefix("-") }
-    if let op = positionals.first, ["start", "exec", "finish"].contains(op) {
-        return ["task", op]
+private func helpPositionals(_ args: [String], limit: Int) throws -> [String] {
+    var reader = OptionReader(args: args)
+    var positionals: [String] = []
+    while positionals.count < limit, let token = try reader.next() {
+        switch token {
+        case .separator: return positionals
+        case .positional(let value): positionals.append(value)
+        case .flag(let name, let inline):
+            if name == "--home" || name == "--runtime" { _ = try reader.value(name, inline) }
+        }
     }
-    return ["task"]
+    return positionals
 }
 
-func runtimeHelpTopic(_ args: [String]) -> [String] {
-    let positionals = args.filter { $0 != "--" && !$0.hasPrefix("-") }
-    if positionals.first == "prepare" { return ["runtime", "prepare"] }
-    return ["runtime"]
+private func groupHelpTopic(_ group: String, _ args: [String]) throws -> [String] {
+    guard let operation = try helpPositionals(args, limit: 1).first, cliSpec([group, operation]) != nil else { return [group] }
+    return [group, operation]
 }
 
 enum OptionToken {
@@ -167,7 +192,7 @@ func flagParts(_ token: String) throws -> (name: String, inline: String?)? {
 }
 
 func isGlobalFlag(_ name: String) -> Bool {
-    ["--help", "-h", "--version", "--verbose", "--json", "--home"].contains(name)
+    ["--help", "-h", "--version", "--verbose", "--no-color", "--json", "--home"].contains(name)
 }
 
 func peelLeadingGlobals(_ tokens: [String], into prefix: inout InvocationPrefix) throws -> [String] {
@@ -184,42 +209,11 @@ func peelLeadingGlobals(_ tokens: [String], into prefix: inout InvocationPrefix)
 func applyGlobal(
     _ name: String, _ inline: String?, tokens: [String], index: Int, prefix: inout InvocationPrefix
 ) throws -> Int {
-    switch name {
-    case "--help", "-h":
-        if inline != nil { throw usageError("\(name) does not take a value") }
-        prefix.help = true
-        return index + 1
-    case "--version":
-        if inline != nil { throw usageError("--version does not take a value") }
-        prefix.version = true
-        return index + 1
-    case "--verbose":
-        if inline != nil { throw usageError("--verbose does not take a value") }
-        prefix.verbose = true
-        return index + 1
-    case "--json":
-        if inline != nil { throw usageError("--json does not take a value") }
-        prefix.json = true
-        return index + 1
-    case "--home":
-        let value = try globalValue(name, inline, tokens: tokens, index: index)
-        if value.value.isEmpty { throw usageError("--home requires a path") }
-        prefix.home = value.value
-        return value.nextIndex
-    default:
+    var reader = OptionReader(args: tokens, index: index + 1)
+    guard try consumeGlobal(name, inline, reader: &reader, prefix: &prefix) else {
         throw usageError("unknown flag \(name)")
     }
-}
-
-func globalValue(
-    _ flag: String, _ inline: String?, tokens: [String], index: Int
-) throws -> (value: String, nextIndex: Int) {
-    if let inline { return (inline, index + 1) }
-    let next = index + 1
-    guard next < tokens.count, tokens[next] != "--", !(tokens[next].hasPrefix("-") && tokens[next] != "-") else {
-        throw usageError("\(flag) requires a value")
-    }
-    return (tokens[next], next + 1)
+    return reader.index
 }
 
 func consumeGlobal(
@@ -236,6 +230,9 @@ func consumeGlobal(
     case "--verbose":
         if inline != nil { throw usageError("--verbose does not take a value") }
         prefix.verbose = true
+    case "--no-color":
+        if inline != nil { throw usageError("--no-color does not take a value") }
+        prefix.noColor = true
     case "--json":
         if inline != nil { throw usageError("--json does not take a value") }
         prefix.json = true

@@ -192,12 +192,16 @@ public struct CLIInvocation: Equatable {
     public var home: URL?
     public var output: CLIOutput
     public var verbose: Bool
+    public var noColor: Bool
     public var command: CLICommand
 
-    public init(home: URL?, command: CLICommand, output: CLIOutput = .human, verbose: Bool = false) {
+    public init(
+        home: URL?, command: CLICommand, output: CLIOutput = .human, verbose: Bool = false, noColor: Bool = false
+    ) {
         self.home = home
         self.output = output
         self.verbose = verbose
+        self.noColor = noColor
         self.command = command
     }
 }

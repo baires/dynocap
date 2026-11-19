@@ -11,4 +11,8 @@ swift build -c release
 bin=".build/release/dynocap"
 codesign --sign - --entitlements entitlements/dynocap.entitlements --force "$bin"
 echo "signed $bin"
+legacy=".build/release/microvm"
+if [ -e "$legacy" ] && ! [ "$legacy" -ef "$bin" ]; then
+    printf 'warning: %s is a separate build artifact from before the rename. Use %s.\n' "$legacy" "$bin" >&2
+fi
 echo "next: $bin doctor --fix"

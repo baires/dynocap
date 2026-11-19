@@ -32,11 +32,14 @@ When `--json` is used on a management command, any validation or operational fai
 
 ## Human Error Format
 
-Without `--json`, failures write clean, human-readable diagnostics to `stderr` without stack traces or global help dumps:
+Without `--json`, failures write human-readable diagnostics to stderr.
+Terminal errors show the command, the failure, and a next action. Invalid
+arguments for a known command point to its help.
 
 ```text
-dynocap: rm: sandbox 'demo' is running; unexported changes would be lost
-Next: Export with 'dynocap finish demo' or discard with 'dynocap rm demo --force'.
+Error · rm
+  sandbox 'demo' is running; unexported changes would be lost
+  Next: Export with 'dynocap finish demo' or discard with 'dynocap rm demo --force'.
 ```
 
 ---

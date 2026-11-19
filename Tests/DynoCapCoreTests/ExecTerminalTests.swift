@@ -86,8 +86,8 @@ final class ExecTerminalTests: XCTestCase {
                      "5 minutes and 1 minute before expiry"] {
             XCTAssertTrue(help.contains(text), text)
         }
-        XCTAssertTrue(commandHelp([]).contains("dynocap shell demo"))
-        XCTAssertTrue(commandHelp([]).contains("dynocap shell NAME_OR_ID"))
+        XCTAssertTrue(commandHelp([]).contains("  shell "))
+        XCTAssertTrue(commandHelp(["workflow"]).contains("dynocap shell demo"))
     }
 
     func testShellRequiresATerminalOnStdinAndStdout() {

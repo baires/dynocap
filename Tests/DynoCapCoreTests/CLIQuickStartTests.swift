@@ -8,12 +8,12 @@ final class CLIQuickStartTests: XCTestCase {
 
     func testReadmeQuickStartIsTheHelpWorkflow() throws {
         let readme = try String(contentsOfFile: "README.md", encoding: .utf8)
-        let marker = try XCTUnwrap(readme.range(of: "<!-- quick start: kept identical to `dynocap help` by CLIQuickStartTests -->"))
+        let marker = try XCTUnwrap(readme.range(of: "<!-- quick start: kept identical to `dynocap help workflow` by CLIQuickStartTests -->"))
         let tail = readme[marker.upperBound...]
         let open = try XCTUnwrap(tail.range(of: "```sh\n"))
         let close = try XCTUnwrap(tail[open.upperBound...].range(of: "```"))
         XCTAssertEqual(String(tail[open.upperBound..<close.lowerBound]), quickStart + "\n")
-        let help = commandHelp([])
+        let help = commandHelp(["workflow"])
         let block = lines.map { "  " + $0 }.joined(separator: "\n")
         XCTAssertTrue(help.contains("WORKFLOW\n" + block + "\n\nRUNTIMES"), help)
     }

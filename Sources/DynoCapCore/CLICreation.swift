@@ -66,7 +66,7 @@ private struct CreationResult: Encodable {
 }
 
 public func formatCreationResult(
-    _ descriptor: TaskDescriptor, command: TaskCommand, home: URL, output: CLIOutput, now: Int64
+    _ descriptor: TaskDescriptor, command: TaskCommand, home: URL, output: CLIOutput, now: Int64, style: CLIStyle = .plain
 ) throws -> String {
     let source = CreationSource(
         kind: command.repositoryUrl == nil ? "directory" : "repository",
@@ -86,7 +86,7 @@ public func formatCreationResult(
         "Expiration discards unexported workspace edits. Run dynocap finish to export work before TTL expires.",
         "Next: \(next)",
     ]
-    return lines.map(creationText).joined(separator: "\n") + "\n"
+    return formatCreationSummary(lines, style: style)
 }
 
 private func creationLifetime(_ deadline: Int64?, now: Int64) -> String {
@@ -116,7 +116,7 @@ private struct RunResult: Encodable {
 }
 
 /// `run` reports a raw sandbox the way clone reports a project sandbox.
-public func formatRunResult(_ status: StatusResult, home: URL, output: CLIOutput, now: Int64) throws -> String {
+public func formatRunResult(_ status: StatusResult, home: URL, output: CLIOutput, now: Int64, style: CLIStyle = .plain) throws -> String {
     let next = "dynocap\(homeFlag(home)) exec \(shellWord(status.name)) -- uname -a"
     if output == .json {
         return try managementJSON(RunResult(status: status, nextCommand: next))
@@ -127,7 +127,7 @@ public func formatRunResult(_ status: StatusResult, home: URL, output: CLIOutput
         "A raw sandbox has no project result to export; expiration or removal discards everything in it.",
         "Next: \(next)",
     ]
-    return lines.map(creationText).joined(separator: "\n") + "\n"
+    return formatCreationSummary(lines, style: style)
 }
 
 private struct RemovalResult: Encodable {
@@ -137,10 +137,14 @@ private struct RemovalResult: Encodable {
 }
 
 /// `rm` and `destroy` send the same request and print the same result.
-public func formatRemovalResult(target: String, purged: Bool, output: CLIOutput) throws -> String {
+public func formatRemovalResult(target: String, purged: Bool, output: CLIOutput, style: CLIStyle = .plain) throws -> String {
     if output == .json { return try managementJSON(RemovalResult(target: target, purged: purged)) }
     let detail = purged ? "; deleted its retained record, logs, and result" : ""
-    return creationText("removed \(target)\(detail)") + "\n"
+    guard style.interactive else { return creationText("removed \(target)\(detail)") + "\n" }
+    return style.result(
+        creationText("Removed: \(target)"),
+        body: purged ? ["Deleted its retained record, logs, and result."] : [],
+        tone: .success)
 }
 
 private struct VersionResult: Encodable {
@@ -149,8 +153,13 @@ private struct VersionResult: Encodable {
     var virtualizationAvailable = DynoCapInfo.virtualizationAvailable
 }
 
-public func formatVersion(output: CLIOutput) throws -> String {
-    output == .json ? try managementJSON(VersionResult()) : DynoCapInfo.describe()
+public func formatVersion(output: CLIOutput, style: CLIStyle = .plain) throws -> String {
+    let result = VersionResult()
+    if output == .json { return try managementJSON(result) }
+    guard style.interactive else { return DynoCapInfo.describe() }
+    let availability = result.virtualizationAvailable ? "available" : "unavailable (requires macOS 13+)"
+    return style.result("dynocap \(result.version)", body: ["Guest architecture: \(result.guestArch)", "Virtualization: \(availability)"]
+        .map(style.label))
 }
 
 private struct RuntimePreparationResult: Encodable {
@@ -162,16 +171,25 @@ private struct RuntimePreparationResult: Encodable {
     var buildLogPath: String
 }
 
-public func formatRuntimePreparationResult(_ artifact: RuntimeArtifact, home: URL, log: URL, output: CLIOutput) throws -> String {
+public func formatRuntimePreparationResult(
+    _ artifact: RuntimeArtifact, home: URL, log: URL, output: CLIOutput, style: CLIStyle = .plain
+) throws -> String {
     let result = RuntimePreparationResult(
         runtimes: artifact.runtimes, arch: artifact.arch, artifactDigest: artifact.artifactDigest,
         directory: home.appendingPathComponent("runtimes").appendingPathComponent(artifact.artifactDigest).path, buildLogPath: log.path)
     if output == .json { return try managementJSON(result) }
-    return [
+    let lines = [
         "Runtime ready: " + artifact.runtimes.map { $0.name + ":" + $0.version }.joined(separator: ", "),
         "Architecture: \(result.arch)", "Verified artifact: \(result.artifactDigest)", "Directory: \(result.directory)",
         "Build log: \(log.path)", "Next: dynocap help clone",
-    ].map(creationText).joined(separator: "\n") + "\n"
+    ]
+    return formatCreationSummary(lines, style: style)
+}
+
+private func formatCreationSummary(_ lines: [String], style: CLIStyle) -> String {
+    let safe = lines.map(creationText)
+    guard style.interactive, let title = safe.first else { return safe.joined(separator: "\n") + "\n" }
+    return style.result(title, body: safe.dropFirst().map(style.label), tone: .success)
 }
 
 /// Capture both companion streams in one file, so they cannot corrupt CLI success or JSON errors.

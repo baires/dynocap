@@ -22,12 +22,19 @@ dynocap ls --home /tmp/mvm
 | Option         | Description                                                                                          |
 | :------------- | :--------------------------------------------------------------------------------------------------- |
 | `--home PATH`  | Directory holding daemon socket, images, and sandboxes. Defaults to `$DYNOCAP_HOME` or `~/.dynocap`. |
-| `--verbose`    | Emits detailed operational diagnostics to `stderr`.                                                  |
+| `--verbose`    | Shows every check in terminal `doctor` reports and adds diagnostics to errors.                       |
+| `--no-color`   | Disables DynoCap colors on both streams.                                                             |
 | `--help`, `-h` | Displays help message and exits 0 (does not start daemon).                                           |
 | `--version`    | Displays CLI and runtime version and exits 0. Accepts `--json`.                                      |
 | `--json`       | Requests structured JSON output on stdout (supported on management commands).                        |
 
 ---
+
+## Help
+
+Run `dynocap` for a command index, `dynocap <command> --help` for usage and
+examples, and `dynocap help workflow` for the full project walkthrough.
+`dynocap help advanced` lists raw sandbox commands, task aliases, and the daemon.
 
 ## Environment Variables
 
@@ -35,7 +42,7 @@ dynocap ls --home /tmp/mvm
 | :--------------- | :------------------------------------------------------------------ | :------------------- |
 | `DYNOCAP_HOME`   | Base directory for daemon socket, disks, and state records.         | `~/.dynocap`         |
 | `DYNOCAP_MKE2FS` | Explicit path to `mke2fs` binary for formatting ext4 virtual disks. | Resolved via `$PATH` |
-| `NO_COLOR`       | Disables colored human terminal output when set.                    | Unset                |
+| `NO_COLOR`       | Disables DynoCap color when set, even to an empty value.            | Unset                |
 | `TERM`           | If set to `dumb`, interactive escape sequences are disabled.        | Inherited from host  |
 
 ---
@@ -60,3 +67,14 @@ DynoCap follows standard POSIX exit status conventions:
 - **Stdout:** Reserved exclusively for command results (JSON payloads, raw exec stdout, unified diff patches).
 - **Stderr:** Reserved for human progress lines, execution warnings, and structured error payloads.
 - **Content vs. Management Commands:** Commands that output content streams (`exec`, `logs`, `diff`, `shell`) do not support `--json`. Management commands (`clone`, `finish`, `ls`, `inspect`, `rm`, `doctor`) support `--json`.
+
+Terminal formatting is determined separately for each output stream. Management
+results lead with a title, then details and a next action where one applies.
+Progress goes to stderr and results for longer operations include elapsed time.
+`--no-color` and `NO_COLOR=1` disable color while keeping the terminal layout.
+`TERM=dumb` disables the terminal layout. Redirected output uses plain text or
+the requested JSON schema.
+
+Guest commands and log replay write their content streams directly. The
+foreground daemon writes diagnostics to stderr. See
+[diff](/reference/cli/commands#dynocap-diff) for terminal patch review.

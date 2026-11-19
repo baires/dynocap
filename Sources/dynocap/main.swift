@@ -23,13 +23,34 @@ struct Main {
         }
     }
 
+    static func terminalStyle(_ fd: Int32, invocation: CLIInvocation? = nil, noColor: Bool = false) -> CLIStyle {
+        CLIStyle(
+            isTerminal: isatty(fd) == 1, environment: ProcessInfo.processInfo.environment,
+            output: invocation?.output ?? .human, noColor: invocation?.noColor ?? noColor)
+    }
+
+    static func showProgress(_ message: String, style: CLIStyle) {
+        fputs(style.progress(message) + "\n", stderr)
+    }
+
+    static func timedResult(_ text: String, since start: UInt64, style: CLIStyle) -> String {
+        guard style.interactive, let end = text.firstIndex(of: "\n") else { return text }
+        let milliseconds = (DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
+        let elapsed = milliseconds < 1_000 ? "\(milliseconds)ms" : formatDuration(Double(milliseconds) / 1_000)
+        return String(text[..<end]) + " " + style.paint("[\(elapsed)]", .muted) + text[end...]
+    }
+
     static func fail(_ error: Error, invocation: CLIInvocation? = nil) -> Never {
-        let result = formatCLIFailure(error, invocation: invocation, arguments: CommandLine.arguments)
+        let args = CommandLine.arguments
+        let style = terminalStyle(STDERR_FILENO, invocation: invocation, noColor: invocationRequestsNoColor(args))
+        let result = formatCLIFailure(error, invocation: invocation, arguments: args, style: style)
         fputs(result.text, stderr)
         exit(result.exitCode)
     }
 
     static func dispatch(_ invocation: CLIInvocation, _ args: [String]) throws {
+        let style = terminalStyle(STDOUT_FILENO, invocation: invocation)
+        let progressStyle = terminalStyle(STDERR_FILENO, invocation: invocation)
         switch invocation.command {
         case .logs(let command):
             let paths = try ready(invocation)
@@ -38,7 +59,7 @@ struct Main {
             let data = try DaemonClient(socketPath: paths.socket.path).task(request)
             let logs = try JSONDecoder().decode(ExecutionLogs.self, from: data)
             if command.list {
-                print(formatExecutionList(logs, arguments: args), terminator: "")
+                print(formatExecutionList(logs, arguments: args, style: style, home: paths.home), terminator: "")
             } else {
                 try replayExecutionLogs(
                     logs, execution: command.execution,
@@ -47,30 +68,36 @@ struct Main {
             }
         case .doctor(let request):
             try request.validate()
-            let report = request.fix ? doctorFix(request, invocation, args) : diagnose(request, invocation, args)
-            print(try formatDoctorReport(report, output: invocation.output, arguments: args), terminator: "")
+            let start = DispatchTime.now().uptimeNanoseconds
+            let report = request.fix ? doctorFix(request, invocation, args, style: progressStyle) : diagnose(request, invocation, args)
+            let result = try formatDoctorReport(report, output: invocation.output, arguments: args, style: style, verbose: invocation.verbose)
+            print(request.fix ? timedResult(result, since: start, style: style) : result, terminator: "")
             exit(report.ok ? 0 : 1)
-        case .ls:
+        case .ls, .ps:
             let paths = try ready(invocation)
             let data = try DaemonClient(socketPath: paths.socket.path).task(TaskCommand(op: "entries"))
             let entries = try JSONDecoder().decode([ManagedEntry].self, from: data)
+            let rawOnly = invocation.command == .ps
+            let visible = rawOnly ? entries.filter { $0.kind == "sandbox" } : entries
             if invocation.output == .json {
-                print(try formatSandboxListJSON(entries), terminator: "")
+                print(try formatSandboxListJSON(visible), terminator: "")
             } else {
-                print(formatSandboxList(entries, now: unixNow(), width: listingWidth()), terminator: "")
+                print(formatSandboxList(visible, now: unixNow(), width: terminalWidth(), style: style, rawOnly: rawOnly), terminator: "")
             }
         case .managed(let command), .task(let command), .destroy(let command):
             // Advanced forms (task start, task finish, destroy) run the same operations as clone, finish, and rm.
             try manage(command, invocation, args)
         case .runtimePrepare(let preparation):
             let paths = try ready(invocation)
-            let say: (String) -> Void = { if invocation.output == .human { fputs($0 + "\n", stderr) } }
+            let start = DispatchTime.now().uptimeNanoseconds
+            let say: (String) -> Void = { if invocation.output == .human { showProgress($0, style: progressStyle) } }
             let (artifact, log) = try prepareRuntime(preparation, paths: paths, args: args, say: say)
-            print(try formatRuntimePreparationResult(artifact, home: paths.home, log: log, output: invocation.output), terminator: "")
+            let result = try formatRuntimePreparationResult(artifact, home: paths.home, log: log, output: invocation.output, style: style)
+            print(timedResult(result, since: start, style: style), terminator: "")
         case .help(let topic):
-            print(commandHelp(topic))
+            print(commandHelp(topic, style: style, width: terminalWidth(fallback: 80)), terminator: "")
         case .version:
-            print(try formatVersion(output: invocation.output), terminator: "")
+            print(try formatVersion(output: invocation.output, style: style), terminator: "")
         case .daemon:
             if ProcessInfo.processInfo.environment["DYNOCAP_DETACH"] == "1" {
                 _ = setsid()
@@ -79,21 +106,13 @@ struct Main {
             let daemon = Daemon(home: paths.home, backend: makeBackend())
             try daemon.start()
             daemon.runForever()
-        case .ps:
-            let paths = try ready(invocation)
-            // ps is ls limited to raw sandboxes, so both share one listing and JSON schema.
-            let data = try DaemonClient(socketPath: paths.socket.path).task(TaskCommand(op: "entries"))
-            let entries = try JSONDecoder().decode([ManagedEntry].self, from: data).filter { $0.kind == "sandbox" }
-            if invocation.output == .json {
-                print(try formatSandboxListJSON(entries), terminator: "")
-            } else {
-                print(formatSandboxList(entries, now: unixNow(), width: listingWidth(), empty: "No raw sandboxes."), terminator: "")
-            }
         case .run(let request):
             let paths = try ready(invocation)
-            if invocation.output == .human { fputs(CreationStage.booting.rawValue + "\n", stderr) }
+            let start = DispatchTime.now().uptimeNanoseconds
+            if invocation.output == .human { showProgress(CreationStage.booting.rawValue, style: progressStyle) }
             let status = try DaemonClient(socketPath: paths.socket.path).run(request)
-            print(try formatRunResult(status, home: paths.home, output: invocation.output, now: unixNow()), terminator: "")
+            let result = try formatRunResult(status, home: paths.home, output: invocation.output, now: unixNow(), style: style)
+            print(timedResult(result, since: start, style: style), terminator: "")
         case .exec(let command), .taskExec(let command):
             try requireTerminalInput(command, stdinIsTerminal: isatty(STDIN_FILENO) == 1)
             let paths = try ready(invocation)
@@ -105,7 +124,7 @@ struct Main {
             try requireShellTerminal(stdinIsTerminal: isatty(STDIN_FILENO) == 1, stdoutIsTerminal: isatty(STDOUT_FILENO) == 1)
             let paths = try ready(invocation)
             let status = try foregroundExec(client: DaemonClient(socketPath: paths.socket.path), command: command)
-            fputs(shellExitNotice(command.name), stderr)
+            fputs(shellExitNotice(command.name, home: paths.home, style: progressStyle), stderr)
             exit(status)
         }
     }
@@ -157,17 +176,26 @@ struct Main {
     }
 
     /// Repairs what the first diagnosis marks fixable, then reports a fresh diagnosis with what was attempted.
-    static func doctorFix(_ request: DoctorRequest, _ invocation: CLIInvocation, _ args: [String]) -> DoctorReport {
+    static func doctorFix(_ request: DoctorRequest, _ invocation: CLIInvocation, _ args: [String], style: CLIStyle) -> DoctorReport {
         let before = diagnose(request, invocation, args)
         let executable = CLIExecutable.resolve(argument: args[0])
         let source = locateDynoCapSource(executable: executable, currentDirectory: URL(fileURLWithPath: FileManager.default.currentDirectoryPath))
         let paths = resolve(invocation)
         // Progress stays on stderr for JSON too, so stdout remains a single JSON document.
         let count = before.fixes.count
-        fputs(count == 0 ? "Nothing to repair automatically.\n" : "Repairing \(count) problem\(count == 1 ? "" : "s"):\n", stderr)
+        let summary = count == 0 ? "Nothing to repair automatically." : "Repairing \(count) problem\(count == 1 ? "" : "s"):"
+        showProgress(summary, style: style)
         let repairs = repairHost(before, progress: { fix, repair in
             if let repair {
-                fputs("\(repair.status) (\(formatDuration(repair.seconds)))\n", stderr)
+                let status = style.phase(repair.status)
+                let time = style.paint("(\(formatDuration(repair.seconds)))", .muted)
+                if style.interactive {
+                    fputs("  \(status) \(time)\n", stderr)
+                } else {
+                    fputs("\(status) \(time)\n", stderr)
+                }
+            } else if style.interactive {
+                showProgress(fix.action(before) + "...", style: style)
             } else {
                 fputs("  \(fix.action(before))... ", stderr)
             }
@@ -213,42 +241,66 @@ struct Main {
     /// Management operations shared by their primary and advanced forms.
     static func manage(_ command: TaskCommand, _ invocation: CLIInvocation, _ args: [String]) throws {
         var command = command
+        let style = terminalStyle(STDOUT_FILENO, invocation: invocation)
+        let progressStyle = terminalStyle(STDERR_FILENO, invocation: invocation)
         // Without --runtime the daemon chooses by the same rule; showing it here keeps the choice visible.
         if command.op == "start", command.runtimes == nil {
             let chosen = ProjectRuntime.choose(projectPath: command.projectPath)
             command.runtimes = [chosen.runtime]
-            if invocation.output == .human { fputs(chosen.note + "\n", stderr) }
+            if invocation.output == .human { showProgress(chosen.note, style: progressStyle) }
         }
         let paths = try ready(invocation)
         let client = DaemonClient(socketPath: paths.socket.path)
         try client.requireTaskManagement()
-        let progress: ((String) -> Void)? = invocation.output == .human && command.op == "start" ? { fputs($0 + "\n", stderr) } : nil
+        let progress: ((String) -> Void)? = invocation.output == .human && command.op == "start"
+            ? { showProgress($0, style: progressStyle) } : nil
+        let start = DispatchTime.now().uptimeNanoseconds
+        if command.op == "finish", progressStyle.interactive {
+            showProgress("Exporting the result and stopping the sandbox...", style: progressStyle)
+        }
         let data = try client.task(command, onProgress: progress)
         switch command.op {
         case "start":
             let descriptor = try JSONDecoder().decode(TaskDescriptor.self, from: data)
-            print(try formatCreationResult(
-                descriptor, command: command, home: paths.home, output: invocation.output, now: unixNow()), terminator: "")
+            let result = try formatCreationResult(
+                descriptor, command: command, home: paths.home, output: invocation.output, now: unixNow(), style: style)
+            print(timedResult(result, since: start, style: style), terminator: "")
         case "inspect":
             let inspection = try JSONDecoder().decode(SandboxInspection.self, from: data)
-            print(try formatInspection(inspection, output: invocation.output, now: unixNow(), arguments: args), terminator: "")
+            print(try formatInspection(inspection, output: invocation.output, now: unixNow(), arguments: args, style: style), terminator: "")
         case "finish":
             let descriptor = try JSONDecoder().decode(TaskDescriptor.self, from: data)
-            print(try formatFinishResult(descriptor, output: invocation.output, now: unixNow()), terminator: "")
+            let result = try formatFinishResult(descriptor, output: invocation.output, now: unixNow(), style: style)
+            print(timedResult(result, since: start, style: style), terminator: "")
         case "diff":
             let preview = try JSONDecoder().decode(TaskPreview.self, from: data)
-            let warning = sensitiveWarning(sensitiveChanges(resultDirectory: preview.directory))
+            let warning = sensitiveWarning(sensitiveChanges(resultDirectory: preview.directory), style: progressStyle)
             if !warning.isEmpty { FileHandle.standardError.write(Data((warning.joined(separator: "\n") + "\n").utf8)) }
             let file = try FileHandle(forReadingFrom: URL(fileURLWithPath: preview.patchPath))
             defer { try? file.close() }
             // On a terminal the patch is shown, not interpreted: escapes and hidden characters become visible text.
             var review = TerminalSanitizer.forTerminal(STDOUT_FILENO, mode: .review)
-            while let chunk = try file.read(upToCount: 64 << 10), !chunk.isEmpty {
-                try FileHandle.standardOutput.write(contentsOf: review?.filter(chunk) ?? chunk)
+            var highlight = style.enabled ? DiffHighlight() : nil
+            defer {
+                if let reset = highlight?.finish(), !reset.isEmpty {
+                    try? FileHandle.standardOutput.write(contentsOf: reset)
+                }
             }
-            if let rest = review?.finish() { try FileHandle.standardOutput.write(contentsOf: rest) }
+            var hasChanges = false
+            while let chunk = try file.read(upToCount: 64 << 10), !chunk.isEmpty {
+                hasChanges = true
+                let shown = review?.filter(chunk) ?? chunk
+                try FileHandle.standardOutput.write(contentsOf: highlight?.filter(shown) ?? shown)
+            }
+            if let rest = review?.finish() {
+                try FileHandle.standardOutput.write(contentsOf: highlight?.filter(rest) ?? rest)
+            }
+            if style.interactive, progressStyle.interactive, !hasChanges {
+                showProgress("No workspace changes.", style: progressStyle)
+            }
         case "remove":
-            print(try formatRemovalResult(target: command.id ?? "", purged: command.purge == true, output: invocation.output), terminator: "")
+            let result = try formatRemovalResult(target: command.id ?? "", purged: command.purge == true, output: invocation.output, style: style)
+            print(timedResult(result, since: start, style: style), terminator: "")
         default:
             print(String(data: data, encoding: .utf8) ?? "")
         }
@@ -384,10 +436,10 @@ struct Main {
         return nil
     }
 
-    static func listingWidth() -> Int {
+    static func terminalWidth(fallback: Int = 120) -> Int {
         var size = winsize()
         guard isatty(STDOUT_FILENO) == 1, ioctl(STDOUT_FILENO, TIOCGWINSZ, &size) == 0, size.ws_col > 0 else {
-            return 120
+            return fallback
         }
         return Int(size.ws_col)
     }
