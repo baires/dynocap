@@ -27,11 +27,15 @@ final class CLIHelpTests: XCTestCase {
             assertNoUnimplementedCommands(commandHelp(topic))
         }
         XCTAssertEqual(try parseCommand(["dynocap", "help", "advanced"]).command, .help(topic: ["advanced"]))
+        XCTAssertEqual(try parseCommand(["dynocap", "help", "workflow"]).command, .help(topic: ["workflow"]))
         let top = helpText
-        XCTAssertTrue(top.contains("dynocap exec"))
-        XCTAssertTrue(top.contains("npm ci --offline"))
+        XCTAssertTrue(top.contains("exec"))
+        XCTAssertTrue(top.contains("dynocap help workflow"))
+        XCTAssertLessThanOrEqual(top.split(separator: "\n", omittingEmptySubsequences: false).count, 32)
+        XCTAssertFalse(top.contains("npm ci --offline"))
+        XCTAssertTrue(commandHelp(["workflow"]).contains("npm ci --offline"))
         XCTAssertTrue(top.contains("dynocap help advanced"))
-        let clone = try XCTUnwrap(top.range(of: "dynocap clone"))
+        let clone = try XCTUnwrap(top.range(of: "clone"))
         let advanced = try XCTUnwrap(top.range(of: "dynocap help advanced"))
         XCTAssertLessThan(clone.lowerBound, advanced.lowerBound)
         assertNoUnimplementedCommands(top)
@@ -90,13 +94,30 @@ final class CLIHelpTests: XCTestCase {
         XCTAssertEqual(try parseCommand(["dynocap", "--version", "run"]).command, .version)
     }
 
+    func testGroupHelpSkipsOptionValues() throws {
+        for args in [
+            ["task", "--home", "/tmp/home", "exec", "--help"],
+            ["--help", "task", "--home=/tmp/home", "exec"],
+            ["task", "--help", "--home", "/tmp/home", "exec"],
+        ] {
+            XCTAssertEqual(try parseCommand(["dynocap"] + args).command, .help(topic: ["task", "exec"]))
+        }
+        for args in [
+            ["runtime", "--home", "/tmp/home", "prepare", "--help"],
+            ["runtime", "--runtime", "shell:1", "prepare", "--help"],
+        ] {
+            XCTAssertEqual(try parseCommand(["dynocap"] + args).command, .help(topic: ["runtime", "prepare"]))
+        }
+    }
+
     func testGuestArgumentsStayByteForByte() throws {
-        let guest = ["--home", "/tmp", "--json", "--help", "-h", "--", "--verbose=1", ""]
+        let guest = ["--home", "/tmp", "--json", "--no-color", "--help", "-h", "--", "--verbose=1", ""]
         let exec = try parseCommand(["dynocap", "--home", "/tmp/host", "exec", "demo", "--"] + guest)
         guard case .exec(let command) = exec.command else { return XCTFail("expected exec") }
         XCTAssertEqual(command.argv, guest)
         XCTAssertEqual(exec.home?.path, "/tmp/host")
         XCTAssertFalse(exec.verbose)
+        XCTAssertFalse(exec.noColor)
         XCTAssertEqual(exec.output, .human)
 
         let swallowed = try parseCommand(["dynocap", "exec", "demo", "uname", "--home", "/tmp"])

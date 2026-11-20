@@ -58,9 +58,19 @@ private func listingCell(_ value: String) -> String {
 }
 
 public func formatSandboxList(
-    _ entries: [ManagedEntry], now: Int64, width: Int = 120, empty: String = "No sandboxes or retained results."
+    _ entries: [ManagedEntry], now: Int64, width: Int = 120, style: CLIStyle = .plain, rawOnly: Bool = false
 ) -> String {
-    guard !entries.isEmpty else { return empty + "\n" }
+    let title = rawOnly ? "Raw sandboxes" : "Sandboxes and results"
+    func render(_ lines: [String]) -> String {
+        style.interactive ? style.result(title, body: lines) : lines.joined(separator: "\n") + "\n"
+    }
+    guard !entries.isEmpty else {
+        let empty = rawOnly ? "No raw sandboxes." : "No sandboxes or retained results."
+        guard style.interactive else { return empty + "\n" }
+        let next = rawOnly ? "dynocap help run" : "dynocap help workflow"
+        return style.result(empty, body: [style.action("Next", next)])
+    }
+    let availableWidth = max(1, width - (style.interactive ? 2 : 0))
     let headers = ["NAME/ID", "PHASE", "RUNTIME", "NETWORK", "TTL", "RETENTION", "RESULT"]
     let rows = sortedListing(entries).map { entry in
         [
@@ -72,18 +82,30 @@ public func formatSandboxList(
     let widths = headers.indices.map { column in
         ([headers] + rows).map { $0[column].count }.max() ?? 0
     }
-    if widths.reduce(0, +) + (headers.count - 1) * 2 <= width {
-        return ([headers] + rows).map { row in
+    func styledValue(_ value: String, column: Int) -> String {
+        if column == 1 { return style.phase(value) }
+        if (column == 4 || column == 5) && value == "expired" { return style.paint(value, .warning) }
+        return value
+    }
+    if widths.reduce(0, +) + (headers.count - 1) * 2 <= availableWidth {
+        let lines = ([headers] + rows).enumerated().map { index, row in
             row.enumerated().map { column, value in
-                column == headers.count - 1 ? value : value.padding(toLength: widths[column], withPad: " ", startingAt: 0)
+                let cell = index == 0 ? style.paint(value, .heading) : styledValue(value, column: column)
+                let padding = column == headers.count - 1 ? 0 : max(0, widths[column] - value.count)
+                return cell + String(repeating: " ", count: padding)
             }.joined(separator: "  ")
-        }.joined(separator: "\n") + "\n"
+        }
+        return render(lines)
     }
     // A labeled layout preserves full identifiers and paths when columns cannot fit.
-    let limit = max(1, width)
-    return rows.map { row in
-        zip(headers, row).map { label, value in
-            var text = "\(label): \(value)"
+    let limit = availableWidth
+    let lines = rows.map { row in
+        row.enumerated().map { column, value in
+            let label = headers[column] + ":"
+            var text = "\(label) \(value)"
+            if text.count <= limit {
+                return style.paint(label, .heading) + " " + styledValue(value, column: column)
+            }
             var lines: [String] = []
             while !text.isEmpty {
                 lines.append(String(text.prefix(limit)))
@@ -91,5 +113,6 @@ public func formatSandboxList(
             }
             return lines.joined(separator: "\n")
         }.joined(separator: "\n")
-    }.joined(separator: "\n\n") + "\n"
+    }.joined(separator: "\n\n")
+    return render(lines.components(separatedBy: "\n"))
 }

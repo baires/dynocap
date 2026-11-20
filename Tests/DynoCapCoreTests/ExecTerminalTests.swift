@@ -86,8 +86,8 @@ final class ExecTerminalTests: XCTestCase {
                      "5 minutes and 1 minute before expiry"] {
             XCTAssertTrue(help.contains(text), text)
         }
-        XCTAssertTrue(commandHelp([]).contains("dynocap shell demo"))
-        XCTAssertTrue(commandHelp([]).contains("dynocap shell NAME_OR_ID"))
+        XCTAssertTrue(commandHelp([]).contains("  shell "))
+        XCTAssertTrue(commandHelp(["workflow"]).contains("dynocap shell demo"))
     }
 
     func testShellRequiresATerminalOnStdinAndStdout() {
@@ -510,7 +510,7 @@ final class ExecTerminalTests: XCTestCase {
         pty.type("q")
         XCTAssertEqual(pty.wait(), 0, pty.text)
         XCTAssertTrue(pty.waitFor("left the shell; demo is still running"), pty.text)
-        XCTAssertTrue(pty.text.contains("dynocap finish demo") && pty.text.contains("dynocap rm demo --force"), pty.text)
+        XCTAssertTrue(pty.waitFor("dynocap --home \(harness.home.path) inspect demo"), pty.text)
         XCTAssertTrue(sameSettings(before, try pty.settings()))
         XCTAssertEqual(harness.backend.cancelled, [])
         XCTAssertEqual(try harness.client.ps().first { $0.name == "demo" }?.phase, .running, "leaving does not end the sandbox")
@@ -706,7 +706,10 @@ private final class PTYProcess {
         self.ptmx = ptmx
         self.pts = pts
         let handle = FileHandle(fileDescriptor: pts, closeOnDealloc: false)
-        process.executableURL = URL(fileURLWithPath: ProcessInfo.processInfo.environment["DYNOCAP_BIN"] ?? ".build/debug/dynocap")
+        var environment = ProcessInfo.processInfo.environment
+        environment["TERM"] = "xterm"
+        process.environment = environment
+        process.executableURL = URL(fileURLWithPath: environment["DYNOCAP_BIN"] ?? ".build/debug/dynocap")
         process.arguments = ["--home", home.path] + args
         process.standardInput = handle
         process.standardOutput = handle

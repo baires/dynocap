@@ -49,8 +49,8 @@ final class CLITests: XCTestCase {
 
     func testHelpMentionsExec() throws {
         XCTAssertEqual(try parseCommand(["dynocap"]).command, .help(topic: []))
-        XCTAssertTrue(helpText.contains("dynocap exec"))
-        XCTAssertTrue(helpText.contains("dynocap exec demo -- npm test"))
+        XCTAssertTrue(helpText.contains("  exec "))
+        XCTAssertTrue(commandHelp(["workflow"]).contains("dynocap exec demo -- npm test"))
     }
 }
 

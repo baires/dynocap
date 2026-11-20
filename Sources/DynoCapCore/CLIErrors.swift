@@ -15,6 +15,8 @@ private struct CLIErrorResult: Encodable {
 struct CLIFailureOptions {
     var json: Bool
     var verbose: Bool
+    var noColor: Bool
+    var helpPath: [String]
     var secrets: [String]
 }
 
@@ -27,9 +29,10 @@ func cliFailureOptions(_ args: [String]) -> CLIFailureOptions {
     var index = 1
     var json = false
     var verbose = false
+    var noColor = false
     var command: String?
     var positionals = 0
-    var taskOperation: String?
+    var subcommand: String?
     let valued = ["--home", "--env", "--git-token-env", "--ssh-key", "--runtime", "--network", "--ttl", "--timeout",
                   "--boot-timeout", "--cwd", "--cpus", "--memory", "--ref", "--history", "--name", "--exec"]
     while index < args.count {
@@ -39,6 +42,7 @@ func cliFailureOptions(_ args: [String]) -> CLIFailureOptions {
         let flag = parts[0]
         if flag == "--json", parts.count == 1 { json = true }
         if flag == "--verbose", parts.count == 1 { verbose = true }
+        if flag == "--no-color", parts.count == 1 { noColor = true }
         if valued.contains(flag) {
             let value = parts.count == 2 ? parts[1] : (index + 1 < args.count ? args[index + 1] : "")
             if flag == "--env" {
@@ -53,15 +57,20 @@ func cliFailureOptions(_ args: [String]) -> CLIFailureOptions {
                 command = token
             } else {
                 positionals += 1
-                if command == "task", positionals == 1 { taskOperation = token }
+                if positionals == 1 { subcommand = token }
                 // exec also permits the guest command without an explicit separator.
                 if command == "exec", positionals == 2 { break }
-                if command == "task", taskOperation == "exec", positionals == 3 { break }
+                if command == "task", subcommand == "exec", positionals == 3 { break }
             }
         }
         index += 1
     }
-    return CLIFailureOptions(json: json, verbose: verbose, secrets: secrets)
+    var path = command.map { [$0] } ?? []
+    if let command, ["task", "runtime"].contains(command), let subcommand, cliSpec([command, subcommand]) != nil {
+        path.append(subcommand)
+    }
+    if cliSpec(path) == nil && path != ["task"] && path != ["runtime"] { path = [] }
+    return CLIFailureOptions(json: json, verbose: verbose, noColor: noColor, helpPath: path, secrets: secrets)
 }
 
 func safeDiagnostic(_ text: String, secrets: [String]) -> String {
@@ -84,7 +93,7 @@ func safeDiagnostic(_ text: String, secrets: [String]) -> String {
 }
 
 public func formatCLIFailure(
-    _ error: Error, invocation: CLIInvocation? = nil, arguments: [String]
+    _ error: Error, invocation: CLIInvocation? = nil, arguments: [String], style: CLIStyle = .plain
 ) -> (text: String, exitCode: Int32) {
     let options = cliFailureOptions(arguments)
     let json = invocation?.output == .json || (invocation == nil && options.json)
@@ -107,9 +116,17 @@ public func formatCLIFailure(
             return (text + "\n", failure.exitCode)
         }
     }
-    var text = "dynocap: \(operation): \(failure.message)\nNext: \(failure.recovery)\n"
-    if verbose {
-        text += "dynocap: code=\(failure.code.rawValue) operation=\(operation) source=\(source); exit \(failure.exitCode)\n"
+    let diagnostic = "dynocap: code=\(failure.code.rawValue) operation=\(operation) source=\(source); exit \(failure.exitCode)"
+    let path = options.helpPath.joined(separator: " ")
+    let recovery = failure.code == .usage && failure.recovery == DynoCapErrorCode.usage.recovery
+        ? (path.isEmpty ? "Run dynocap help." : "Run dynocap \(path) --help.") : failure.recovery
+    let text: String
+    if style.interactive {
+        let title = "Error · " + (path.isEmpty ? operation : path)
+        let body = [failure.message, style.action("Next", recovery)] + (verbose ? [style.paint(diagnostic, .muted)] : [])
+        text = style.result(title, body: body, tone: .error)
+    } else {
+        text = "dynocap: \(operation): \(failure.message)\nNext: \(recovery)\n" + (verbose ? diagnostic + "\n" : "")
     }
     return (text, failure.exitCode)
 }

@@ -1,8 +1,12 @@
 import Foundation
 
-public func formatExecutionList(_ logs: ExecutionLogs, arguments: [String] = []) -> String {
-    guard !logs.executions.isEmpty else { return "No recorded executions for \(logs.name ?? logs.id).\n" }
+public func formatExecutionList(
+    _ logs: ExecutionLogs, arguments: [String] = [], style: CLIStyle = .plain, home: URL? = nil
+) -> String {
     let secrets = cliFailureOptions(arguments).secrets
+    let name = safeDiagnostic(logs.name ?? logs.id, secrets: secrets)
+    guard !logs.executions.isEmpty else { return "No recorded executions for \(name).\n" }
+    var replayID: Int?
     var lines = ["EXEC  STATE  STARTED (UTC)  EXIT  STDOUT_BYTES  STDERR_BYTES  INTEGRITY  FORMAT  COMMAND"]
     for execution in logs.executions {
         let integrity: String
@@ -19,9 +23,30 @@ public func formatExecutionList(_ logs: ExecutionLogs, arguments: [String] = [])
             String(execution.id), execution.state, date, exit, stdoutBytes, stderrBytes, integrity,
             execution.format, execution.command,
         ]
-        lines.append(columns.map { safeDiagnostic($0, secrets: secrets) }.joined(separator: "  "))
+        let safe = columns.map { safeDiagnostic($0, secrets: secrets) }
+        if style.interactive {
+            let state = style.phase(safe[1])
+            let integrityTone: CLIStyle.Tone = integrity == "complete" ? .muted : .warning
+            let bytes = terminal ? "\(safe[4]) B" : "\(safe[4]) B out / \(safe[5]) B err"
+            let exitTone: CLIStyle.Tone = execution.exitCode.map { $0 == 0 ? .success : .error } ?? .muted
+            let exitText = style.paint("exit " + safe[3], exitTone)
+            lines.append("#\(safe[0])  \(state)  \(exitText)  \(safe[2])  " + style.paint(integrity, integrityTone))
+            lines.append("  \(safe[8])  " + style.paint("[\(safe[7]), \(bytes)]", .muted))
+            if integrity == "complete", execution.state != "running", terminal || execution.format == "separate" {
+                replayID = execution.id
+            }
+        } else {
+            lines.append(safe.joined(separator: "  "))
+        }
     }
-    return lines.joined(separator: "\n") + "\n"
+    guard style.interactive else { return lines.joined(separator: "\n") + "\n" }
+    var body = Array(lines.dropFirst())
+    if let replayID {
+        let homeOption = home.map(homeFlag) ?? ""
+        let command = "dynocap\(homeOption) logs \(shellWord(logs.id)) --exec \(replayID)"
+        body.append(style.action("Replay", safeDiagnostic(command, secrets: secrets)))
+    }
+    return style.result("Executions: \(name)", body: body)
 }
 
 /// Copies each ordinary stream independently. It does not claim to restore cross-stream chronology.

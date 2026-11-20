@@ -100,10 +100,10 @@ A push to `main` opens or updates `chore: release vX.Y.Z`, which writes that ver
 ## Quick start
 
 After `dynocap` is on your PATH, the repository workflow below is the same one
-`dynocap help` prints. `./project` is your project, with a `package-lock.json`
+`dynocap help workflow` prints. `./project` is your project, with a `package-lock.json`
 and `node_modules/` in `.gitignore`.
 
-<!-- quick start: kept identical to `dynocap help` by CLIQuickStartTests -->
+<!-- quick start: kept identical to `dynocap help workflow` by CLIQuickStartTests -->
 
 ```sh
 dynocap doctor --fix ./project                     # builds the guest image and the runtime ./project uses
@@ -340,9 +340,9 @@ dynocap shell demo
 sandboxes, with no command deadline; leaving it keeps the sandbox running until
 `finish`, `rm --force`, or its TTL. See [interactive shells guide](docs/how-to/interactive-shells-and-terminal.mdx).
 
-`dynocap help run` and `dynocap run --help` show the same command help. Top-level help
-teaches the repository workflow; `dynocap help advanced` lists raw sandboxes, task
-commands, and the daemon. `--home`, `--verbose`, `--help`, and `--version` work
+`dynocap help run` and `dynocap run --help` show the same command help. Top-level help lists the main commands. Use `dynocap help workflow` for the
+full quick start and `dynocap help advanced` for raw sandboxes, task commands,
+and the daemon. `--home`, `--no-color`, `--verbose`, `--help`, and `--version` work
 before or after the subcommand. Valued options accept `--flag value` and
 `--flag=value`. Arguments after `exec`'s `--` are the guest command, unchanged,
 even when they look like dynocap flags. Invalid usage exits 2 and names the

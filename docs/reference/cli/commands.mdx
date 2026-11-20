@@ -18,7 +18,7 @@ Every exposed command, its output, and whether it accepts `--json`.
 | `dynocap inspect`         | primary  | Inspection                                 | yes      | [JSON Schemas](json-schemas.mdx)                 |
 | `dynocap exec`            | primary  | Guest stdout                               | no       | Content stream                                   |
 | `dynocap shell`           | primary  | Guest terminal                             | no       | Interactive terminal                             |
-| `dynocap diff`            | primary  | Patch bytes                                | no       | Content stream                                   |
+| `dynocap diff`            | primary  | Terminal review or raw patch bytes         | no       | Content stream                                   |
 | `dynocap finish`          | primary  | Finish result                              | yes      | [JSON Schemas](json-schemas.mdx)                 |
 | `dynocap rm`              | primary  | Removal result                             | yes      | [JSON Schemas](json-schemas.mdx)                 |
 | `dynocap run`             | advanced | Raw sandbox creation result                | yes      | [JSON Schemas](json-schemas.mdx)                 |
@@ -102,7 +102,12 @@ Output a unified Git diff of all changes made in `/workspace` since creation.
 dynocap diff NAME
 ```
 
-- **Output:** Streams clean, standard unified diff bytes (`diff --git ...`) directly to `stdout`.
+- Piping or redirecting stdout streams the original unified patch bytes.
+- A terminal highlights additions, deletions, and hunk markers. Control
+  characters are displayed visibly during terminal review, including with
+  `NO_COLOR` or `TERM=dumb`.
+- With both streams attached to a terminal, an empty patch reports
+  `No workspace changes.` on stderr.
 - **Note:** Does not alter, stop, or finish the running sandbox.
 
 ---
@@ -135,7 +140,7 @@ dynocap logs NAME [options]
 ```
 
 - **Options:**
-  - `--list`: Print a table of all recorded command executions for this task.
+  - `--list`: List recorded executions, outcomes, and log integrity. In a terminal, the listing suggests a replay command when a complete log is available.
   - `--exec <ID>`: Replay stdout and stderr of a specific zero-based execution index.
 - **Default:** Replays stdout and stderr of the most recent execution.
 
@@ -151,14 +156,14 @@ dynocap ls [options]
 
 - **Options:**
   - `--json`: Output listing array as JSON.
-- **Output Columns:**
+- **Human output:**
   - `NAME/ID`: Friendly name or immutable ID.
-  - `KIND`: `task` (project task) or `sandbox` (raw).
   - `PHASE`: `booting`, `running`, `stopping`, `stopped`, `completed`, or `failed`.
   - `RUNTIME`: Runtime identifier (e.g. `node:24` or `minimal`).
   - `NETWORK`: `none`, `filtered`, or `nat`.
   - `TTL`: Remaining time until sandbox expiration.
   - `RETENTION`: Remaining time until retained host results expire (7 days from creation).
+  - `RESULT`: Path to the exported result where available.
 
 ---
 
@@ -192,7 +197,9 @@ dynocap rm NAME_OR_ID [options]
 
 ### `dynocap doctor`
 
-Check that this Mac can run sandboxes. Each failed check says what is wrong and what to run next. Without `--fix`, doctor changes nothing.
+Check that this Mac can run sandboxes. Terminal output shows a summary, problems
+with recovery commands, and runtime information. Use `--verbose` to see every
+check. Without `--fix`, doctor changes nothing.
 
 ```sh
 dynocap doctor [PROJECT] [options]

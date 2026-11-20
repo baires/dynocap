@@ -37,13 +37,13 @@ public func sensitiveChanges(resultDirectory: String) -> [SensitiveChange] {
 }
 
 /// Human warning lines for flagged changes; empty when nothing is flagged.
-public func sensitiveWarning(_ changes: [SensitiveChange]) -> [String] {
+public func sensitiveWarning(_ changes: [SensitiveChange], style: CLIStyle = .plain) -> [String] {
     guard !changes.isEmpty else { return [] }
-    return ["Review carefully before applying. These changes can run code on this Mac or in CI:"]
+    return [style.paint("Review carefully before applying. These changes can run code on this Mac or in CI:", .warning)]
         + changes.map { "  \(finishText($0.kind)) \(finishText($0.path)): \(finishText($0.reason))" }
 }
 
-public func formatFinishResult(_ descriptor: TaskDescriptor, output: CLIOutput, now: Int64) throws -> String {
+public func formatFinishResult(_ descriptor: TaskDescriptor, output: CLIOutput, now: Int64, style: CLIStyle = .plain) throws -> String {
     let directory = descriptor.resultDirectory
     let patch = directory.map { URL(fileURLWithPath: $0).appendingPathComponent("changes.patch").path }
     let quoted = patch.map(shellQuote) ?? shellQuote("unavailable")
@@ -71,15 +71,16 @@ public func formatFinishResult(_ descriptor: TaskDescriptor, output: CLIOutput, 
         "Result retention: \(remaining) (\(date))",
         "The patch applies only to a checkout matching the imported baseline, including uncommitted changes that were imported. "
             + "dynocap does not modify the host checkout.",
-    ] + sensitiveWarning(sensitive) + [
-        "Apply: \(apply)",
     ]
     if priorCommandFailure {
         lines.insert(
             "Guest commands failed before export. The result was still exported; this is not an export or teardown failure.",
             at: 3)
     }
-    return lines.joined(separator: "\n") + "\n"
+    let warnings = sensitiveWarning(sensitive, style: style)
+    guard style.interactive else { return (lines + warnings + ["Apply: \(apply)"]).joined(separator: "\n") + "\n" }
+    let body = lines.dropFirst().map(style.label) + warnings + [style.action("Apply", finishText(apply))]
+    return style.result(lines[0], body: body, tone: .success)
 }
 
 private func finishRetention(_ seconds: Int64) -> String {

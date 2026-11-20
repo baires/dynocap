@@ -43,7 +43,7 @@ private struct InspectionJSON: Encodable {
 }
 
 public func formatInspection(
-    _ inspection: SandboxInspection, output: CLIOutput, now: Int64, arguments: [String] = []
+    _ inspection: SandboxInspection, output: CLIOutput, now: Int64, arguments: [String] = [], style: CLIStyle = .plain
 ) throws -> String {
     var value = inspection
     let secrets = cliFailureOptions(arguments).secrets
@@ -87,5 +87,7 @@ public func formatInspection(
     default: break
     }
     if let message = value.message { lines.append("Message: \(message)") }
-    return lines.map(safe).joined(separator: "\n") + "\n"
+    let details = lines.map(safe)
+    guard style.interactive else { return details.joined(separator: "\n") + "\n" }
+    return style.result(safe("Sandbox: \(value.name ?? value.id)"), body: details.dropFirst().map(style.label))
 }

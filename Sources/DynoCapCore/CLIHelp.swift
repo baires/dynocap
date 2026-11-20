@@ -48,39 +48,38 @@ public func invocationRequestsVerbose(_ args: [String]) -> Bool {
     cliFailureOptions(args).verbose
 }
 
+public func invocationRequestsNoColor(_ args: [String]) -> Bool {
+    args.contains("--no-color") && cliFailureOptions(args).noColor
+}
+
 public var helpText: String { commandHelp([]) }
 
-public func commandHelp(_ topic: [String]) -> String {
+public func commandHelp(_ topic: [String], style: CLIStyle = .plain, width: Int = 80) -> String {
+    let layout = HelpLayout(style: style, width: min(96, max(40, width)))
     switch topic {
     case []:
-        return topLevelHelp()
+        return topLevelHelp(layout)
     case ["advanced"]:
-        return advancedHelp()
+        return layout.index("dynocap help advanced", commands: cliCommandSpecs.filter { $0.group == .advanced })
+    case ["workflow"]:
+        return layout.guide()
     case ["task"]:
-        return groupHelp(
-            "task",
-            "Project-task operations that overlap clone, exec, and finish.",
-            [["task", "start"], ["task", "exec"], ["task", "finish"]]
-        )
+        return layout.index("dynocap task", commands: cliCommandSpecs.filter { $0.path.first == "task" })
     case ["runtime"]:
-        return groupHelp(
-            "runtime",
-            "Prepare the runtime disk a sandbox expects. Clone does not download one for you.",
-            [["runtime", "prepare"]]
-        )
+        return layout.index("dynocap runtime", commands: cliCommandSpecs.filter { $0.path.first == "runtime" })
     default:
         guard let spec = cliSpec(topic) else {
             return "unknown command \(topic.joined(separator: " "))\n"
         }
-        return render(spec)
+        return layout.command(spec)
     }
 }
 
 func helpTopic(from positionals: [String], strict: Bool) throws -> [String] {
     if positionals.isEmpty { return [] }
-    if positionals[0] == "advanced" {
+    if ["advanced", "workflow"].contains(positionals[0]) {
         if strict && positionals.count > 1 { throw usageError("unexpected argument \(positionals[1])") }
-        return ["advanced"]
+        return [positionals[0]]
     }
     if positionals[0] == "task" || positionals[0] == "runtime" {
         if positionals.count == 1 { return [positionals[0]] }
@@ -174,8 +173,12 @@ let cliCommandSpecs: [CLICommandSpec] = [
             CLIFlag(name: "--ssh-key", value: "PATH", summary: "Private key used only for an ssh guest fetch."),
         ],
         examples: [
-            "dynocap clone ./project demo --runtime node:24 --network none --ttl 1800 --cpus 2 --memory 1024 --history head --json",
-            "dynocap clone git@github.com:org/repo.git demo --network nat --ref main --git-token-env DYNOCAP_EXAMPLE_TOKEN --ssh-key /tmp/key",
+            "dynocap clone ./project demo",
+            "dynocap clone ./project demo --runtime node:24 --history head",
+            "dynocap clone ./project demo --ttl 600 --cpus 2 --memory 1024 --json",
+            "dynocap clone https://github.com/org/repo.git demo --network filtered --ref main",
+            "dynocap clone https://github.com/org/repo.git demo --network filtered --git-token-env DYNOCAP_EXAMPLE_TOKEN",
+            "dynocap clone git@github.com:org/repo.git demo --network nat --ssh-key /tmp/key",
         ],
         discussion: networkChoice
             + " Names match [A-Za-z0-9][A-Za-z0-9._-]* and cannot start with task- or runtime-."
@@ -203,7 +206,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
         TTL is the sandbox deadline; RETENTION is the independent retained-record/result deadline, measured from creation.
         A dash means unavailable or not applicable. JSON is an array with explicit nulls and Unix-second deadlines;
         see docs/reference/cli/json-schemas.mdx. JSON failures use stderr; see docs/reference/cli/errors.mdx.
-        Human output is plain text without color or paging.
+        Terminal output highlights phases and expired deadlines. Use --no-color to disable highlighting.
         """,
         allowsJSON: true
     ),
@@ -223,7 +226,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
         The runtime is the one PROJECT (default: the current directory) uses, judged as clone does: package.json is node:24;
         pyproject.toml, uv.lock, requirements.txt, setup.py, or Pipfile is python:3.14; go.mod is go:1.27. With no project,
         doctor lists prepared runtimes and requires none.
-        Each failed check says what is wrong and what to run next. A stopped daemon is normal; a broken or outdated daemon is an error.
+        Terminal reports lead with problems and the runtime. --verbose shows every check. A stopped daemon is normal; a broken or outdated daemon is an error.
         Without --fix, doctor changes nothing: it does not create the home, start a daemon or guest, or download anything.
         With --fix, doctor repairs fixable checks, then checks again. Builds need the dynocap checkout and Go, and download pinned,
         verified inputs. It never restarts a daemon that has running sandboxes. Progress goes to stderr; the report goes to stdout.
@@ -320,7 +323,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
         usage: "dynocap diff NAME_OR_ID",
         flags: [],
         examples: ["dynocap diff demo"],
-        discussion: "The patch is the command's stdout. diff does not destroy the sandbox."
+        discussion: "Terminals highlight the patch for review. Redirect stdout to save the original patch. The sandbox keeps running."
     ),
     CLICommandSpec(
         path: ["finish"],
@@ -464,9 +467,10 @@ let cliCommandSpecs: [CLICommandSpec] = [
             CLIFlag(name: "--ssh-key", value: "PATH", summary: "Private key used only for an ssh guest fetch."),
         ],
         examples: [
-            "dynocap task start /tmp/project --name demo --runtime node:24 --network none --ttl 1800 "
-                + "--cpus 2 --memory 1024 --history head --ref main --ssh-key /tmp/key --git-token-env DYNOCAP_EXAMPLE_TOKEN",
-            "dynocap task start /tmp/project --name demo --json",
+            "dynocap task start ./project --name demo --runtime node:24 --history head",
+            "dynocap task start ./project --ttl 600 --cpus 2 --memory 1024 --json",
+            "dynocap task start https://github.com/org/repo.git --network filtered --ref main --git-token-env DYNOCAP_EXAMPLE_TOKEN",
+            "dynocap task start git@github.com:org/repo.git --network nat --ssh-key /tmp/key",
         ],
         discussion: networkChoice + " Creation, progress, output, and JSON are the same as clone; see docs/reference/cli/json-schemas.mdx."
             + " Prefer clone when choosing a name up front.",
@@ -520,7 +524,7 @@ let cliCommandSpecs: [CLICommandSpec] = [
         summary: "Show help for a command.",
         usage: "dynocap help [COMMAND]",
         flags: [],
-        examples: ["dynocap help", "dynocap help clone", "dynocap clone --help"],
+        examples: ["dynocap help", "dynocap help clone", "dynocap clone --help", "dynocap help workflow", "dynocap help advanced"],
         discussion: "dynocap help COMMAND and dynocap COMMAND --help show the same command help. Help is text only; "
             + "--json is unsupported. See docs/reference/cli/commands.mdx for every command's output and JSON support."
     ),
@@ -556,107 +560,113 @@ The project's files choose the runtime; --runtime overrides it. Filtered egress 
   shell:1       anything else     bash, git and ssh only; no package manager or cache
 """
 
-private func topLevelHelp() -> String {
-    let commands = cliCommandSpecs.filter { $0.group == .primary }.map { spec in
-        "  \(spec.usage)\n        \(spec.summary)"
-    }.joined(separator: "\n")
-    return """
-    dynocap \(DynoCapInfo.version) — local Linux microVMs on macOS
-
-    Bring a repository into a disposable sandbox, run commands there, and export a result.
-    Names are explicit targets. \(networkChoice)
-
-    WORKFLOW
-    \(quickStart.split(separator: "\n").map { "  " + $0 }.joined(separator: "\n"))
-
-    RUNTIMES
-    \(runtimesHelp.split(separator: "\n").map { "  " + $0 }.joined(separator: "\n"))
-
-    COMMANDS
-    \(commands)
-
-    Run `dynocap help <command>` or `dynocap <command> --help` for flags and examples.
-    Run `dynocap help advanced` for raw sandboxes, task commands, and the daemon.
-
-    \(globalOptions)
-
-    Run `dynocap doctor --fix` to build images and runtimes into DYNOCAP_HOME (default ~/.dynocap).
-    Commands that need a daemon start one. Help and invalid usage do not.
-
-    """
+private func topLevelHelp(_ layout: HelpLayout) -> String {
+    let title = layout.style.paint("dynocap \(DynoCapInfo.version)", .heading)
+    let commands = cliCommandSpecs.filter { $0.group == .primary }
+    return layout.page([
+        title + " · Local Linux sandboxes on macOS",
+        layout.section("USAGE", [layout.syntax("dynocap <command> [options]")]),
+        layout.commandIndex(commands),
+        layout.section("START HERE", [
+            layout.syntax("dynocap doctor --fix ./project"),
+            layout.syntax("dynocap help <command>"),
+            layout.syntax("dynocap help workflow"),
+            layout.syntax("dynocap help advanced"),
+        ]),
+        layout.globals,
+    ])
 }
 
-private func advancedHelp() -> String {
-    let commands = cliCommandSpecs.filter { $0.group == .advanced }.map { spec in
-        "  \(spec.usage)\n        \(spec.summary)"
-    }.joined(separator: "\n")
-    return """
-    Advanced commands
+private struct HelpLayout {
+    let style: CLIStyle
+    let width: Int
 
-    These remain available beside the repository workflow. Overlapping commands share the same sandbox behavior.
+    func page(_ blocks: [String]) -> String { blocks.joined(separator: "\n\n") + "\n" }
 
-    \(commands)
-
-    \(globalOptions)
-    """
-}
-
-private func groupHelp(_ name: String, _ intro: String, _ paths: [[String]]) -> String {
-    let commands = paths.compactMap(cliSpec).map { spec in
-        "  \(spec.usage)\n        \(spec.summary)"
-    }.joined(separator: "\n")
-    return """
-    dynocap \(name)
-
-    \(intro)
-
-    \(commands)
-
-    Run `dynocap help \(name) <subcommand>` for flags and examples.
-
-    \(globalOptions)
-    """
-}
-
-private func render(_ spec: CLICommandSpec) -> String {
-    let options: String
-    if spec.flags.isEmpty {
-        options = "  This command accepts no flags besides the global options.\n"
-    } else {
-        options = spec.flags.map { flag in
-            let label = flag.value.map { "\(flag.name) \($0)" } ?? flag.name
-            return "  \(label)\n        \(flag.summary)"
-        }.joined(separator: "\n") + "\n"
+    func section(_ title: String, _ rows: [String]) -> String {
+        ([style.paint(title, .heading)] + rows.map { "  " + $0 }).joined(separator: "\n")
     }
-    let examples = spec.examples.map { "  \($0)" }.joined(separator: "\n")
-    return """
-    \(spec.summary)
 
-    USAGE
-      \(spec.usage)
+    func syntax(_ text: String) -> String {
+        let parts = text.components(separatedBy: " #")
+        let command = parts[0].components(separatedBy: " ").map { word in
+            if word == "dynocap" { return style.paint(word, .heading) }
+            if word.hasPrefix("-") || word.hasPrefix("[-") { return style.paint(word, .accent) }
+            return word
+        }.joined(separator: " ")
+        guard parts.count > 1 else { return command }
+        return command + style.paint(" #" + parts.dropFirst().joined(separator: " #"), .muted)
+    }
 
-    OPTIONS
-    \(options)
-    \(spec.discussion)
+    var globals: String {
+        section("GLOBAL OPTIONS", [
+            syntax("--home PATH   --no-color   --verbose"),
+            syntax("-h, --help    --version"),
+        ])
+    }
 
-    EXAMPLES
-    \(examples)
+    func commandIndex(_ commands: [CLICommandSpec]) -> String {
+        let column = (commands.map { $0.path.joined(separator: " ").count }.max() ?? 0) + 2
+        let rows = commands.map { spec in
+            let name = spec.path.joined(separator: " ")
+            let indent = String(repeating: " ", count: column)
+            let summary = wrapped(spec.summary, limit: width - column - 2)
+                .joined(separator: "\n  " + indent)
+            return style.paint(name, .accent) + String(repeating: " ", count: column - name.count) + summary
+        }
+        return section("COMMANDS", rows)
+    }
 
-    \(globalOptions)
-    """
+    func index(_ title: String, commands: [CLICommandSpec]) -> String {
+        page([
+            style.paint(title, .heading),
+            commandIndex(commands),
+            section("HELP", [syntax("dynocap help <command>")]),
+            globals,
+        ])
+    }
+
+    func guide() -> String {
+        page([
+            style.paint("dynocap help workflow", .heading),
+            section("WORKFLOW", quickStart.split(separator: "\n").map { syntax(String($0)) }),
+            section("RUNTIMES", runtimesHelp.split(separator: "\n").map(String.init)),
+        ])
+    }
+
+    func command(_ spec: CLICommandSpec) -> String {
+        var blocks = [
+            style.paint("dynocap " + spec.path.joined(separator: " "), .heading),
+            wrapped(spec.summary, limit: width).joined(separator: "\n"),
+            section("USAGE", [syntax(spec.usage)]),
+            section("EXAMPLES", spec.examples.map(syntax)),
+        ]
+        if !spec.flags.isEmpty {
+            let rows = spec.flags.flatMap { flag in
+                let label = flag.value.map { "\(flag.name) \($0)" } ?? flag.name
+                return [style.paint(label, .accent)] + wrapped(flag.summary, limit: width - 4).map { "  " + $0 }
+            }
+            blocks.append(section("OPTIONS", rows))
+        }
+        blocks.append(section("DETAILS", wrapped(spec.discussion, limit: width - 2)))
+        blocks.append(globals)
+        return page(blocks)
+    }
+
+    private func wrapped(_ text: String, limit: Int) -> [String] {
+        var lines: [String] = []
+        var line = ""
+        for word in text.split(whereSeparator: \.isWhitespace) {
+            if line.isEmpty {
+                line = String(word)
+            } else if line.count + word.count + 1 <= limit {
+                line += " " + word
+            } else {
+                lines.append(line)
+                line = String(word)
+            }
+        }
+        if !line.isEmpty { lines.append(line) }
+        return lines
+    }
 }
-
-private let globalOptions = """
-GLOBAL OPTIONS
-  --home PATH
-        Use this directory instead of DYNOCAP_HOME. It may appear before or after the subcommand.
-  --verbose
-        On failure, include safe error code, operation, source, and exit status diagnostics on stderr.
-  -h, --help
-        Show help for the current command and exit.
-  --version
-        Print the version and exit.
-
-Valued options accept a separate argument or an equals sign, for example --network nat or --network=nat.
-Guest arguments after exec's -- are not read as options.
-"""

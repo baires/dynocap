@@ -117,8 +117,16 @@ public func requireShellTerminal(stdinIsTerminal: Bool, stdoutIsTerminal: Bool) 
 }
 
 /// Printed on stderr after the shell exits, because leaving it does not end the sandbox.
-public func shellExitNotice(_ name: String) -> String {
-    "dynocap: left the shell; \(name) is still running until its TTL. "
+public func shellExitNotice(_ name: String, home: URL? = nil, style: CLIStyle = .plain) -> String {
+    if style.interactive {
+        let safe = safeDiagnostic(name, secrets: [])
+        let homeOption = home.map(homeFlag) ?? ""
+        let command = safeDiagnostic("dynocap\(homeOption) inspect \(shellWord(name))", secrets: [])
+        return style.result(
+            "dynocap left the shell; \(safe) is still running until its TTL.",
+            body: [style.action("Next", command)])
+    }
+    return "dynocap: left the shell; \(name) is still running until its TTL. "
         + "Export with `dynocap finish \(name)` or discard with `dynocap rm \(name) --force`.\n"
 }
 

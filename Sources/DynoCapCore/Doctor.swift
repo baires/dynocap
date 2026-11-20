@@ -293,7 +293,9 @@ private func doctorImages(paths: DynoCapPaths, arch: String) -> DoctorCheck {
                            : "The guest image for \(arch) has not been built yet.")
 }
 
-public func formatDoctorReport(_ report: DoctorReport, output: CLIOutput, arguments: [String] = []) throws -> String {
+public func formatDoctorReport(
+    _ report: DoctorReport, output: CLIOutput, arguments: [String] = [], style: CLIStyle = .plain, verbose: Bool = false
+) throws -> String {
     var safe = report
     let secrets = cliFailureOptions(arguments).secrets
     safe.home = safeDiagnostic(safe.home, secrets: secrets)
@@ -306,24 +308,61 @@ public func formatDoctorReport(_ report: DoctorReport, output: CLIOutput, argume
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         return (String(data: try encoder.encode(safe), encoding: .utf8) ?? "") + "\n"
     }
+    if style.interactive {
+        return interactiveDoctorReport(safe, style: style, verbose: verbose, secrets: secrets)
+    }
     let width = (safe.checks.map(\.id.count).max() ?? 0) + 2
     let indent = String(repeating: " ", count: 8 + width)
+    func statusColumn(_ status: String) -> String {
+        let padding = String(repeating: " ", count: max(0, 8 - status.uppercased().count))
+        return status.uppercased() + padding
+    }
     var lines = ["Home: \(safe.home)", ""]
     for repair in safe.repairs ?? [] {
-        lines.append("\(repair.status.uppercased().padding(toLength: 8, withPad: " ", startingAt: 0))\(repair.summary)")
+        lines.append("\(statusColumn(repair.status))\(repair.summary)")
         if let note = repair.note { lines.append("        Note: \(note)") }
         if let log = repair.logPath { lines.append("        Log: \(log)") }
         if let recovery = repair.recovery { lines.append("        Next: \(recovery)") }
     }
     if safe.repairs?.isEmpty == false { lines.append("") }
     for check in safe.checks {
-        lines.append(check.status.uppercased().padding(toLength: 8, withPad: " ", startingAt: 0)
+        lines.append(statusColumn(check.status)
             + check.id.padding(toLength: width, withPad: " ", startingAt: 0) + check.message)
         if check.status != "ok", let recovery = check.recovery { lines.append(indent + "Next: " + recovery) }
     }
     lines.append("")
     lines.append(doctorSummary(safe))
     return lines.joined(separator: "\n") + "\n"
+}
+
+private func interactiveDoctorReport(_ report: DoctorReport, style: CLIStyle, verbose: Bool, secrets: [String]) -> String {
+    let issues = report.checks.filter { $0.status != "ok" }
+    let failures = issues.filter { $0.status == "error" }.count
+    let warnings = issues.count - failures
+    let title = failures > 0 ? "Host needs attention" : (warnings > 0 ? "Host ready with warnings" : "Host ready")
+    let tone: CLIStyle.Tone = failures > 0 ? .error : (warnings > 0 ? .warning : .success)
+    let counts = "\(report.checks.count - issues.count) passed · \(warnings) warnings · \(failures) failed"
+    var body = [counts]
+    if verbose || !issues.isEmpty { body.append(style.label("Home: \(report.home)")) }
+    for repair in report.repairs ?? [] {
+        let status = style.phase(repair.status, uppercase: true)
+        body.append("\(status)  \(safeDiagnostic(repair.summary, secrets: secrets))")
+        if let note = repair.note { body.append("  " + safeDiagnostic(note, secrets: secrets)) }
+        if let log = repair.logPath { body.append("  " + style.label("Log: " + safeDiagnostic(log, secrets: secrets))) }
+        if let next = repair.recovery { body.append("  " + style.action("Next", safeDiagnostic(next, secrets: secrets))) }
+    }
+    let passing = report.checks.filter { $0.status == "ok" }
+    let shownPassing = verbose ? passing : passing.filter { $0.id == "runtime" }
+    let checks = issues + shownPassing
+    for check in checks {
+        let status = style.phase(check.status, uppercase: true)
+        body.append("\(status)  \(style.paint(check.id, .heading))  \(check.message)")
+        if let next = check.recovery { body.append("  " + style.action("Next", next)) }
+    }
+    if shownPassing.count < passing.count {
+        body.append(style.paint("Use --verbose to show passing checks.", .muted))
+    }
+    return style.result(title, body: body, tone: tone)
 }
 
 private func doctorSummary(_ report: DoctorReport) -> String {

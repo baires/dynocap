@@ -17,7 +17,7 @@ final class ExecSignalTests: XCTestCase {
     }
 
     func testExecHelpDocumentsInterruptStatus() {
-        let help = commandHelp(["exec"])
+        let help = commandHelp(["exec"]).split(whereSeparator: \.isWhitespace).joined(separator: " ")
         XCTAssertTrue(help.contains("Ctrl-C"))
         XCTAssertTrue(help.contains("130"))
         XCTAssertTrue(help.contains("does not destroy the sandbox"))
