@@ -97,7 +97,7 @@ func daemonError(_ text: String) -> DynoCapError {
 }
 
 public enum DynoCapInfo {
-    public static let version = "0.2.0"
+    public static let version = "0.3.0"
     /// Guest vsock port. The host connects; the agent listens.
     public static let guestPort: UInt32 = 5252
     public static let protocolVersion: UInt32 = 1
